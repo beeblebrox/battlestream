@@ -268,6 +268,90 @@ func TestProcessorGameEndSetsPlacement(t *testing.T) {
 	}
 }
 
+// TestProcessorPlacementFromTagChange verifies that PLAYER_LEADERBOARD_PLACE
+// arriving as a TagChange before GAME_RESULT is used as the final placement.
+func TestProcessorPlacementFromTagChange(t *testing.T) {
+	m, p := proc()
+	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+	// Placement arrives first as a TagChange (real HS log order)
+	p.Handle(parser.GameEvent{
+		Type:      parser.EventTagChange,
+		Timestamp: time.Now(),
+		Tags:      map[string]string{"PLAYER_LEADERBOARD_PLACE": "5"},
+	})
+	// GameEnd has no placement in tags (as the real parser emits it)
+	p.Handle(parser.GameEvent{
+		Type:      parser.EventGameEnd,
+		Timestamp: time.Now(),
+		Tags:      map[string]string{"GAME_RESULT": "LOSS"},
+	})
+	if m.State().Placement != 5 {
+		t.Errorf("expected placement 5 from prior TagChange, got %d", m.State().Placement)
+	}
+}
+
+// TestProcessorPlacementResetOnNewGame verifies that pendingPlacement does not
+// leak from one game into the next.
+func TestProcessorPlacementResetOnNewGame(t *testing.T) {
+	m, p := proc()
+	// Game 1
+	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+	p.Handle(parser.GameEvent{
+		Type:  parser.EventTagChange,
+		Tags:  map[string]string{"PLAYER_LEADERBOARD_PLACE": "7"},
+	})
+	p.Handle(parser.GameEvent{Type: parser.EventGameEnd, Timestamp: time.Now(), Tags: map[string]string{"GAME_RESULT": "LOSS"}})
+	// Game 2 — no placement event
+	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+	p.Handle(parser.GameEvent{Type: parser.EventGameEnd, Timestamp: time.Now(), Tags: map[string]string{"GAME_RESULT": "WIN"}})
+	if m.State().Placement != 0 {
+		t.Errorf("placement should be 0 when no PLAYER_LEADERBOARD_PLACE in game 2, got %d", m.State().Placement)
+	}
+}
+
+// TestProcessorZoneGraveyardRemovesMinion verifies that a TAG_CHANGE with
+// ZONE=GRAVEYARD removes the entity from the board.
+func TestProcessorZoneGraveyardRemovesMinion(t *testing.T) {
+	m, p := proc()
+	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventEntityUpdate,
+		EntityID: 42,
+		Tags:     map[string]string{"ATK": "3", "HEALTH": "2"},
+	})
+	if len(m.State().Board) != 1 {
+		t.Fatalf("expected 1 minion on board before death")
+	}
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventTagChange,
+		EntityID: 42,
+		Tags:     map[string]string{"ZONE": "GRAVEYARD"},
+	})
+	if len(m.State().Board) != 0 {
+		t.Errorf("expected board empty after ZONE=GRAVEYARD, got %d minions", len(m.State().Board))
+	}
+}
+
+// TestProcessorZonePlayDoesNotRemove verifies that ZONE=PLAY does not remove
+// minions from the board.
+func TestProcessorZonePlayDoesNotRemove(t *testing.T) {
+	m, p := proc()
+	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventEntityUpdate,
+		EntityID: 10,
+		Tags:     map[string]string{"ATK": "2", "HEALTH": "1"},
+	})
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventTagChange,
+		EntityID: 10,
+		Tags:     map[string]string{"ZONE": "PLAY"},
+	})
+	if len(m.State().Board) != 1 {
+		t.Errorf("expected 1 minion after ZONE=PLAY, got %d", len(m.State().Board))
+	}
+}
+
 // ── Full pipeline test ────────────────────────────────────────────────────────
 
 func TestFullPipeline(t *testing.T) {

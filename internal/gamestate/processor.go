@@ -9,8 +9,9 @@ import (
 
 // Processor consumes parser.GameEvents and updates a Machine.
 type Processor struct {
-	machine  *Machine
-	gameSeq  int
+	machine          *Machine
+	gameSeq          int
+	pendingPlacement int // tracks PLAYER_LEADERBOARD_PLACE before GAME_RESULT fires
 }
 
 // NewProcessor returns a Processor that updates the given Machine.
@@ -23,16 +24,20 @@ func (p *Processor) Handle(e parser.GameEvent) {
 	switch e.Type {
 	case parser.EventGameStart:
 		p.gameSeq++
+		p.pendingPlacement = 0
 		gameID := fmt.Sprintf("game-%d", p.gameSeq)
 		p.machine.GameStart(gameID, e.Timestamp)
 
 	case parser.EventGameEnd:
-		result := e.Tags["GAME_RESULT"]
-		placement := 0
+		// Prefer placement from tags (allows tests to inject directly);
+		// fall back to any placement tracked from a prior TAG_CHANGE.
+		placement := p.pendingPlacement
 		if pl, ok := e.Tags["PLAYER_LEADERBOARD_PLACE"]; ok {
-			placement, _ = strconv.Atoi(pl)
+			if v, err := strconv.Atoi(pl); err == nil {
+				placement = v
+			}
 		}
-		_ = result
+		p.pendingPlacement = 0
 		p.machine.GameEnd(placement, e.Timestamp)
 
 	case parser.EventTurnStart:
@@ -54,19 +59,31 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 		switch tag {
 		case "HEALTH", "ARMOR", "SPELL_POWER":
 			p.machine.UpdatePlayerTag(tag, value)
+
 		case "PLAYER_TECH_LEVEL", "TAVERN_TIER":
 			tier, _ := strconv.Atoi(value)
 			if tier > 0 {
 				p.machine.SetTavernTier(tier)
 			}
+
 		case "BACON_TRIPLE_CARD":
 			p.machine.UpdatePlayerTag(tag, value)
+
+		case "PLAYER_LEADERBOARD_PLACE":
+			if pl, err := strconv.Atoi(value); err == nil && pl > 0 {
+				p.pendingPlacement = pl
+			}
+
+		case "ZONE":
+			// Minion removed from board when it moves to graveyard.
+			if value == "GRAVEYARD" && e.EntityID > 0 {
+				p.machine.RemoveMinion(e.EntityID)
+			}
 		}
 	}
 }
 
 func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
-	// Minimal: create/update a minion on the board if it has ATK/HEALTH tags
 	if e.EntityID == 0 {
 		return
 	}
