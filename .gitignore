@@ -41,8 +41,7 @@ stats/
 # Config with secrets
 config.yaml
 
-# Generated protobuf files
-internal/api/grpc/gen/
+# Generated protobuf files are committed (see internal/api/grpc/gen/)
 
 # Air live reload
 tmp/
