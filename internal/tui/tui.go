@@ -253,9 +253,20 @@ func (m *Model) View() string {
 	)
 
 	// ── Row 2: board | modifications ─────────────────────────
+	// Build content first, pad to equal line count, then apply border so
+	// rounded corners stay intact on both panels.
+	boardContent := m.boardContent()
+	modsContent := m.modsContent()
+	boardLines := strings.Count(boardContent, "\n")
+	modsLines := strings.Count(modsContent, "\n")
+	if boardLines < modsLines {
+		boardContent += strings.Repeat("\n", modsLines-boardLines)
+	} else if modsLines < boardLines {
+		modsContent += strings.Repeat("\n", boardLines-modsLines)
+	}
 	row2 := lipgloss.JoinHorizontal(lipgloss.Top,
-		m.renderBoardPanel(colW),
-		m.renderModsPanel(colW),
+		styleBorder.Width(colW).Render(boardContent),
+		styleBorder.Width(colW).Render(modsContent),
 	)
 
 	// ── Row 3: session stats ──────────────────────────────────
@@ -277,7 +288,7 @@ func (m *Model) renderGamePanel(w int) string {
 	b.WriteString(styleTitle.Render("BATTLESTREAM") + "\n")
 
 	if m.game == nil {
-		b.WriteString(styleDim.Render("waiting for game…"))
+		b.WriteString(styleDim.Render("waiting for game…") + "\n\n\n\n")
 	} else {
 		phase := m.game.Phase
 		if phase == "" {
@@ -286,7 +297,9 @@ func (m *Model) renderGamePanel(w int) string {
 		b.WriteString(styleLabel.Render("Game   ") + styleValue.Render(m.game.GameId) + "\n")
 		b.WriteString(styleLabel.Render("Phase  ") + stylePhase.Render(phase) + "\n")
 		b.WriteString(styleLabel.Render("Turn   ") + styleValue.Render(fmt.Sprintf("%d", m.game.Turn)) + "\n")
-		b.WriteString(styleLabel.Render("Tavern ") + renderTavernTier(int(m.game.TavernTier)))
+		b.WriteString(styleLabel.Render("Tavern ") + renderTavernTier(int(m.game.TavernTier)) + "\n")
+		// Blank line to match hero panel height (title + 5 data rows each)
+		b.WriteString("")
 	}
 
 	return styleBorder.Width(w).Render(b.String())
@@ -296,7 +309,7 @@ func (m *Model) renderHeroPanel(w int) string {
 	var b strings.Builder
 
 	if m.game == nil || m.game.Player == nil {
-		b.WriteString(styleDim.Render("no player data"))
+		b.WriteString(styleDim.Render("no player data") + "\n\n\n\n")
 		return styleBorder.Width(w).Render(b.String())
 	}
 
@@ -307,21 +320,20 @@ func (m *Model) renderHeroPanel(w int) string {
 	}
 	b.WriteString(styleTitle.Render(name) + "\n")
 
-	// Health bar
 	maxHP := int32(40)
 	b.WriteString(styleLabel.Render("Health  ") + renderHealthBar(p.Health, maxHP, 16) + "\n")
-
+	armor := "—"
 	if p.Armor > 0 {
-		b.WriteString(styleLabel.Render("Armor   ") + styleValue.Render(fmt.Sprintf("%d", p.Armor)) + "\n")
+		armor = fmt.Sprintf("%d", p.Armor)
 	}
-	b.WriteString(styleLabel.Render("Tavern  ") + renderTavernTier(int(p.TavernTier)) + "\n")
+	b.WriteString(styleLabel.Render("Armor   ") + styleValue.Render(armor) + "\n")
 	b.WriteString(styleLabel.Render("Spell+  ") + styleValue.Render(fmt.Sprintf("%d", p.SpellPower)) + "\n")
-	b.WriteString(styleLabel.Render("Triples ") + styleValue.Render(fmt.Sprintf("%d", p.TripleCount)))
+	b.WriteString(styleLabel.Render("Triples ") + styleValue.Render(fmt.Sprintf("%d", p.TripleCount)) + "\n")
 
 	return styleBorder.Width(w).Render(b.String())
 }
 
-func (m *Model) renderBoardPanel(w int) string {
+func (m *Model) boardContent() string {
 	var b strings.Builder
 	b.WriteString(styleTitle.Render("YOUR BOARD") + "\n")
 
@@ -333,10 +345,10 @@ func (m *Model) renderBoardPanel(w int) string {
 		}
 	}
 
-	return styleBorder.Width(w).Render(b.String())
+	return b.String()
 }
 
-func (m *Model) renderModsPanel(w int) string {
+func (m *Model) modsContent() string {
 	var b strings.Builder
 	b.WriteString(styleTitle.Render("MODIFICATIONS") + "\n")
 
@@ -344,7 +356,6 @@ func (m *Model) renderModsPanel(w int) string {
 		b.WriteString(styleDim.Render("(none this game)"))
 	} else {
 		mods := m.game.Modifications
-		// Show last 8
 		if len(mods) > 8 {
 			mods = mods[len(mods)-8:]
 		}
@@ -359,7 +370,7 @@ func (m *Model) renderModsPanel(w int) string {
 		}
 	}
 
-	return styleBorder.Width(w).Render(b.String())
+	return b.String()
 }
 
 func (m *Model) renderSessionBar(w int) string {
@@ -543,6 +554,7 @@ func waitForEventCmd(ch <-chan *bspb.GameEvent) tea.Cmd {
 		return eventMsg{event: e}
 	}
 }
+
 
 func aggTickCmd() tea.Cmd {
 	return tea.Tick(10*time.Second, func(t time.Time) tea.Msg {
