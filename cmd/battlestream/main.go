@@ -50,6 +50,8 @@ persists aggregate stats, and exposes them via gRPC, REST, WebSocket, and file o
 		cmdTUI(),
 		cmdDiscover(),
 		cmdConfig(),
+		cmdReparse(),
+		cmdDBReset(),
 		cmdVersion(),
 	)
 
@@ -128,10 +130,11 @@ func cmdDaemon() *cobra.Command {
 
 			// --- Log watcher ---
 			w, err := watcher.New(ctx, watcher.Config{
-				LogDir:    logPath,
-				Files:     []string{"Power.log"},
-				Reopen:    true,
-				MustExist: false,
+				LogDir:        logPath,
+				Files:         []string{"Power.log"},
+				Reopen:        true,
+				MustExist:     false,
+				ReadFromStart: true,
 			})
 			if err != nil {
 				return fmt.Errorf("starting watcher: %w", err)
@@ -170,7 +173,9 @@ func cmdDaemon() *cobra.Command {
 						// Persist game end
 						if e.Type == parser.EventGameEnd {
 							s := machine.State()
-							if err := st.SaveFullGame(s); err != nil {
+							if st.HasGame(s.GameID) {
+								slog.Info("game already persisted, skipping", "gameID", s.GameID)
+							} else if err := st.SaveFullGame(s); err != nil {
 								slog.Error("persisting game", "err", err)
 							}
 							if fw != nil {
@@ -238,7 +243,10 @@ func cmdDaemon() *cobra.Command {
 // --- tui ---
 
 func cmdTUI() *cobra.Command {
-	return &cobra.Command{
+	var dumpFlag bool
+	var widthFlag int
+
+	cmd := &cobra.Command{
 		Use:   "tui",
 		Short: "Open the live TUI dashboard (connects to running daemon)",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -246,9 +254,21 @@ func cmdTUI() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if dumpFlag {
+				out, err := tui.Dump(cfg.API.GRPCAddr, widthFlag)
+				if err != nil {
+					return err
+				}
+				fmt.Println(out)
+				return nil
+			}
 			return tui.New(cfg.API.GRPCAddr).Run()
 		},
 	}
+
+	cmd.Flags().BoolVar(&dumpFlag, "dump", false, "dump rendered TUI to stdout (no TTY needed)")
+	cmd.Flags().IntVar(&widthFlag, "width", 120, "terminal width for --dump rendering")
+	return cmd
 }
 
 // --- discover ---
@@ -448,6 +468,158 @@ func cmdConfig() *cobra.Command {
 	}
 }
 
+// --- reparse ---
+
+func cmdReparse() *cobra.Command {
+	return &cobra.Command{
+		Use:   "reparse",
+		Short: "Parse all existing Power.log files and populate the database",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load(cfgFile)
+			if err != nil {
+				return fmt.Errorf("loading config: %w", err)
+			}
+
+			profile, err := cfg.GetProfile(profileFlag)
+			if err != nil {
+				return err
+			}
+
+			logPath := profile.Hearthstone.LogPath
+			if logPath == "" {
+				info, dErr := discovery.Discover()
+				if dErr != nil {
+					return fmt.Errorf("auto-discovery failed: %w", dErr)
+				}
+				logPath = info.LogPath
+			}
+
+			st, err := store.Open(profile.Storage.DBPath)
+			if err != nil {
+				return fmt.Errorf("opening store: %w", err)
+			}
+			defer st.Close()
+
+			machine := gamestate.New()
+			proc := gamestate.NewProcessor(machine)
+
+			// Find all Power.log files in the log directory.
+			var logFiles []string
+			entries, _ := os.ReadDir(logPath)
+			for _, e := range entries {
+				if e.IsDir() && strings.HasPrefix(e.Name(), "Hearthstone_") {
+					candidate := filepath.Join(logPath, e.Name(), "Power.log")
+					if _, err := os.Stat(candidate); err == nil {
+						logFiles = append(logFiles, candidate)
+					}
+				}
+			}
+			// Also check for Power.log directly in the log dir.
+			if direct := filepath.Join(logPath, "Power.log"); fileExists(direct) {
+				logFiles = append(logFiles, direct)
+			}
+
+			if len(logFiles) == 0 {
+				fmt.Println("No Power.log files found in", logPath)
+				return nil
+			}
+
+			parsedCh := make(chan parser.GameEvent, 512)
+			p := parser.New(parsedCh)
+
+			// Process events in a goroutine.
+			done := make(chan struct{})
+			gamesFound := 0
+			gamesSaved := 0
+			go func() {
+				defer close(done)
+				for e := range parsedCh {
+					proc.Handle(e)
+					if e.Type == parser.EventGameEnd {
+						gamesFound++
+						s := machine.State()
+						if st.HasGame(s.GameID) {
+							continue
+						}
+						if err := st.SaveFullGame(s); err != nil {
+							slog.Error("persisting game", "err", err)
+						} else {
+							gamesSaved++
+						}
+					}
+				}
+			}()
+
+			// Parse each log file sequentially.
+			for _, lf := range logFiles {
+				fmt.Printf("Parsing %s...\n", lf)
+				f, err := os.Open(lf)
+				if err != nil {
+					slog.Error("opening log file", "path", lf, "err", err)
+					continue
+				}
+				scanner := bufio.NewScanner(f)
+				scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+				for scanner.Scan() {
+					p.Feed(scanner.Text())
+				}
+				f.Close()
+			}
+			p.Flush()
+			close(parsedCh)
+			<-done
+
+			fmt.Printf("Done: found %d games, saved %d new\n", gamesFound, gamesSaved)
+			return nil
+		},
+	}
+}
+
+// --- db reset ---
+
+func cmdDBReset() *cobra.Command {
+	return &cobra.Command{
+		Use:   "db-reset",
+		Short: "Clear all data in the database",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load(cfgFile)
+			if err != nil {
+				return fmt.Errorf("loading config: %w", err)
+			}
+
+			profile, err := cfg.GetProfile(profileFlag)
+			if err != nil {
+				return err
+			}
+
+			fmt.Printf("This will delete ALL data in %s\n", profile.Storage.DBPath)
+			fmt.Print("Are you sure? (yes/N): ")
+			scanner := bufio.NewScanner(os.Stdin)
+			if !scanner.Scan() {
+				return nil
+			}
+			answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
+			if answer != "yes" {
+				fmt.Println("Aborted.")
+				return nil
+			}
+
+			st, err := store.Open(profile.Storage.DBPath)
+			if err != nil {
+				return fmt.Errorf("opening store: %w", err)
+			}
+			defer st.Close()
+
+			if err := st.DropAll(); err != nil {
+				return fmt.Errorf("dropping data: %w", err)
+			}
+
+			fmt.Println("Database cleared.")
+			return nil
+		},
+	}
+}
+
 // --- version ---
 
 func cmdVersion() *cobra.Command {
@@ -462,6 +634,11 @@ func cmdVersion() *cobra.Command {
 }
 
 // --- helpers ---
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
 
 func setupLogging(cfg config.LoggingConfig) {
 	level := slog.LevelInfo

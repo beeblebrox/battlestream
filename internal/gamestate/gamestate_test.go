@@ -31,23 +31,41 @@ func TestMachineGameStart(t *testing.T) {
 	}
 }
 
-func TestMachineSetTurnPhases(t *testing.T) {
+func TestMachineSetTurn(t *testing.T) {
 	m := New()
 	m.GameStart("g", time.Now())
 
 	m.SetTurn(1)
+	if m.State().Turn != 1 {
+		t.Errorf("expected turn 1, got %d", m.State().Turn)
+	}
 	if m.State().Phase != PhaseRecruit {
-		t.Errorf("turn 1 should be RECRUIT, got %s", m.State().Phase)
+		t.Errorf("SetTurn should set RECRUIT, got %s", m.State().Phase)
 	}
 
-	m.SetTurn(2)
+	m.SetTurn(3)
+	if m.State().Turn != 3 {
+		t.Errorf("expected turn 3, got %d", m.State().Turn)
+	}
+}
+
+func TestMachineSetGameEntityTurnPhases(t *testing.T) {
+	m := New()
+	m.GameStart("g", time.Now())
+
+	m.SetGameEntityTurn(1)
+	if m.State().Phase != PhaseRecruit {
+		t.Errorf("GameEntity turn 1 should be RECRUIT, got %s", m.State().Phase)
+	}
+
+	m.SetGameEntityTurn(2)
 	if m.State().Phase != PhaseCombat {
-		t.Errorf("turn 2 should be COMBAT, got %s", m.State().Phase)
+		t.Errorf("GameEntity turn 2 should be COMBAT, got %s", m.State().Phase)
 	}
 
-	m.SetTurn(7)
+	m.SetGameEntityTurn(7)
 	if m.State().Phase != PhaseRecruit {
-		t.Errorf("turn 7 should be RECRUIT, got %s", m.State().Phase)
+		t.Errorf("GameEntity turn 7 should be RECRUIT, got %s", m.State().Phase)
 	}
 }
 
@@ -162,13 +180,49 @@ func TestMachineStatSnapshot(t *testing.T) {
 
 // ── Processor tests ───────────────────────────────────────────────────────────
 
-func proc() (*Machine, *Processor) {
+func newProc() (*Machine, *Processor) {
 	m := New()
 	return m, NewProcessor(m)
 }
 
+// setupGame sends a typical game start sequence to identify the local player.
+func setupGame(p *Processor) {
+	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+	// Local player: hi≠0
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventPlayerDef,
+		EntityID: 20,
+		PlayerID: 7,
+		Tags:     map[string]string{"hi": "144115193835963207", "lo": "30722021", "PLAYER_ID": "7"},
+	})
+	// Dummy player: hi=0
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventPlayerDef,
+		EntityID: 21,
+		PlayerID: 15,
+		Tags:     map[string]string{"hi": "0", "lo": "0", "PLAYER_ID": "15"},
+	})
+	// Player names
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventPlayerName,
+		PlayerID:   7,
+		EntityName: "Moch#1358",
+	})
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventPlayerName,
+		PlayerID:   15,
+		EntityName: "DirePants",
+	})
+	// Hero entity assignment
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventTagChange,
+		EntityName: "Moch#1358",
+		Tags:       map[string]string{"HERO_ENTITY": "75"},
+	})
+}
+
 func TestProcessorGameStartIncrementsID(t *testing.T) {
-	m, p := proc()
+	m, p := newProc()
 	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
 	if m.State().GameID != "game-1" {
 		t.Errorf("expected game-1, got %q", m.State().GameID)
@@ -179,54 +233,144 @@ func TestProcessorGameStartIncrementsID(t *testing.T) {
 	}
 }
 
-func TestProcessorTurnUpdatesPhase(t *testing.T) {
-	m, p := proc()
-	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+func TestProcessorLocalPlayerIdentification(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+
+	if m.State().Player.Name != "Moch#1358" {
+		t.Errorf("expected player name Moch#1358, got %q", m.State().Player.Name)
+	}
+}
+
+func TestProcessorTurnFromPlayerEntity(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+
+	// Player TURN tag (what the user sees)
 	p.Handle(parser.GameEvent{
-		Type: parser.EventTurnStart,
-		Tags: map[string]string{"TURN": "3"},
+		Type:       parser.EventTagChange,
+		EntityName: "Moch#1358",
+		Tags:       map[string]string{"TURN": "3"},
 	})
 	if m.State().Turn != 3 {
 		t.Errorf("expected turn 3, got %d", m.State().Turn)
 	}
+}
+
+func TestProcessorGameEntityTurnSetsPhase(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+
+	// GameEntity turn 1 = recruit
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTurnStart,
+		Tags: map[string]string{"TURN": "1"},
+	})
 	if m.State().Phase != PhaseRecruit {
-		t.Errorf("expected RECRUIT, got %s", m.State().Phase)
+		t.Errorf("expected RECRUIT on odd GameEntity turn, got %s", m.State().Phase)
+	}
+
+	// GameEntity turn 2 = combat
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTurnStart,
+		Tags: map[string]string{"TURN": "2"},
+	})
+	if m.State().Phase != PhaseCombat {
+		t.Errorf("expected COMBAT on even GameEntity turn, got %s", m.State().Phase)
 	}
 }
 
-func TestProcessorTagChangeHealth(t *testing.T) {
-	m, p := proc()
-	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+func TestProcessorHealthOnlyFromLocalHero(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+
+	// Register hero entity 75 as controlled by player 7
 	p.Handle(parser.GameEvent{
-		Type: parser.EventTagChange,
-		Tags: map[string]string{"HEALTH": "22"},
+		Type:     parser.EventEntityUpdate,
+		EntityID: 75,
+		PlayerID: 7,
+		CardID:   "TB_BaconShop_HERO_49",
+		Tags:     map[string]string{"CONTROLLER": "7", "CARDTYPE": "HERO", "HEALTH": "30"},
+	})
+
+	// Local hero HEALTH change
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventTagChange,
+		EntityID:   75,
+		PlayerID:   7,
+		EntityName: "[entityName=Millhouse id=75 zone=PLAY player=7]",
+		Tags:       map[string]string{"HEALTH": "22"},
 	})
 	if m.State().Player.Health != 22 {
-		t.Errorf("expected health 22, got %d", m.State().Player.Health)
+		t.Errorf("expected health 22 from local hero, got %d", m.State().Player.Health)
+	}
+
+	// Opponent hero HEALTH change — should NOT update local player.
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventTagChange,
+		EntityID:   200,
+		PlayerID:   15,
+		EntityName: "[entityName=Rakanishu id=200 zone=PLAY player=15]",
+		Tags:       map[string]string{"HEALTH": "30"},
+	})
+	if m.State().Player.Health != 22 {
+		t.Errorf("opponent health should not affect local player, got %d", m.State().Player.Health)
+	}
+}
+
+func TestProcessorArmorOnlyFromLocalHero(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+
+	// Register hero entity
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventEntityUpdate,
+		EntityID: 75,
+		PlayerID: 7,
+		CardID:   "TB_BaconShop_HERO_49",
+		Tags:     map[string]string{"CONTROLLER": "7", "CARDTYPE": "HERO", "HEALTH": "30", "ARMOR": "10"},
+	})
+
+	// Opponent armor — should NOT affect local player.
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventTagChange,
+		EntityID:   200,
+		PlayerID:   15,
+		EntityName: "[entityName=Rakanishu id=200 zone=PLAY player=15]",
+		Tags:       map[string]string{"ARMOR": "15"},
+	})
+	if m.State().Player.Armor != 10 {
+		t.Errorf("opponent armor should not affect local player, expected 10, got %d", m.State().Player.Armor)
 	}
 }
 
 func TestProcessorTagChangeTavernTier(t *testing.T) {
-	m, p := proc()
-	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+	m, p := newProc()
+	setupGame(p)
+
+	// Tavern tier from local player entity
 	p.Handle(parser.GameEvent{
-		Type: parser.EventTagChange,
-		Tags: map[string]string{"PLAYER_TECH_LEVEL": "4"},
+		Type:       parser.EventTagChange,
+		EntityName: "Moch#1358",
+		Tags:       map[string]string{"PLAYER_TECH_LEVEL": "4"},
 	})
 	if m.State().TavernTier != 4 {
 		t.Errorf("expected tavern tier 4, got %d", m.State().TavernTier)
 	}
 }
 
-func TestProcessorEntityUpdateCreatesMinion(t *testing.T) {
-	m, p := proc()
-	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+func TestProcessorEntityUpdateCreatesLocalMinion(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+
+	// Local player's minion (CONTROLLER=7)
 	p.Handle(parser.GameEvent{
 		Type:       parser.EventEntityUpdate,
 		EntityID:   42,
 		EntityName: "Murloc Tidehunter",
 		CardID:     "EX1_506",
-		Tags:       map[string]string{"ATK": "2", "HEALTH": "1"},
+		PlayerID:   7,
+		Tags:       map[string]string{"ATK": "2", "HEALTH": "1", "CONTROLLER": "7", "CARDTYPE": "MINION", "ZONE": "PLAY"},
 	})
 
 	board := m.State().Board
@@ -238,9 +382,28 @@ func TestProcessorEntityUpdateCreatesMinion(t *testing.T) {
 	}
 }
 
+func TestProcessorEntityUpdateFiltersOpponentMinion(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+
+	// Opponent's minion (CONTROLLER=15) should NOT appear on local board
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventEntityUpdate,
+		EntityID:   99,
+		EntityName: "Enemy Minion",
+		CardID:     "EX1_999",
+		PlayerID:   15,
+		Tags:       map[string]string{"ATK": "5", "HEALTH": "5", "CONTROLLER": "15", "CARDTYPE": "MINION", "ZONE": "PLAY"},
+	})
+
+	if len(m.State().Board) != 0 {
+		t.Error("opponent minion should not appear on local board")
+	}
+}
+
 func TestProcessorEntityUpdateNoStatsIgnored(t *testing.T) {
-	m, p := proc()
-	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+	m, p := newProc()
+	setupGame(p)
 	p.Handle(parser.GameEvent{
 		Type:     parser.EventEntityUpdate,
 		EntityID: 99,
@@ -252,12 +415,19 @@ func TestProcessorEntityUpdateNoStatsIgnored(t *testing.T) {
 }
 
 func TestProcessorGameEndSetsPlacement(t *testing.T) {
-	m, p := proc()
-	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+	m, p := newProc()
+	setupGame(p)
+	// Placement arrives as TagChange before GameEnd
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventTagChange,
+		Timestamp:  time.Now(),
+		EntityName: "Moch#1358",
+		Tags:       map[string]string{"PLAYER_LEADERBOARD_PLACE": "3"},
+	})
 	p.Handle(parser.GameEvent{
 		Type:      parser.EventGameEnd,
 		Timestamp: time.Now(),
-		Tags:      map[string]string{"PLAYER_LEADERBOARD_PLACE": "3"},
+		Tags:      map[string]string{},
 	})
 	s := m.State()
 	if s.Phase != PhaseGameOver {
@@ -271,19 +441,20 @@ func TestProcessorGameEndSetsPlacement(t *testing.T) {
 // TestProcessorPlacementFromTagChange verifies that PLAYER_LEADERBOARD_PLACE
 // arriving as a TagChange before GAME_RESULT is used as the final placement.
 func TestProcessorPlacementFromTagChange(t *testing.T) {
-	m, p := proc()
-	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+	m, p := newProc()
+	setupGame(p)
 	// Placement arrives first as a TagChange (real HS log order)
 	p.Handle(parser.GameEvent{
-		Type:      parser.EventTagChange,
-		Timestamp: time.Now(),
-		Tags:      map[string]string{"PLAYER_LEADERBOARD_PLACE": "5"},
+		Type:       parser.EventTagChange,
+		Timestamp:  time.Now(),
+		EntityName: "Moch#1358",
+		Tags:       map[string]string{"PLAYER_LEADERBOARD_PLACE": "5"},
 	})
 	// GameEnd has no placement in tags (as the real parser emits it)
 	p.Handle(parser.GameEvent{
 		Type:      parser.EventGameEnd,
 		Timestamp: time.Now(),
-		Tags:      map[string]string{"GAME_RESULT": "LOSS"},
+		Tags:      map[string]string{},
 	})
 	if m.State().Placement != 5 {
 		t.Errorf("expected placement 5 from prior TagChange, got %d", m.State().Placement)
@@ -293,17 +464,18 @@ func TestProcessorPlacementFromTagChange(t *testing.T) {
 // TestProcessorPlacementResetOnNewGame verifies that pendingPlacement does not
 // leak from one game into the next.
 func TestProcessorPlacementResetOnNewGame(t *testing.T) {
-	m, p := proc()
+	m, p := newProc()
 	// Game 1
-	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+	setupGame(p)
 	p.Handle(parser.GameEvent{
-		Type:  parser.EventTagChange,
-		Tags:  map[string]string{"PLAYER_LEADERBOARD_PLACE": "7"},
+		Type:       parser.EventTagChange,
+		EntityName: "Moch#1358",
+		Tags:       map[string]string{"PLAYER_LEADERBOARD_PLACE": "7"},
 	})
-	p.Handle(parser.GameEvent{Type: parser.EventGameEnd, Timestamp: time.Now(), Tags: map[string]string{"GAME_RESULT": "LOSS"}})
+	p.Handle(parser.GameEvent{Type: parser.EventGameEnd, Timestamp: time.Now(), Tags: map[string]string{}})
 	// Game 2 — no placement event
 	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
-	p.Handle(parser.GameEvent{Type: parser.EventGameEnd, Timestamp: time.Now(), Tags: map[string]string{"GAME_RESULT": "WIN"}})
+	p.Handle(parser.GameEvent{Type: parser.EventGameEnd, Timestamp: time.Now(), Tags: map[string]string{}})
 	if m.State().Placement != 0 {
 		t.Errorf("placement should be 0 when no PLAYER_LEADERBOARD_PLACE in game 2, got %d", m.State().Placement)
 	}
@@ -312,12 +484,13 @@ func TestProcessorPlacementResetOnNewGame(t *testing.T) {
 // TestProcessorZoneGraveyardRemovesMinion verifies that a TAG_CHANGE with
 // ZONE=GRAVEYARD removes the entity from the board.
 func TestProcessorZoneGraveyardRemovesMinion(t *testing.T) {
-	m, p := proc()
-	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+	m, p := newProc()
+	setupGame(p)
 	p.Handle(parser.GameEvent{
 		Type:     parser.EventEntityUpdate,
 		EntityID: 42,
-		Tags:     map[string]string{"ATK": "3", "HEALTH": "2"},
+		PlayerID: 7,
+		Tags:     map[string]string{"ATK": "3", "HEALTH": "2", "CONTROLLER": "7", "CARDTYPE": "MINION", "ZONE": "PLAY"},
 	})
 	if len(m.State().Board) != 1 {
 		t.Fatalf("expected 1 minion on board before death")
@@ -335,12 +508,13 @@ func TestProcessorZoneGraveyardRemovesMinion(t *testing.T) {
 // TestProcessorZonePlayDoesNotRemove verifies that ZONE=PLAY does not remove
 // minions from the board.
 func TestProcessorZonePlayDoesNotRemove(t *testing.T) {
-	m, p := proc()
-	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+	m, p := newProc()
+	setupGame(p)
 	p.Handle(parser.GameEvent{
 		Type:     parser.EventEntityUpdate,
 		EntityID: 10,
-		Tags:     map[string]string{"ATK": "2", "HEALTH": "1"},
+		PlayerID: 7,
+		Tags:     map[string]string{"ATK": "2", "HEALTH": "1", "CONTROLLER": "7", "CARDTYPE": "MINION", "ZONE": "PLAY"},
 	})
 	p.Handle(parser.GameEvent{
 		Type:     parser.EventTagChange,
@@ -355,22 +529,46 @@ func TestProcessorZonePlayDoesNotRemove(t *testing.T) {
 // ── Full pipeline test ────────────────────────────────────────────────────────
 
 func TestFullPipeline(t *testing.T) {
-	// Simulate a short game via the parser → processor → machine pipeline.
+	// Simulate a BG game via the parser → processor → machine pipeline.
 	ch := make(chan parser.GameEvent, 64)
 	p := parser.New(ch)
-	m, proc := proc()
+	m, proc := newProc()
 
 	lines := []string{
+		// Game start
 		"D 10:00:00.0000000 GameState.DebugPrintPower() - CREATE_GAME",
-		"D 10:00:01.0000000 GameState.DebugPrintPower() - TAG_CHANGE Entity=GameEntity tag=TURN value=1",
-		"D 10:00:02.0000000 GameState.DebugPrintPower() - TAG_CHANGE Entity=Fixates tag=HEALTH value=38",
-		"D 10:00:03.0000000 GameState.DebugPrintPower() - TAG_CHANGE Entity=Fixates tag=ARMOR value=3",
-		"D 10:00:04.0000000 GameState.DebugPrintPower() - FULL_ENTITY - Creating Entity=Murloc Tidehunter CardID=EX1_506",
-		"D 10:00:05.0000000 GameState.DebugPrintPower() - TAG_CHANGE Entity=Fixates tag=GAME_RESULT value=WIN",
+		// Player definitions
+		"D 10:00:00.0000000 GameState.DebugPrintPower() -     Player EntityID=20 PlayerID=7 GameAccountId=[hi=144115193835963207 lo=30722021]",
+		"D 10:00:00.0000000 GameState.DebugPrintPower() -     Player EntityID=21 PlayerID=15 GameAccountId=[hi=0 lo=0]",
+		// Player names
+		"D 10:00:00.0000000 GameState.DebugPrintGame() - PlayerID=7, PlayerName=Moch#1358",
+		"D 10:00:00.0000000 GameState.DebugPrintGame() - PlayerID=15, PlayerName=DirePants",
+		// Hero entity created for local player
+		"D 10:00:01.0000000 GameState.DebugPrintPower() - FULL_ENTITY - Creating ID=75 CardID=TB_BaconShop_HERO_49",
+		"D 10:00:01.0000000 GameState.DebugPrintPower() -     tag=CONTROLLER value=7",
+		"D 10:00:01.0000000 GameState.DebugPrintPower() -     tag=CARDTYPE value=HERO",
+		"D 10:00:01.0000000 GameState.DebugPrintPower() -     tag=HEALTH value=30",
+		"D 10:00:01.0000000 GameState.DebugPrintPower() -     tag=ARMOR value=10",
+		// Hero assignment
+		"D 10:00:01.5000000 GameState.DebugPrintPower() - TAG_CHANGE Entity=Moch#1358 tag=HERO_ENTITY value=75",
+		// GameEntity turn 1 (recruit)
+		"D 10:00:02.0000000 GameState.DebugPrintPower() - TAG_CHANGE Entity=GameEntity tag=TURN value=1",
+		// Player turn 1
+		"D 10:00:02.0000000 GameState.DebugPrintPower() - TAG_CHANGE Entity=Moch#1358 tag=TURN value=1",
+		// Local hero health update
+		"D 10:00:03.0000000 GameState.DebugPrintPower() - TAG_CHANGE Entity=[entityName=Millhouse id=75 zone=PLAY zonePos=0 cardId=TB_BaconShop_HERO_49 player=7] tag=HEALTH value=28",
+		// Opponent hero health — should NOT affect local player
+		"D 10:00:03.5000000 GameState.DebugPrintPower() - TAG_CHANGE Entity=[entityName=Rakanishu id=200 zone=PLAY zonePos=0 cardId=TB_BaconShop_HERO_75 player=15] tag=HEALTH value=35",
+		// PowerTaskList line — should be FILTERED OUT
+		"D 10:00:03.7000000 PowerTaskList.DebugPrintPower() - TAG_CHANGE Entity=[entityName=Millhouse id=75 zone=PLAY player=7] tag=HEALTH value=99",
+		// Game end
+		"D 10:00:04.0000000 GameState.DebugPrintPower() - TAG_CHANGE Entity=Moch#1358 tag=PLAYER_LEADERBOARD_PLACE value=3",
+		"D 10:00:05.0000000 GameState.DebugPrintPower() - TAG_CHANGE Entity=GameEntity tag=STATE value=COMPLETE",
 	}
 	for _, l := range lines {
 		p.Feed(l)
 	}
+	p.Flush()
 	close(ch)
 	for e := range ch {
 		proc.Handle(e)
@@ -383,10 +581,19 @@ func TestFullPipeline(t *testing.T) {
 	if s.Phase != PhaseGameOver {
 		t.Errorf("Phase: expected GAME_OVER, got %s", s.Phase)
 	}
-	if s.Player.Health != 38 {
-		t.Errorf("Health: expected 38, got %d", s.Player.Health)
+	if s.Player.Name != "Moch#1358" {
+		t.Errorf("Name: expected Moch#1358, got %q", s.Player.Name)
 	}
-	if s.Player.Armor != 3 {
-		t.Errorf("Armor: expected 3, got %d", s.Player.Armor)
+	if s.Player.Health != 28 {
+		t.Errorf("Health: expected 28 (not 35 from opponent, not 99 from PowerTaskList), got %d", s.Player.Health)
+	}
+	if s.Player.Armor != 10 {
+		t.Errorf("Armor: expected 10, got %d", s.Player.Armor)
+	}
+	if s.Turn != 1 {
+		t.Errorf("Turn: expected 1 (player turn, not GameEntity turn), got %d", s.Turn)
+	}
+	if s.Placement != 3 {
+		t.Errorf("Placement: expected 3, got %d", s.Placement)
 	}
 }

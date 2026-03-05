@@ -8,16 +8,23 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/nxadm/tail"
 )
 
 // Watcher tails one or more HS log files and sends lines to Lines channel.
 type Watcher struct {
 	Lines  <-chan Line
+	lines  chan Line
 	errors chan error
 	done   chan struct{}
-	tails  []*tail.Tail
+
+	mu    sync.Mutex
+	tails []*tail.Tail
 }
 
 // Line is a raw log line with its source file.
@@ -28,10 +35,11 @@ type Line struct {
 
 // Config configures which log files to watch.
 type Config struct {
-	LogDir  string   // directory containing the log files
-	Files   []string // file names to tail (e.g. "Power.log", "Zone.log")
-	Reopen  bool     // reopen file when truncated (log rotation)
-	MustExist bool   // fail if file does not exist at startup
+	LogDir    string   // directory containing the log files (or session subdirs)
+	Files     []string // file names to tail (e.g. "Power.log", "Zone.log")
+	Reopen    bool     // reopen file when truncated (log rotation)
+	MustExist bool     // fail if file does not exist at startup
+	ReadFromStart bool // read existing content on initial startup (catch up with current game)
 }
 
 // New creates and starts a Watcher. It will continue until ctx is cancelled
@@ -44,29 +52,62 @@ func New(ctx context.Context, cfg Config) (*Watcher, error) {
 	lines := make(chan Line, 512)
 	w := &Watcher{
 		Lines:  lines,
+		lines:  lines,
 		errors: make(chan error, 1),
 		done:   make(chan struct{}),
 	}
 
+	// Resolve the actual directory containing the log files.
+	// Hearthstone may place logs directly in LogDir or inside
+	// timestamped session subdirectories (Hearthstone_YYYY_MM_DD_HH_MM_SS/).
+	logDir := resolveLogDir(cfg.LogDir, cfg.Files)
+	slog.Info("resolved log directory", "configured", cfg.LogDir, "resolved", logDir)
+
+	if err := w.startTails(ctx, logDir, cfg, cfg.ReadFromStart); err != nil {
+		return nil, err
+	}
+
+	// Watch for new session directories so we switch when HS restarts.
+	go w.watchForNewSessions(ctx, cfg)
+
+	go func() {
+		<-ctx.Done()
+		w.Stop()
+	}()
+
+	return w, nil
+}
+
+// startTails begins tailing all configured files in the given directory.
+// If fromStart is true, reads from the beginning of the file to catch up.
+func (w *Watcher) startTails(ctx context.Context, logDir string, cfg Config, fromStart bool) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
 	for _, name := range cfg.Files {
-		path := filepath.Join(cfg.LogDir, name)
+		path := filepath.Join(logDir, name)
 
 		if cfg.MustExist {
 			if _, err := os.Stat(path); err != nil {
-				return nil, fmt.Errorf("log file %s does not exist: %w", path, err)
+				return fmt.Errorf("log file %s does not exist: %w", path, err)
 			}
 		}
+
+		var loc *tail.SeekInfo
+		if !fromStart {
+			loc = &tail.SeekInfo{Offset: 0, Whence: io.SeekEnd}
+		}
+		// loc=nil means start from the beginning of the file.
 
 		t, err := tail.TailFile(path, tail.Config{
 			Follow:    true,
 			ReOpen:    cfg.Reopen,
 			MustExist: cfg.MustExist,
-			Location:  &tail.SeekInfo{Offset: 0, Whence: io.SeekEnd}, // only new lines
+			Location:  loc,
 			Logger:    tail.DiscardingLogger,
 		})
 		if err != nil {
-			w.Stop()
-			return nil, fmt.Errorf("tailing %s: %w", path, err)
+			return fmt.Errorf("tailing %s: %w", path, err)
 		}
 		w.tails = append(w.tails, t)
 
@@ -82,7 +123,7 @@ func New(ctx context.Context, cfg Config) (*Watcher, error) {
 						continue
 					}
 					select {
-					case lines <- Line{File: fname, Text: line.Text}:
+					case w.lines <- Line{File: fname, Text: line.Text}:
 					case <-ctx.Done():
 						return
 					}
@@ -93,12 +134,105 @@ func New(ctx context.Context, cfg Config) (*Watcher, error) {
 		}(t, name)
 	}
 
-	go func() {
-		<-ctx.Done()
-		w.Stop()
-	}()
+	return nil
+}
 
-	return w, nil
+// stopTails stops all current tails.
+func (w *Watcher) stopTails() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, t := range w.tails {
+		_ = t.Stop()
+	}
+	w.tails = nil
+}
+
+// watchForNewSessions uses fsnotify to detect new session subdirectories
+// in the configured LogDir and restarts tails when one appears.
+func (w *Watcher) watchForNewSessions(ctx context.Context, cfg Config) {
+	fsw, err := fsnotify.NewWatcher()
+	if err != nil {
+		slog.Error("failed to create fsnotify watcher for session dirs", "err", err)
+		return
+	}
+	defer fsw.Close()
+
+	if err := fsw.Add(cfg.LogDir); err != nil {
+		slog.Error("failed to watch log dir for new sessions", "dir", cfg.LogDir, "err", err)
+		return
+	}
+
+	for {
+		select {
+		case ev, ok := <-fsw.Events:
+			if !ok {
+				return
+			}
+			if ev.Op&fsnotify.Create == 0 {
+				continue
+			}
+			// Only care about new Hearthstone session directories.
+			base := filepath.Base(ev.Name)
+			if !strings.HasPrefix(base, "Hearthstone_") {
+				continue
+			}
+			info, err := os.Stat(ev.Name)
+			if err != nil || !info.IsDir() {
+				continue
+			}
+			slog.Info("new HS session directory detected, switching tails", "dir", ev.Name)
+			w.stopTails()
+			// New session = new game, read from start to get CREATE_GAME.
+			if err := w.startTails(ctx, ev.Name, cfg, true); err != nil {
+				slog.Error("failed to start tails in new session dir", "dir", ev.Name, "err", err)
+			}
+		case err, ok := <-fsw.Errors:
+			if !ok {
+				return
+			}
+			slog.Error("fsnotify error watching log dir", "err", err)
+		case <-ctx.Done():
+			return
+		case <-w.done:
+			return
+		}
+	}
+}
+
+// resolveLogDir checks if the log files exist directly in dir. If not, it
+// looks for Hearthstone session subdirectories (Hearthstone_YYYY_MM_DD_...)
+// and returns the most recent one.
+func resolveLogDir(dir string, files []string) string {
+	// Check if any target file exists directly in dir.
+	for _, f := range files {
+		if _, err := os.Stat(filepath.Join(dir, f)); err == nil {
+			return dir
+		}
+	}
+
+	// Look for session subdirectories.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return dir
+	}
+
+	var sessions []os.DirEntry
+	for _, e := range entries {
+		if e.IsDir() && strings.HasPrefix(e.Name(), "Hearthstone_") {
+			sessions = append(sessions, e)
+		}
+	}
+	if len(sessions) == 0 {
+		return dir
+	}
+
+	// Sort by name descending — the timestamp format sorts lexicographically.
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].Name() > sessions[j].Name()
+	})
+
+	resolved := filepath.Join(dir, sessions[0].Name())
+	return resolved
 }
 
 // Stop gracefully stops all tails and closes the Lines channel.
@@ -109,7 +243,5 @@ func (w *Watcher) Stop() {
 	default:
 		close(w.done)
 	}
-	for _, t := range w.tails {
-		_ = t.Stop()
-	}
+	w.stopTails()
 }

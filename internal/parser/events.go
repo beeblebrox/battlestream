@@ -14,6 +14,8 @@ const (
 	EventTagChange    EventType = "TAG_CHANGE"
 	EventPlayerUpdate EventType = "PLAYER_UPDATE"
 	EventZoneChange   EventType = "ZONE_CHANGE"
+	EventPlayerDef    EventType = "PLAYER_DEF"  // Player entity definition from CREATE_GAME
+	EventPlayerName   EventType = "PLAYER_NAME" // PlayerID → PlayerName mapping
 )
 
 // GameEvent is a single parsed event from the Power.log stream.
@@ -21,7 +23,8 @@ type GameEvent struct {
 	Type       EventType         `json:"type"`
 	Timestamp  time.Time         `json:"timestamp"`
 	EntityID   int               `json:"entity_id,omitempty"`
-	Tags       map[string]string `json:"tags,omitempty"` // TAG -> VALUE
+	PlayerID   int               `json:"player_id,omitempty"` // CONTROLLER / player= field
+	Tags       map[string]string `json:"tags,omitempty"`      // TAG -> VALUE
 	EntityName string            `json:"entity_name,omitempty"`
 	CardID     string            `json:"card_id,omitempty"`
 }

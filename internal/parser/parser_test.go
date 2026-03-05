@@ -45,15 +45,12 @@ func TestTurnStart(t *testing.T) {
 }
 
 func TestGameEnd(t *testing.T) {
-	events := feed("D 10:00:00.0000000 GameState.DebugPrintPower() - TAG_CHANGE Entity=Fixates tag=GAME_RESULT value=LOSS")
+	events := feed("D 10:00:00.0000000 GameState.DebugPrintPower() - TAG_CHANGE Entity=GameEntity tag=STATE value=COMPLETE")
 	if len(events) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(events))
 	}
 	if events[0].Type != EventGameEnd {
 		t.Errorf("expected %s, got %s", EventGameEnd, events[0].Type)
-	}
-	if events[0].Tags["GAME_RESULT"] != "LOSS" {
-		t.Errorf("expected GAME_RESULT=LOSS, got %q", events[0].Tags["GAME_RESULT"])
 	}
 }
 
@@ -201,6 +198,8 @@ func TestTimestampParsing(t *testing.T) {
 }
 
 func TestNoTimestamp(t *testing.T) {
+	// Lines without the GameState source are now filtered out,
+	// so we need to include it.
 	before := time.Now()
 	events := feed("GameState.DebugPrintPower() - CREATE_GAME")
 	after := time.Now()
@@ -213,10 +212,20 @@ func TestNoTimestamp(t *testing.T) {
 	}
 }
 
+func TestPowerTaskListLinesFiltered(t *testing.T) {
+	events := feed(
+		"D 10:00:00.0000000 PowerTaskList.DebugPrintPower() - CREATE_GAME",
+		"D 10:00:00.0000000 PowerTaskList.DebugPrintPower() - TAG_CHANGE Entity=Fixates tag=HEALTH value=28",
+		"D 10:00:00.0000000 PowerTaskList.DebugPrintPower() - BLOCK_START BlockType=POWER",
+	)
+	if len(events) != 0 {
+		t.Errorf("expected 0 events from PowerTaskList lines, got %d: %+v", len(events), events)
+	}
+}
+
 func TestUnrecognisedLineProducesNoEvent(t *testing.T) {
 	events := feed(
 		"D 10:00:00.0000000 GameState.DebugPrintOptions() - id=1",
-		"D 10:00:00.0000000 PowerTaskList.DebugPrintPower() - BLOCK_START BlockType=POWER",
 		"",
 		"just some random text",
 	)
@@ -230,7 +239,7 @@ func TestMultipleEvents(t *testing.T) {
 		"D 10:00:00.0000000 GameState.DebugPrintPower() - CREATE_GAME",
 		"D 10:00:01.0000000 GameState.DebugPrintPower() - TAG_CHANGE Entity=GameEntity tag=TURN value=1",
 		"D 10:00:02.0000000 GameState.DebugPrintPower() - TAG_CHANGE Entity=Fixates tag=HEALTH value=40",
-		"D 10:00:03.0000000 GameState.DebugPrintPower() - TAG_CHANGE Entity=Fixates tag=GAME_RESULT value=WIN",
+		"D 10:00:03.0000000 GameState.DebugPrintPower() - TAG_CHANGE Entity=GameEntity tag=STATE value=COMPLETE",
 	)
 	if len(events) != 4 {
 		t.Fatalf("expected 4 events, got %d", len(events))
@@ -240,5 +249,123 @@ func TestMultipleEvents(t *testing.T) {
 		if events[i].Type != want {
 			t.Errorf("event[%d]: expected %s, got %s", i, want, events[i].Type)
 		}
+	}
+}
+
+// TestPlayerDef verifies parsing of Player entity definitions from CREATE_GAME.
+func TestPlayerDef(t *testing.T) {
+	events := feed(
+		"D 10:00:00.0000000 GameState.DebugPrintPower() -     Player EntityID=20 PlayerID=7 GameAccountId=[hi=144115193835963207 lo=30722021]",
+	)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	e := events[0]
+	if e.Type != EventPlayerDef {
+		t.Errorf("expected %s, got %s", EventPlayerDef, e.Type)
+	}
+	if e.EntityID != 20 {
+		t.Errorf("expected EntityID 20, got %d", e.EntityID)
+	}
+	if e.PlayerID != 7 {
+		t.Errorf("expected PlayerID 7, got %d", e.PlayerID)
+	}
+	if e.Tags["hi"] != "144115193835963207" {
+		t.Errorf("expected hi=144115193835963207, got %q", e.Tags["hi"])
+	}
+}
+
+// TestPlayerDefDummy verifies parsing of the dummy player (hi=0 lo=0).
+func TestPlayerDefDummy(t *testing.T) {
+	events := feed(
+		"D 10:00:00.0000000 GameState.DebugPrintPower() -     Player EntityID=21 PlayerID=15 GameAccountId=[hi=0 lo=0]",
+	)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	e := events[0]
+	if e.Tags["hi"] != "0" {
+		t.Errorf("expected hi=0 for dummy, got %q", e.Tags["hi"])
+	}
+	if e.PlayerID != 15 {
+		t.Errorf("expected PlayerID 15, got %d", e.PlayerID)
+	}
+}
+
+// TestPlayerNameParsing verifies extraction of PlayerID → PlayerName mapping.
+func TestPlayerNameParsing(t *testing.T) {
+	events := feed(
+		"D 10:00:00.0000000 GameState.DebugPrintGame() - PlayerID=7, PlayerName=Moch#1358",
+	)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	e := events[0]
+	if e.Type != EventPlayerName {
+		t.Errorf("expected %s, got %s", EventPlayerName, e.Type)
+	}
+	if e.PlayerID != 7 {
+		t.Errorf("expected PlayerID 7, got %d", e.PlayerID)
+	}
+	if e.EntityName != "Moch#1358" {
+		t.Errorf("expected name Moch#1358, got %q", e.EntityName)
+	}
+}
+
+// TestPlayerFieldExtraction verifies player= is extracted from bracketed entities.
+func TestPlayerFieldExtraction(t *testing.T) {
+	events := feed(
+		"D 10:00:00.0000000 GameState.DebugPrintPower() - TAG_CHANGE Entity=[entityName=Millhouse id=75 zone=PLAY zonePos=0 cardId=TB_BaconShop_HERO_49 player=7] tag=HEALTH value=30",
+	)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	e := events[0]
+	if e.PlayerID != 7 {
+		t.Errorf("expected PlayerID 7, got %d", e.PlayerID)
+	}
+	if e.EntityID != 75 {
+		t.Errorf("expected EntityID 75, got %d", e.EntityID)
+	}
+}
+
+// TestFullEntityControllerFromBlockTags verifies CONTROLLER tag in block is
+// resolved to PlayerID on the event.
+func TestFullEntityControllerFromBlockTags(t *testing.T) {
+	events := feed(
+		"D 10:00:00.0000000 GameState.DebugPrintPower() - FULL_ENTITY - Creating ID=75 CardID=TB_BaconShop_HERO_49",
+		"D 10:00:00.0000000 GameState.DebugPrintPower() -     tag=CONTROLLER value=7",
+		"D 10:00:00.0000000 GameState.DebugPrintPower() -     tag=CARDTYPE value=HERO",
+		"D 10:00:00.0000000 GameState.DebugPrintPower() -     tag=HEALTH value=40",
+	)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	e := events[0]
+	if e.PlayerID != 7 {
+		t.Errorf("expected PlayerID 7 from CONTROLLER, got %d", e.PlayerID)
+	}
+	if e.EntityID != 75 {
+		t.Errorf("expected EntityID 75, got %d", e.EntityID)
+	}
+	if e.CardID != "TB_BaconShop_HERO_49" {
+		t.Errorf("expected CardID TB_BaconShop_HERO_49, got %q", e.CardID)
+	}
+}
+
+// TestFullEntityIDFormat verifies the "FULL_ENTITY - Creating ID=N CardID=X" format.
+func TestFullEntityIDFormat(t *testing.T) {
+	events := feed(
+		"D 10:00:00.0000000 GameState.DebugPrintPower() - FULL_ENTITY - Creating ID=37 CardID=TB_BaconShop_HERO_PH",
+		"D 10:00:00.0000000 GameState.DebugPrintPower() -     tag=CONTROLLER value=7",
+	)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].EntityID != 37 {
+		t.Errorf("expected EntityID 37, got %d", events[0].EntityID)
+	}
+	if events[0].CardID != "TB_BaconShop_HERO_PH" {
+		t.Errorf("expected CardID TB_BaconShop_HERO_PH, got %q", events[0].CardID)
 	}
 }

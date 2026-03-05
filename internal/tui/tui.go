@@ -49,7 +49,8 @@ var (
 	styleWin     = lipgloss.NewStyle().Foreground(colorGreen).Bold(true)
 	styleLoss    = lipgloss.NewStyle().Foreground(colorRed)
 	stylePhase   = lipgloss.NewStyle().Foreground(colorOrange).Bold(true)
-	styleErr     = lipgloss.NewStyle().Foreground(colorRed).Bold(true)
+	styleErr      = lipgloss.NewStyle().Foreground(colorRed).Bold(true)
+	styleGameOver = lipgloss.NewStyle().Foreground(colorDim).Bold(true)
 
 	styleHealthBar = lipgloss.NewStyle().
 			Foreground(colorHealthFg).
@@ -130,6 +131,35 @@ func (m *Model) Run() error {
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err := p.Run()
 	return err
+}
+
+// Dump connects to the daemon, fetches current state, and returns the rendered
+// view as a plain string. Useful for debugging without a TTY.
+func Dump(grpcAddr string, width int) (string, error) {
+	client, err := Dial(grpcAddr)
+	if err != nil {
+		return "", err
+	}
+	defer client.Close()
+
+	ctx := context.Background()
+	game, err := client.GetCurrentGame(ctx)
+	if err != nil {
+		return "", fmt.Errorf("fetching game: %w", err)
+	}
+	agg, err := client.GetAggregate(ctx)
+	if err != nil {
+		return "", fmt.Errorf("fetching aggregate: %w", err)
+	}
+
+	m := &Model{
+		connState: stateConnected,
+		game:      game,
+		agg:       agg,
+		width:     width,
+		height:    40,
+	}
+	return m.View(), nil
 }
 
 // ============================================================
@@ -295,11 +325,23 @@ func (m *Model) renderGamePanel(w int) string {
 			phase = "IDLE"
 		}
 		b.WriteString(styleLabel.Render("Game   ") + styleValue.Render(m.game.GameId) + "\n")
-		b.WriteString(styleLabel.Render("Phase  ") + stylePhase.Render(phase) + "\n")
+
+		if phase == "GAME_OVER" {
+			placement := int(m.game.Placement)
+			placeStr := fmt.Sprintf("#%d", placement)
+			if placement >= 1 && placement <= 4 {
+				b.WriteString(styleLabel.Render("Result ") + styleWin.Render("WIN "+placeStr) + "\n")
+			} else if placement > 0 {
+				b.WriteString(styleLabel.Render("Result ") + styleLoss.Render("LOSS "+placeStr) + "\n")
+			} else {
+				b.WriteString(styleLabel.Render("Phase  ") + styleGameOver.Render("GAME OVER") + "\n")
+			}
+		} else {
+			b.WriteString(styleLabel.Render("Phase  ") + stylePhase.Render(phase) + "\n")
+		}
+
 		b.WriteString(styleLabel.Render("Turn   ") + styleValue.Render(fmt.Sprintf("%d", m.game.Turn)) + "\n")
 		b.WriteString(styleLabel.Render("Tavern ") + renderTavernTier(int(m.game.TavernTier)) + "\n")
-		// Blank line to match hero panel height (title + 5 data rows each)
-		b.WriteString("")
 	}
 
 	return styleBorder.Width(w).Render(b.String())
@@ -335,7 +377,11 @@ func (m *Model) renderHeroPanel(w int) string {
 
 func (m *Model) boardContent() string {
 	var b strings.Builder
-	b.WriteString(styleTitle.Render("YOUR BOARD") + "\n")
+	title := "YOUR BOARD"
+	if m.game != nil && m.game.Phase == "GAME_OVER" {
+		title = "FINAL BOARD"
+	}
+	b.WriteString(styleTitle.Render(title) + "\n")
 
 	if m.game == nil || len(m.game.Board) == 0 {
 		b.WriteString(styleDim.Render("(empty)"))
@@ -462,6 +508,9 @@ func renderMinion(mn *bspb.MinionState) string {
 	var sb strings.Builder
 
 	name := mn.Name
+	if name == "" {
+		name = mn.CardId
+	}
 	if len(name) > 22 {
 		name = name[:21] + "…"
 	}

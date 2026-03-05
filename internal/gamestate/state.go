@@ -19,18 +19,18 @@ const (
 
 // BGGameState is the current state of a Battlegrounds game.
 type BGGameState struct {
-	GameID         string
-	Phase          GamePhase
-	Turn           int
-	TavernTier     int
-	Player         PlayerState
-	Opponent       *PlayerState
-	Board          []MinionState
-	OpponentBoard  []MinionState
-	Modifications  []StatMod
-	StartTime      time.Time
-	EndTime        *time.Time
-	Placement      int
+	GameID        string
+	Phase         GamePhase
+	Turn          int // The BG turn the player sees (from player TURN tag)
+	TavernTier    int
+	Player        PlayerState
+	Opponent      *PlayerState
+	Board         []MinionState
+	OpponentBoard []MinionState
+	Modifications []StatMod
+	StartTime     time.Time
+	EndTime       *time.Time
+	Placement     int
 }
 
 // PlayerState holds per-player stats.
@@ -69,8 +69,10 @@ type StatMod struct {
 
 // Machine manages the BGGameState and applies events.
 type Machine struct {
-	mu    sync.RWMutex
-	state BGGameState
+	mu              sync.RWMutex
+	state           BGGameState
+	gameEntityTurn  int // internal doubled turn from GameEntity
+	boardSnapshot   []MinionState // board state before combat, restored on game over
 }
 
 // New creates a new Machine in IDLE phase.
@@ -78,6 +80,13 @@ func New() *Machine {
 	return &Machine{
 		state: BGGameState{Phase: PhaseIdle},
 	}
+}
+
+// Phase returns the current game phase.
+func (m *Machine) Phase() GamePhase {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.state.Phase
 }
 
 // State returns a snapshot of the current game state.
@@ -102,6 +111,7 @@ func (m *Machine) GameStart(gameID string, t time.Time) {
 		StartTime: t,
 		Player:    PlayerState{Health: 40},
 	}
+	m.gameEntityTurn = 0
 }
 
 // GameEnd marks the game as over.
@@ -111,6 +121,11 @@ func (m *Machine) GameEnd(placement int, t time.Time) {
 	m.state.Phase = PhaseGameOver
 	m.state.Placement = placement
 	m.state.EndTime = &t
+	// Restore pre-combat board if the current board is empty (minions died during combat).
+	if len(m.state.Board) == 0 && len(m.boardSnapshot) > 0 {
+		m.state.Board = m.boardSnapshot
+	}
+	m.boardSnapshot = nil
 }
 
 // SetPhase updates the game phase.
@@ -120,15 +135,30 @@ func (m *Machine) SetPhase(phase GamePhase) {
 	m.state.Phase = phase
 }
 
-// SetTurn updates the turn counter.
+// SetTurn sets the BG turn (the turn number the player sees).
+// This comes from TAG_CHANGE Entity=<localPlayer> tag=TURN value=N.
 func (m *Machine) SetTurn(turn int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.state.Turn = turn
+	// Player turn always starts a recruit phase.
+	m.state.Phase = PhaseRecruit
+}
+
+// SetGameEntityTurn tracks the internal GameEntity TURN (doubled: odd=recruit, even=combat).
+// Used only for phase detection, not for display.
+func (m *Machine) SetGameEntityTurn(turn int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.gameEntityTurn = turn
+	// Use GameEntity turn for phase: odd = recruit, even = combat.
 	if turn%2 == 1 {
 		m.state.Phase = PhaseRecruit
 	} else {
 		m.state.Phase = PhaseCombat
+		// Snapshot the board before combat starts — minions die during combat
+		// and we want to preserve the pre-combat board for game-over display.
+		m.boardSnapshot = append([]MinionState(nil), m.state.Board...)
 	}
 }
 
@@ -144,6 +174,13 @@ func (m *Machine) UpdatePlayerName(name string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.state.Player.Name = name
+}
+
+// UpdateHeroCardID sets the hero card ID for the local player.
+func (m *Machine) UpdateHeroCardID(cardID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.state.Player.HeroCardID = cardID
 }
 
 // UpsertMinion inserts or updates a minion on the board.
@@ -196,8 +233,8 @@ func applyTagToPlayer(p *PlayerState, tag, value string) {
 		p.SpellPower = parseInt(value)
 	case "TAVERN_TIER", "PLAYER_TECH_LEVEL":
 		// handled separately
-	case "BACON_TRIPLE_CARD":
-		p.TripleCount++
+	case "PLAYER_TRIPLES":
+		p.TripleCount = parseInt(value)
 	}
 }
 

@@ -156,6 +156,20 @@ func (s *Store) ListGames(limit, offset int) ([]GameMeta, error) {
 	return all, nil
 }
 
+// HasGame checks if a game with the given ID already exists in the store.
+func (s *Store) HasGame(gameID string) bool {
+	err := s.db.View(func(txn *badger.Txn) error {
+		_, err := txn.Get([]byte(prefixGameMeta + gameID))
+		return err
+	})
+	return err == nil
+}
+
+// DropAll deletes all data in the database.
+func (s *Store) DropAll() error {
+	return s.db.DropAll()
+}
+
 // SaveFullGame persists the complete game state snapshot.
 func (s *Store) SaveFullGame(gs gamestate.BGGameState) error {
 	endTime := int64(0)
