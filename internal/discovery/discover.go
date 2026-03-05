@@ -187,7 +187,7 @@ func logConfigInPrefix(prefixRoot, home string) string {
 }
 
 // WalkForInstall walks startDir looking for a Hearthstone install.
-// Used by DiscoverFromRoot and the interactive discovery wizard.
+// Returns the first match found, or an error if nothing is found.
 func WalkForInstall(startDir string) (*InstallInfo, error) {
 	var found *InstallInfo
 	err := filepath.WalkDir(startDir, func(path string, d os.DirEntry, err error) error {
@@ -211,4 +211,59 @@ func WalkForInstall(startDir string) (*InstallInfo, error) {
 		return nil, err
 	}
 	return nil, fmt.Errorf("no hearthstone install found under %s", startDir)
+}
+
+// WalkForAllInstalls walks startDir and returns every Hearthstone install found.
+// Unlike WalkForInstall it does not stop at the first match.
+func WalkForAllInstalls(startDir string) ([]*InstallInfo, error) {
+	var all []*InstallInfo
+	err := filepath.WalkDir(startDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return filepath.SkipDir
+		}
+		if !d.IsDir() {
+			return nil
+		}
+		info, e := probeRoot(path)
+		if e == nil {
+			all = append(all, info)
+			// Don't recurse inside a found install directory.
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	return all, err
+}
+
+// DiscoverAll scans all platform-default search roots and returns every
+// Hearthstone install found. Unlike Discover it does not stop at the first match.
+func DiscoverAll() ([]*InstallInfo, error) {
+	seen := make(map[string]bool)
+	var all []*InstallInfo
+	for _, root := range searchRoots() {
+		infos := discoverAllFromRoot(root)
+		for _, info := range infos {
+			if !seen[info.InstallRoot] {
+				seen[info.InstallRoot] = true
+				all = append(all, info)
+			}
+		}
+	}
+	if len(all) == 0 {
+		return nil, fmt.Errorf("no hearthstone installations found in default search paths")
+	}
+	return all, nil
+}
+
+// discoverAllFromRoot returns all installs under a single root path.
+func discoverAllFromRoot(root string) []*InstallInfo {
+	if info, err := probeRoot(root); err == nil {
+		return []*InstallInfo{info}
+	}
+	driveC := filepath.Join(root, "drive_c")
+	if _, err := os.Stat(driveC); err == nil {
+		all, _ := WalkForAllInstalls(driveC)
+		return all
+	}
+	return nil
 }

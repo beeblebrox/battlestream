@@ -1,16 +1,38 @@
-hearthstone:
-  install_path: ""          # auto-detected if blank
-  log_path: ""              # auto-detected from install_path
-  auto_patch_logconfig: true
+# battlestream configuration
+#
+# Profiles group per-install settings. Use --profile <name> to select one.
+# If only one profile is defined it is used automatically.
+# Run 'battlestream discover' to populate profiles interactively.
 
-storage:
-  db_path: "~/.battlestream/data"
+active_profile: "main"
 
-output:
-  enabled: true
-  path: "~/.battlestream/stats"
-  write_interval_ms: 500
+profiles:
+  main:
+    hearthstone:
+      install_path: ""          # auto-detected if blank
+      log_path: ""              # derived from install_path if blank
+      auto_patch_logconfig: true
+    storage:
+      db_path: "~/.battlestream/profiles/main/data"
+    output:
+      enabled: true
+      path: "~/.battlestream/profiles/main/stats"
+      write_interval_ms: 500
 
+  # Example second profile (Wine prefix on a separate drive):
+  # wine:
+  #   hearthstone:
+  #     install_path: "/mnt/games/battlenet/drive_c/Program Files (x86)/Hearthstone"
+  #     log_path: ""
+  #     auto_patch_logconfig: true
+  #   storage:
+  #     db_path: "~/.battlestream/profiles/wine/data"
+  #   output:
+  #     enabled: true
+  #     path: "~/.battlestream/profiles/wine/stats"
+  #     write_interval_ms: 500
+
+# Global settings shared across all profiles.
 api:
   grpc_addr: "127.0.0.1:50051"
   rest_addr: "127.0.0.1:8080"

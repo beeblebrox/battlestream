@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git init:*)",
+      "Bash(git branch:*)",
+      "Bash(chmod +x:*)",
+      "Bash(go build:*)",
+      "Bash(./battlestream:*)",
+      "Bash(echo gateway version: $GWVER:*)",
+      "Bash(git commit:*)",
+      "Bash(gh run:*)",
+      "Bash(go mod:*)",
+      "Bash(go get:*)",
+      "Bash(go test:*)",
+      "Bash(for f in /chungus/projects/battlestream/docs/*.md)",
+      "Bash(do echo \"=== $f ===\")",
+      "Read(//chungus/projects/battlestream/**)",
+      "Bash(done)",
+      "Bash(git push:*)"
+    ]
+  }
+}

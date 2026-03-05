@@ -29,7 +29,10 @@ import (
 
 const version = "0.1.0-dev"
 
-var cfgFile string
+var (
+	cfgFile     string
+	profileFlag string
+)
 
 func main() {
 	root := &cobra.Command{
@@ -40,6 +43,7 @@ persists aggregate stats, and exposes them via gRPC, REST, WebSocket, and file o
 	}
 
 	root.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ~/.battlestream/config.yaml)")
+	root.PersistentFlags().StringVar(&profileFlag, "profile", "", "profile name to use (default: active_profile or sole profile)")
 
 	root.AddCommand(
 		cmdDaemon(),
@@ -69,8 +73,13 @@ func cmdDaemon() *cobra.Command {
 
 			setupLogging(cfg.Logging)
 
+			profile, err := cfg.GetProfile(profileFlag)
+			if err != nil {
+				return err
+			}
+
 			// --- Resolve log path ---
-			logPath := cfg.Hearthstone.LogPath
+			logPath := profile.Hearthstone.LogPath
 			if logPath == "" {
 				info, err := discovery.Discover()
 				if err != nil {
@@ -79,7 +88,7 @@ func cmdDaemon() *cobra.Command {
 				logPath = info.LogPath
 				slog.Info("auto-discovered HS logs", "path", logPath)
 
-				if cfg.Hearthstone.AutoPatchLogConfig {
+				if profile.Hearthstone.AutoPatchLogConfig {
 					if err := logconfig.EnsureVerboseLogging(info.LogConfig); err != nil {
 						slog.Warn("could not patch log.config", "err", err)
 					} else {
@@ -89,7 +98,7 @@ func cmdDaemon() *cobra.Command {
 			}
 
 			// --- Open store ---
-			st, err := store.Open(cfg.Storage.DBPath)
+			st, err := store.Open(profile.Storage.DBPath)
 			if err != nil {
 				return fmt.Errorf("opening store: %w", err)
 			}
@@ -97,12 +106,12 @@ func cmdDaemon() *cobra.Command {
 
 			// --- File output ---
 			var fw *fileout.Writer
-			if cfg.Output.Enabled {
-				fw, err = fileout.New(cfg.Output.Path)
+			if profile.Output.Enabled {
+				fw, err = fileout.New(profile.Output.Path)
 				if err != nil {
 					return fmt.Errorf("creating file writer: %w", err)
 				}
-				slog.Info("file output enabled", "path", cfg.Output.Path)
+				slog.Info("file output enabled", "path", profile.Output.Path)
 			}
 
 			// --- Game state machine ---
@@ -113,8 +122,6 @@ func cmdDaemon() *cobra.Command {
 			defer cancel()
 
 			// --- Event bus ---
-			// parsedCh receives events from the parser.
-			// broadcastCh receives copies for the gRPC fan-out.
 			parsedCh := make(chan parser.GameEvent, 512)
 			broadcastCh := make(chan parser.GameEvent, 512)
 			p := parser.New(parsedCh)
@@ -148,7 +155,7 @@ func cmdDaemon() *cobra.Command {
 
 			// --- Event processing: parsedCh → state machine + broadcast ---
 			go func() {
-				interval := time.Duration(cfg.Output.WriteIntervalMs) * time.Millisecond
+				interval := time.Duration(profile.Output.WriteIntervalMs) * time.Millisecond
 				ticker := time.NewTicker(interval)
 				defer ticker.Stop()
 
@@ -247,74 +254,151 @@ func cmdTUI() *cobra.Command {
 // --- discover ---
 
 func cmdDiscover() *cobra.Command {
-	cmd := &cobra.Command{
+	return &cobra.Command{
 		Use:   "discover",
 		Short: "Interactive Hearthstone install discovery wizard",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("Searching for Hearthstone installation...")
+			scanner := bufio.NewScanner(os.Stdin)
 
-			info, err := discovery.Discover()
-			if err != nil {
-				fmt.Printf("Auto-discovery failed: %v\n\n", err)
-				fmt.Println("Enter one of:")
-				fmt.Println("  • Hearthstone install dir  (contains Hearthstone.exe / Hearthstone.app)")
-				fmt.Println("  • Logs directory           (contains Power.log)")
-				fmt.Println("  • Wine/Proton prefix root  (contains drive_c/)  e.g. /chungus/battlenet")
-				fmt.Print("\nPath: ")
-
-				scanner := bufio.NewScanner(os.Stdin)
-				if !scanner.Scan() {
-					return fmt.Errorf("no input provided")
-				}
-				userPath := strings.TrimSpace(scanner.Text())
-				if userPath == "" {
-					return fmt.Errorf("no path entered")
-				}
-
-				// Try direct probe first
-				info, err = discovery.DiscoverFromRoot(userPath)
-				if err != nil {
-					// Try walking
-					fmt.Printf("Probing %s (this may take a moment)...\n", userPath)
-					info, err = discovery.WalkForInstall(userPath)
-					if err != nil {
-						return fmt.Errorf("could not find Hearthstone install: %w", err)
-					}
-				}
-			}
-
-			fmt.Printf("\nFound Hearthstone installation:\n")
-			fmt.Printf("  Install root: %s\n", info.InstallRoot)
-			fmt.Printf("  Log path:     %s\n", info.LogPath)
-			fmt.Printf("  log.config:   %s\n", info.LogConfig)
-
-			// Save to config
+			// Load existing config (or start fresh).
 			cfg, err := config.Load(cfgFile)
 			if err != nil {
 				cfg = &config.Config{}
 			}
-			cfg.Hearthstone.InstallPath = info.InstallRoot
-			cfg.Hearthstone.LogPath = info.LogPath
 
+			fmt.Println("Searching for Hearthstone installations...")
+			found, err := discovery.DiscoverAll()
+			if err != nil {
+				fmt.Printf("Auto-discovery: %v\n", err)
+				found = nil
+			} else {
+				fmt.Printf("Found %d installation(s) automatically.\n", len(found))
+			}
+
+			// Show all auto-discovered installs and collect profile names.
+			var namedInstalls []namedInstall
+			for i, info := range found {
+				fmt.Printf("\n[%d] Install root: %s\n", i+1, info.InstallRoot)
+				fmt.Printf("    Log path:     %s\n", info.LogPath)
+				fmt.Printf("    log.config:   %s\n", info.LogConfig)
+				fmt.Printf("    Profile name (Enter to skip): ")
+				if !scanner.Scan() {
+					break
+				}
+				name := strings.TrimSpace(scanner.Text())
+				if name != "" {
+					namedInstalls = append(namedInstalls, namedInstall{name: name, info: info})
+				}
+			}
+
+			// Offer to add paths manually.
+			for {
+				fmt.Print("\nAdd a path manually? (y/N): ")
+				if !scanner.Scan() {
+					break
+				}
+				answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
+				if answer != "y" && answer != "yes" {
+					break
+				}
+
+				fmt.Println("Enter one of:")
+				fmt.Println("  • Hearthstone install dir  (contains Hearthstone.exe / Hearthstone.app)")
+				fmt.Println("  • Logs directory           (contains Power.log)")
+				fmt.Println("  • Wine/Proton prefix root  (contains drive_c/)  e.g. /chungus/battlenet")
+				fmt.Print("Path: ")
+				if !scanner.Scan() {
+					break
+				}
+				userPath := strings.TrimSpace(scanner.Text())
+				if userPath == "" {
+					continue
+				}
+
+				info, err := discovery.DiscoverFromRoot(userPath)
+				if err != nil {
+					fmt.Printf("Probing %s (this may take a moment)...\n", userPath)
+					info, err = discovery.WalkForInstall(userPath)
+					if err != nil {
+						fmt.Printf("Could not find Hearthstone install: %v\n", err)
+						continue
+					}
+				}
+
+				fmt.Printf("  Install root: %s\n", info.InstallRoot)
+				fmt.Printf("  Log path:     %s\n", info.LogPath)
+				fmt.Printf("  log.config:   %s\n", info.LogConfig)
+				fmt.Print("Profile name: ")
+				if !scanner.Scan() {
+					break
+				}
+				name := strings.TrimSpace(scanner.Text())
+				if name == "" {
+					fmt.Println("Skipping (no name given).")
+					continue
+				}
+				namedInstalls = append(namedInstalls, namedInstall{name: name, info: info})
+			}
+
+			if len(namedInstalls) == 0 {
+				return fmt.Errorf("no installations configured; run 'battlestream discover' again")
+			}
+
+			// Build profiles and add to config.
+			firstProfile := ""
+			for _, ni := range namedInstalls {
+				p := config.NewProfileConfig(ni.name)
+				p.Hearthstone.InstallPath = ni.info.InstallRoot
+				p.Hearthstone.LogPath = ni.info.LogPath
+				setActive := firstProfile == ""
+				cfg.AddProfile(ni.name, p, setActive)
+				if setActive {
+					firstProfile = ni.name
+				}
+				fmt.Printf("  Added profile %q → %s\n", ni.name, ni.info.InstallRoot)
+			}
+
+			// If multiple profiles, ask which should be active.
+			if len(namedInstalls) > 1 {
+				fmt.Printf("\nMultiple profiles added. Active profile [%s]: ", cfg.ActiveProfile)
+				if scanner.Scan() {
+					if name := strings.TrimSpace(scanner.Text()); name != "" {
+						if _, ok := cfg.Profiles[name]; ok {
+							cfg.ActiveProfile = name
+						} else {
+							fmt.Printf("Profile %q not found; keeping %q as active.\n", name, cfg.ActiveProfile)
+						}
+					}
+				}
+			}
+
+			// Determine save path.
 			home, _ := os.UserHomeDir()
 			savePath := filepath.Join(home, ".battlestream", "config.yaml")
 			if cfgFile != "" {
 				savePath = cfgFile
 			}
 
-			if err := os.MkdirAll(filepath.Dir(savePath), 0755); err != nil {
-				return fmt.Errorf("creating config dir: %w", err)
-			}
 			if err := config.Save(cfg, savePath); err != nil {
 				return fmt.Errorf("saving config: %w", err)
 			}
 
 			fmt.Printf("\nConfig saved to: %s\n", savePath)
+			fmt.Printf("Active profile:  %s\n", cfg.ActiveProfile)
+			if len(cfg.Profiles) > 1 {
+				fmt.Printf("All profiles:    %s\n", cfg.ProfileList())
+				fmt.Println("\nUse --profile <name> to select a specific profile.")
+			}
 			fmt.Println("\nRun 'battlestream daemon' to start the service.")
 			return nil
 		},
 	}
-	return cmd
+}
+
+// namedInstall pairs a profile name with a discovered install.
+type namedInstall struct {
+	name string
+	info *discovery.InstallInfo
 }
 
 // --- config ---
@@ -329,18 +413,36 @@ func cmdConfig() *cobra.Command {
 				return fmt.Errorf("loading config: %w", err)
 			}
 
-			fmt.Printf("Configuration:\n")
-			fmt.Printf("  hearthstone.install_path:        %q\n", cfg.Hearthstone.InstallPath)
-			fmt.Printf("  hearthstone.log_path:            %q\n", cfg.Hearthstone.LogPath)
-			fmt.Printf("  hearthstone.auto_patch_logconfig: %v\n", cfg.Hearthstone.AutoPatchLogConfig)
-			fmt.Printf("  storage.db_path:                 %q\n", cfg.Storage.DBPath)
-			fmt.Printf("  output.enabled:                  %v\n", cfg.Output.Enabled)
-			fmt.Printf("  output.path:                     %q\n", cfg.Output.Path)
-			fmt.Printf("  output.write_interval_ms:        %d\n", cfg.Output.WriteIntervalMs)
-			fmt.Printf("  api.grpc_addr:                   %q\n", cfg.API.GRPCAddr)
-			fmt.Printf("  api.rest_addr:                   %q\n", cfg.API.RESTAddr)
-			fmt.Printf("  logging.level:                   %q\n", cfg.Logging.Level)
-			fmt.Printf("  logging.file:                    %q\n", cfg.Logging.File)
+			fmt.Printf("Global settings:\n")
+			fmt.Printf("  api.grpc_addr:   %q\n", cfg.API.GRPCAddr)
+			fmt.Printf("  api.rest_addr:   %q\n", cfg.API.RESTAddr)
+			fmt.Printf("  logging.level:   %q\n", cfg.Logging.Level)
+			fmt.Printf("  logging.file:    %q\n", cfg.Logging.File)
+
+			if len(cfg.Profiles) == 0 {
+				fmt.Println("\nNo profiles configured. Run 'battlestream discover'.")
+				return nil
+			}
+
+			fmt.Printf("\nActive profile: %s\n", cfg.ActiveProfile)
+			fmt.Printf("Profiles (%d):\n", len(cfg.Profiles))
+
+			names := cfg.ProfileList()
+			for _, name := range strings.Split(names, ", ") {
+				p := cfg.Profiles[name]
+				marker := ""
+				if name == cfg.ActiveProfile {
+					marker = " *"
+				}
+				fmt.Printf("\n  [%s]%s\n", name, marker)
+				fmt.Printf("    hearthstone.install_path:        %q\n", p.Hearthstone.InstallPath)
+				fmt.Printf("    hearthstone.log_path:            %q\n", p.Hearthstone.LogPath)
+				fmt.Printf("    hearthstone.auto_patch_logconfig: %v\n", p.Hearthstone.AutoPatchLogConfig)
+				fmt.Printf("    storage.db_path:                 %q\n", p.Storage.DBPath)
+				fmt.Printf("    output.enabled:                  %v\n", p.Output.Enabled)
+				fmt.Printf("    output.path:                     %q\n", p.Output.Path)
+				fmt.Printf("    output.write_interval_ms:        %d\n", p.Output.WriteIntervalMs)
+			}
 			return nil
 		},
 	}

@@ -6,36 +6,67 @@ Config file is loaded from (in order):
 3. `./config.yaml`
 4. `/etc/battlestream/config.yaml`
 
-Environment variables override file values. Prefix: `BS_`, separator `_`.
-Example: `BS_API_GRPC_ADDR=127.0.0.1:50051`
+## Profiles
+
+battlestream supports multiple named profiles, one per Hearthstone installation.
+This is useful when running multiple Wine/Proton prefixes or having both a native
+and a Wine install.
+
+Use `--profile <name>` to select a profile when starting the daemon or TUI.
+If only one profile is configured it is selected automatically.
+The `active_profile` key sets the default when no `--profile` flag is given.
+
+Run the interactive wizard to set up profiles:
+
+```
+battlestream discover
+```
 
 ## Full Reference
 
 ```yaml
-hearthstone:
-  # Path to Hearthstone install root. Auto-detected if blank.
-  install_path: ""
+# Which profile to use when --profile is not specified and multiple exist.
+active_profile: "main"
 
-  # Path to Hearthstone Logs/ directory. Derived from install_path if blank.
-  log_path: ""
+# One entry per Hearthstone installation.
+profiles:
+  main:
+    hearthstone:
+      # Path to Hearthstone install root. Auto-detected if blank.
+      install_path: ""
 
-  # Automatically write required sections to log.config on daemon start.
-  auto_patch_logconfig: true
+      # Path to Hearthstone Logs/ directory. Derived from install_path if blank.
+      log_path: ""
 
-storage:
-  # Path to the BadgerDB data directory.
-  db_path: "~/.battlestream/data"
+      # Automatically write required sections to log.config on daemon start.
+      auto_patch_logconfig: true
 
-output:
-  # Enable JSON file output.
-  enabled: true
+    storage:
+      # Path to the BadgerDB data directory.
+      db_path: "~/.battlestream/profiles/main/data"
 
-  # Directory to write stat files to.
-  path: "~/.battlestream/stats"
+    output:
+      # Enable JSON file output.
+      enabled: true
 
-  # How often to flush current state to disk (milliseconds).
-  write_interval_ms: 500
+      # Directory to write stat files to.
+      path: "~/.battlestream/profiles/main/stats"
 
+      # How often to flush current state to disk (milliseconds).
+      write_interval_ms: 500
+
+  # Add more profiles for additional installs:
+  # wine:
+  #   hearthstone:
+  #     install_path: "/mnt/games/battlenet/drive_c/Program Files (x86)/Hearthstone"
+  #   storage:
+  #     db_path: "~/.battlestream/profiles/wine/data"
+  #   output:
+  #     enabled: true
+  #     path: "~/.battlestream/profiles/wine/stats"
+  #     write_interval_ms: 500
+
+# Global settings shared across all profiles.
 api:
   # gRPC server listen address.
   grpc_addr: "127.0.0.1:50051"
@@ -55,15 +86,22 @@ logging:
   file: ""
 ```
 
+## Backward Compatibility
+
+Configs written before profile support (with top-level `hearthstone`, `storage`,
+and `output` keys) are automatically migrated to a profile named `"default"` on
+first load. The migrated layout is written back on the next `battlestream discover`
+save.
+
 ## Environment Variables
+
+Environment variables override file values. Prefix: `BS_`, separator `_`.
 
 | Variable | Config Key | Example |
 |---|---|---|
-| `BS_HEARTHSTONE_INSTALL_PATH` | `hearthstone.install_path` | `/opt/hearthstone` |
-| `BS_HEARTHSTONE_LOG_PATH` | `hearthstone.log_path` | `/opt/hearthstone/Logs` |
-| `BS_STORAGE_DB_PATH` | `storage.db_path` | `~/.battlestream/data` |
-| `BS_OUTPUT_PATH` | `output.path` | `~/obs-sources/bs-stats` |
 | `BS_API_GRPC_ADDR` | `api.grpc_addr` | `0.0.0.0:50051` |
 | `BS_API_REST_ADDR` | `api.rest_addr` | `0.0.0.0:8080` |
 | `BS_API_API_KEY` | `api.api_key` | `s3cr3t` |
 | `BS_LOGGING_LEVEL` | `logging.level` | `debug` |
+
+Per-profile settings cannot be set via environment variables; use the config file.
