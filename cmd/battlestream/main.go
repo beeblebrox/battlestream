@@ -14,8 +14,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"battlestream.fixates.io/internal/api/rest"
 	grpcserver "battlestream.fixates.io/internal/api/grpc"
+	"battlestream.fixates.io/internal/api/rest"
 	"battlestream.fixates.io/internal/config"
 	"battlestream.fixates.io/internal/discovery"
 	"battlestream.fixates.io/internal/fileout"
@@ -233,22 +233,13 @@ func cmdDaemon() *cobra.Command {
 func cmdTUI() *cobra.Command {
 	return &cobra.Command{
 		Use:   "tui",
-		Short: "Open the live TUI dashboard",
+		Short: "Open the live TUI dashboard (connects to running daemon)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load(cfgFile)
 			if err != nil {
 				return err
 			}
-			_ = cfg
-
-			// In the real implementation, this connects to the daemon via gRPC.
-			// For now, use a local machine for standalone mode.
-			machine := gamestate.New()
-
-			model := tui.New(func() gamestate.BGGameState {
-				return machine.State()
-			})
-			return model.Run()
+			return tui.New(cfg.API.GRPCAddr).Run()
 		},
 	}
 }
