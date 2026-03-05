@@ -1,6 +1,9 @@
 package gamestate
 
 import (
+	"bufio"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -595,5 +598,104 @@ func TestFullPipeline(t *testing.T) {
 	}
 	if s.Placement != 3 {
 		t.Errorf("Placement: expected 3, got %d", s.Placement)
+	}
+}
+
+// ── Integration test ──────────────────────────────────────────────────────────
+
+func TestIntegrationPowerLog(t *testing.T) {
+	f, err := os.Open("testdata/power_log_game.txt")
+	if err != nil {
+		t.Skipf("test fixture not available: %v", err)
+	}
+	defer f.Close()
+
+	ch := make(chan parser.GameEvent, 256)
+	p := parser.New(ch)
+	m := New()
+	proc := NewProcessor(m)
+
+	// Drain events concurrently to avoid channel deadlock.
+	done := make(chan struct{})
+	go func() {
+		for e := range ch {
+			proc.Handle(e)
+		}
+		close(done)
+	}()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		p.Feed(scanner.Text())
+	}
+	p.Flush()
+	close(ch)
+	<-done
+
+	s := m.State()
+
+	// Basic game state
+	if s.Phase != PhaseGameOver {
+		t.Errorf("Phase: expected GAME_OVER, got %s", s.Phase)
+	}
+	if s.Player.Name != "Moch#1358" {
+		t.Errorf("Player.Name: expected Moch#1358, got %q", s.Player.Name)
+	}
+	if s.Placement != 1 {
+		t.Errorf("Placement: expected 1, got %d", s.Placement)
+	}
+	if s.TavernTier != 5 {
+		t.Errorf("TavernTier: expected 5, got %d", s.TavernTier)
+	}
+	if s.Player.TripleCount != 2 {
+		t.Errorf("TripleCount: expected 2, got %d", s.Player.TripleCount)
+	}
+
+	// Board minions — 6 expected with exact stats
+	type expectedMinion struct {
+		Name   string
+		Attack int
+		Health int
+	}
+	want := []expectedMinion{
+		{"Wildfire Elemental", 233, 181},
+		{"Unleashed Mana Surge", 85, 64},
+		{"Flaming Enforcer", 1022, 817},
+		{"Timewarped Nomi", 22, 20},
+		{"Acid Rainfall", 884, 724},
+		{"Brann Bronzebeard", 4, 7},
+	}
+
+	if len(s.Board) != len(want) {
+		for i, mn := range s.Board {
+			t.Logf("  Board[%d]: %q (id=%d) %d/%d", i, mn.Name, mn.EntityID, mn.Attack, mn.Health)
+		}
+		t.Fatalf("Board: expected %d minions, got %d", len(want), len(s.Board))
+	}
+
+	// Build a lookup by name for flexible ordering
+	boardByName := make(map[string]MinionState)
+	for _, mn := range s.Board {
+		boardByName[mn.Name] = mn
+	}
+
+	for _, w := range want {
+		mn, ok := boardByName[w.Name]
+		if !ok {
+			t.Errorf("Board: missing minion %q", w.Name)
+			continue
+		}
+		if mn.Attack != w.Attack || mn.Health != w.Health {
+			t.Errorf("Board %q: expected %d/%d, got %d/%d",
+				w.Name, w.Attack, w.Health, mn.Attack, mn.Health)
+		}
+	}
+
+	// Modifications should be board-wide only (Target starts with "Board")
+	for _, mod := range s.Modifications {
+		if !strings.HasPrefix(mod.Target, "Board") {
+			t.Errorf("Modification should be board-wide, got Target=%q (turn %d, %s %+d)",
+				mod.Target, mod.Turn, mod.Stat, mod.Delta)
+		}
 	}
 }

@@ -121,8 +121,10 @@ func (m *Machine) GameEnd(placement int, t time.Time) {
 	m.state.Phase = PhaseGameOver
 	m.state.Placement = placement
 	m.state.EndTime = &t
-	// Restore pre-combat board if the current board is empty (minions died during combat).
-	if len(m.state.Board) == 0 && len(m.boardSnapshot) > 0 {
+	// Always restore the pre-combat board snapshot — combat replaces recruit
+	// entities with simulation copies that have base stats, so the snapshot
+	// has the correct fully-buffed stats.
+	if len(m.boardSnapshot) > 0 {
 		m.state.Board = m.boardSnapshot
 	}
 	m.boardSnapshot = nil
@@ -155,11 +157,20 @@ func (m *Machine) SetGameEntityTurn(turn int) {
 	if turn%2 == 1 {
 		m.state.Phase = PhaseRecruit
 	} else {
-		m.state.Phase = PhaseCombat
-		// Snapshot the board before combat starts — minions die during combat
-		// and we want to preserve the pre-combat board for game-over display.
+		// Snapshot the board before combat — minions die during combat and
+		// are replaced by simulation copies with base stats. The recruit
+		// board has the fully-buffed stats we want to preserve.
 		m.boardSnapshot = append([]MinionState(nil), m.state.Board...)
+		m.state.Phase = PhaseCombat
 	}
+}
+
+// UpdateBoardSnapshot overwrites the board snapshot with the current board.
+// Called during combat to keep the snapshot in sync as combat copies are added.
+func (m *Machine) UpdateBoardSnapshot() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.boardSnapshot = append([]MinionState(nil), m.state.Board...)
 }
 
 // UpdatePlayerTag applies a tag change to the local player state.
@@ -194,6 +205,32 @@ func (m *Machine) UpsertMinion(minion MinionState) {
 		}
 	}
 	m.state.Board = append(m.state.Board, minion)
+}
+
+// UpdateMinionStat updates a specific stat on a board minion.
+// Returns true if the minion was found and updated.
+func (m *Machine) UpdateMinionStat(entityID int, stat string, value int) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, mn := range m.state.Board {
+		if mn.EntityID == entityID {
+			switch stat {
+			case "ATK":
+				m.state.Board[i].Attack = value
+			case "HEALTH":
+				m.state.Board[i].Health = value
+			}
+			return true
+		}
+	}
+	return false
+}
+
+// currentTurn returns the current display turn (thread-safe).
+func (m *Machine) currentTurn() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.state.Turn
 }
 
 // RemoveMinion removes a minion from the board by entity ID.

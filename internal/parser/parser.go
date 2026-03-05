@@ -234,11 +234,16 @@ func stripTimestamp(line string) string {
 
 func extractEntityID(s string) int {
 	m := reEntityID.FindStringSubmatch(s)
-	if m == nil {
-		return 0
+	if m != nil {
+		id, _ := strconv.Atoi(m[1])
+		return id
 	}
-	id, _ := strconv.Atoi(m[1])
-	return id
+	// Handle bare numeric entity IDs (e.g., "10181" from "Entity=10181").
+	id, err := strconv.Atoi(s)
+	if err == nil && id > 0 {
+		return id
+	}
+	return 0
 }
 
 func extractPlayerField(s string) int {

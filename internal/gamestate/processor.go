@@ -19,6 +19,15 @@ type entityInfo struct {
 	Zone     string
 }
 
+// pendingStatChange buffers a stat change for batch analysis.
+type pendingStatChange struct {
+	entityID int
+	name     string
+	turn     int
+	stat     string
+	delta    int
+}
+
 // Processor consumes parser.GameEvents and updates a Machine.
 type Processor struct {
 	machine          *Machine
@@ -36,6 +45,9 @@ type Processor struct {
 	heroEntities     map[int]bool
 	// entityProps tracks known properties of entities for zone transition handling.
 	entityProps      map[int]*entityInfo
+
+	// Buffered stat changes for board-wide buff detection.
+	pendingStatChanges []pendingStatChange
 }
 
 // NewProcessor returns a Processor that updates the given Machine.
@@ -70,6 +82,7 @@ func (p *Processor) Handle(e parser.GameEvent) {
 		p.handlePlayerName(e)
 
 	case parser.EventGameEnd:
+		p.flushPendingStatChanges()
 		placement := p.pendingPlacement
 		if pl, ok := e.Tags["PLAYER_LEADERBOARD_PLACE"]; ok {
 			if v, err := strconv.Atoi(pl); err == nil {
@@ -80,6 +93,7 @@ func (p *Processor) Handle(e parser.GameEvent) {
 		p.machine.GameEnd(placement, e.Timestamp)
 
 	case parser.EventTurnStart:
+		p.flushPendingStatChanges()
 		if t, ok := e.Tags["TURN"]; ok {
 			turn, _ := strconv.Atoi(t)
 			p.machine.SetGameEntityTurn(turn)
@@ -117,10 +131,38 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 	// Determine the controller for this entity.
 	controllerID := p.resolveController(e)
 
+	// Keep entity registry up-to-date with names from TAG_CHANGE events.
+	if e.EntityID > 0 && e.EntityName != "" {
+		info := p.entityProps[e.EntityID]
+		if info == nil {
+			info = &entityInfo{}
+			p.entityProps[e.EntityID] = info
+		}
+		cleaned := cleanEntityName(e.EntityName)
+		// Update name if empty or currently a bare number placeholder.
+		if info.Name == "" || isBareNumber(info.Name) {
+			info.Name = cleaned
+		}
+		if info.CardID == "" {
+			info.CardID = extractCardID(e.EntityName)
+		}
+	}
+
 	for tag, value := range e.Tags {
 		switch tag {
-		case "HEALTH", "ARMOR":
-			// Only apply to the local player's hero entity.
+		case "HEALTH":
+			if p.isLocalHero(e, controllerID) {
+				p.machine.UpdatePlayerTag(tag, value)
+			} else if e.EntityID > 0 && controllerID == p.localPlayerID {
+				p.updateMinionStat(e, "HEALTH", value)
+			}
+
+		case "ATK":
+			if e.EntityID > 0 && controllerID == p.localPlayerID {
+				p.updateMinionStat(e, "ATK", value)
+			}
+
+		case "ARMOR":
 			if p.isLocalHero(e, controllerID) {
 				p.machine.UpdatePlayerTag(tag, value)
 			}
@@ -160,13 +202,17 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 					info.Zone = value
 				}
 			}
-			if value == "GRAVEYARD" || value == "REMOVEDFROMGAME" {
+			if value == "GRAVEYARD" || value == "REMOVEDFROMGAME" || value == "SETASIDE" {
 				if e.EntityID > 0 && p.machine.Phase() != PhaseGameOver {
 					p.machine.RemoveMinion(e.EntityID)
 				}
 			} else if value == "PLAY" && e.EntityID > 0 {
 				// Minion moved to board — add if it's a local minion.
-				p.tryAddMinionFromRegistry(e.EntityID, controllerID)
+				// Allow zone transitions during any phase (BG refreshes board
+				// entities from SETASIDE→PLAY between combat rounds).
+				if p.machine.Phase() != PhaseGameOver {
+					p.tryAddMinionFromRegistry(e.EntityID, controllerID)
+				}
 			}
 
 		case "TURN":
@@ -175,6 +221,7 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 			if p.isLocalPlayerEntity(e) {
 				turn, _ := strconv.Atoi(value)
 				if turn > 0 {
+					p.flushPendingStatChanges()
 					p.machine.SetTurn(turn)
 				}
 			}
@@ -279,13 +326,15 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 	}
 
 	if controllerID == p.localPlayerID {
-		p.machine.UpsertMinion(MinionState{
-			EntityID: e.EntityID,
-			CardID:   info.CardID,
-			Name:     info.Name,
-			Attack:   info.Attack,
-			Health:   info.Health,
-		})
+		if p.machine.Phase() != PhaseGameOver {
+			p.machine.UpsertMinion(MinionState{
+				EntityID: e.EntityID,
+				CardID:   info.CardID,
+				Name:     info.Name,
+				Attack:   info.Attack,
+				Health:   info.Health,
+			})
+		}
 	}
 }
 
@@ -331,6 +380,96 @@ func (p *Processor) isLocalHero(e parser.GameEvent, controllerID int) bool {
 	return p.heroEntities[e.EntityID]
 }
 
+// updateMinionStat updates a minion's stat on the board and in the entity
+// registry. During recruit phase, buffers the delta for board-wide detection.
+func (p *Processor) updateMinionStat(e parser.GameEvent, stat, value string) {
+	newVal := parseInt(value)
+	if e.EntityID <= 0 {
+		return
+	}
+
+	// Update entity registry.
+	info := p.entityProps[e.EntityID]
+	if info == nil {
+		info = &entityInfo{}
+		p.entityProps[e.EntityID] = info
+	}
+
+	// Extract name from the event entity name if we don't have one yet
+	// or only have a bare numeric placeholder.
+	if e.EntityName != "" && (info.Name == "" || isBareNumber(info.Name)) {
+		info.Name = cleanEntityName(e.EntityName)
+	}
+
+	var oldVal int
+	switch stat {
+	case "ATK":
+		oldVal = info.Attack
+		info.Attack = newVal
+	case "HEALTH":
+		oldVal = info.Health
+		info.Health = newVal
+	}
+
+	// Skip hero entities — those are handled by UpdatePlayerTag.
+	if p.heroEntities[e.EntityID] {
+		return
+	}
+
+	// Update board minion stats if it's on the board.
+	onBoard := p.machine.UpdateMinionStat(e.EntityID, stat, newVal)
+
+	// Buffer stat changes during recruit phase for board-wide buff detection.
+	// Skip during combat (simulation noise).
+	phase := p.machine.Phase()
+	if oldVal > 0 && newVal != oldVal && (onBoard || info.Zone == "PLAY") && phase != PhaseCombat {
+		delta := newVal - oldVal
+		name := info.Name
+		if name == "" {
+			name = info.CardID
+		}
+		p.pendingStatChanges = append(p.pendingStatChanges, pendingStatChange{
+			entityID: e.EntityID,
+			name:     name,
+			turn:     p.machine.currentTurn(),
+			stat:     stat,
+			delta:    delta,
+		})
+	}
+}
+
+// flushPendingStatChanges groups buffered stat changes and emits only board-wide
+// modifications (2+ minions affected with the same turn/stat/delta).
+func (p *Processor) flushPendingStatChanges() {
+	if len(p.pendingStatChanges) == 0 {
+		return
+	}
+
+	type groupKey struct {
+		turn  int
+		stat  string
+		delta int
+	}
+
+	groups := make(map[groupKey]int)
+	for _, sc := range p.pendingStatChanges {
+		groups[groupKey{sc.turn, sc.stat, sc.delta}]++
+	}
+
+	for key, count := range groups {
+		if count >= 2 {
+			p.machine.AddMod(StatMod{
+				Turn:   key.turn,
+				Target: fmt.Sprintf("Board (%dx)", count),
+				Stat:   key.stat,
+				Delta:  key.delta,
+			})
+		}
+	}
+
+	p.pendingStatChanges = p.pendingStatChanges[:0]
+}
+
 // tryAddMinionFromRegistry adds a minion to the board from the entity registry
 // if it's a local player's minion with valid stats.
 func (p *Processor) tryAddMinionFromRegistry(entityID, controllerID int) {
@@ -344,6 +483,9 @@ func (p *Processor) tryAddMinionFromRegistry(entityID, controllerID int) {
 	if info.CardType != "" && info.CardType != "MINION" {
 		return
 	}
+	if p.machine.Phase() == PhaseGameOver {
+		return
+	}
 	p.machine.UpsertMinion(MinionState{
 		EntityID: entityID,
 		CardID:   info.CardID,
@@ -351,6 +493,24 @@ func (p *Processor) tryAddMinionFromRegistry(entityID, controllerID int) {
 		Attack:   info.Attack,
 		Health:   info.Health,
 	})
+	// During combat, keep the snapshot in sync so GameEnd restores
+	// the combat board with correct buffed stats.
+	if p.machine.Phase() == PhaseCombat {
+		p.machine.UpdateBoardSnapshot()
+	}
+}
+
+// isBareNumber returns true if s consists entirely of digits.
+func isBareNumber(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // cleanEntityName extracts a readable name from bracketed entity notation.
@@ -362,4 +522,20 @@ func cleanEntityName(s string) string {
 		}
 	}
 	return s
+}
+
+// extractCardID extracts the cardId from bracketed entity notation.
+// e.g. "[entityName=Acid Rainfall id=9596 zone=PLAY zonePos=5 cardId=BG34_857_G player=8]"
+func extractCardID(s string) string {
+	const prefix = "cardId="
+	idx := strings.Index(s, prefix)
+	if idx < 0 {
+		return ""
+	}
+	rest := s[idx+len(prefix):]
+	end := strings.IndexAny(rest, " ]")
+	if end < 0 {
+		return rest
+	}
+	return rest[:end]
 }
