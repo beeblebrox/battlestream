@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package battlestream.v1;
+
+import "battlestream/v1/game.proto";
+import "battlestream/v1/stats.proto";
+import "google/api/annotations.proto";
+
+option go_package = "battlestream.fixates.io/internal/api/grpc/gen;bspb";
+
+service BattlestreamService {
+  rpc GetCurrentGame(GetCurrentGameRequest) returns (GameState) {
+    option (google.api.http) = {
+      get: "/v1/game/current"
+    };
+  }
+
+  rpc GetGame(GetGameRequest) returns (GameState) {
+    option (google.api.http) = {
+      get: "/v1/game/{game_id}"
+    };
+  }
+
+  rpc StreamGameEvents(StreamRequest) returns (stream GameEvent) {
+    // WebSocket / SSE handled separately in REST layer
+  }
+
+  rpc GetAggregate(GetAggregateRequest) returns (AggregateStats) {
+    option (google.api.http) = {
+      get: "/v1/stats/aggregate"
+    };
+  }
+
+  rpc ListGames(ListGamesRequest) returns (ListGamesResponse) {
+    option (google.api.http) = {
+      get: "/v1/stats/games"
+    };
+  }
+
+  rpc GetPlayerProfile(GetPlayerRequest) returns (PlayerProfile) {
+    option (google.api.http) = {
+      get: "/v1/player/{name}"
+    };
+  }
+}
+
+message GetCurrentGameRequest {}
+message GetGameRequest { string game_id = 1; }
+message StreamRequest {}
+message GetAggregateRequest {}
+message ListGamesRequest {
+  int32 limit = 1;
+  int32 offset = 2;
+}
+message ListGamesResponse {
+  repeated GameMeta games = 1;
+  int32 total = 2;
+}
+message GetPlayerRequest { string name = 1; }

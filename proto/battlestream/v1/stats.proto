@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package battlestream.v1;
+
+option go_package = "battlestream.fixates.io/internal/api/grpc/gen;bspb";
+
+message AggregateStats {
+  int32 games_played = 1;
+  int32 wins = 2;
+  int32 losses = 3;
+  double avg_placement = 4;
+  int32 best_placement = 5;
+  int32 worst_placement = 6;
+}
+
+message GameMeta {
+  string game_id = 1;
+  int64 start_time_unix = 2;
+  int64 end_time_unix = 3;
+  int32 placement = 4;
+}
+
+message PlayerProfile {
+  string name = 1;
+  int32 games_played = 2;
+  int32 wins = 3;
+  int32 losses = 4;
+  double avg_placement = 5;
+  int32 best_placement = 6;
+  repeated string game_ids = 7;
+}

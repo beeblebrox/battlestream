@@ -1,0 +1,16 @@
+services:
+  battlestream:
+    build: .
+    ports:
+      - "50051:50051"
+      - "8080:8080"
+    volumes:
+      - ${HS_LOG_PATH:-./testdata/logs}:/hs-logs:ro
+      - battlestream-data:/root/.battlestream/data
+      - ./stats:/root/.battlestream/stats
+    environment:
+      - BS_HEARTHSTONE_LOG_PATH=/hs-logs
+    restart: unless-stopped
+
+volumes:
+  battlestream-data:

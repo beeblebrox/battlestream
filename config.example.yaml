@@ -1,0 +1,21 @@
+hearthstone:
+  install_path: ""          # auto-detected if blank
+  log_path: ""              # auto-detected from install_path
+  auto_patch_logconfig: true
+
+storage:
+  db_path: "~/.battlestream/data"
+
+output:
+  enabled: true
+  path: "~/.battlestream/stats"
+  write_interval_ms: 500
+
+api:
+  grpc_addr: "127.0.0.1:50051"
+  rest_addr: "127.0.0.1:8080"
+  api_key: ""               # empty = no auth required
+
+logging:
+  level: "info"             # debug, info, warn, error
+  file: ""                  # empty = stderr only

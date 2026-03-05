@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+package battlestream.v1;
+
+option go_package = "battlestream.fixates.io/internal/api/grpc/gen;bspb";
+
+message PlayerStats {
+  string name = 1;
+  string hero_card_id = 2;
+  int32 health = 3;
+  int32 armor = 4;
+  int32 tavern_tier = 5;
+  int32 spell_power = 6;
+  int32 triple_count = 7;
+  int32 win_streak = 8;
+  int32 placement = 9;
+  int32 loss_streak = 10;
+}
+
+message MinionState {
+  int32 entity_id = 1;
+  string card_id = 2;
+  string name = 3;
+  int32 attack = 4;
+  int32 health = 5;
+  string minion_type = 6;
+  int32 buff_attack = 7;
+  int32 buff_health = 8;
+}
+
+message StatMod {
+  int32 turn = 1;
+  string target = 2;
+  string stat = 3;
+  int32 delta = 4;
+  string source = 5;
+}
+
+message GameState {
+  string game_id = 1;
+  string phase = 2;
+  int32 turn = 3;
+  int32 tavern_tier = 4;
+  PlayerStats player = 5;
+  PlayerStats opponent = 6;
+  repeated MinionState board = 7;
+  repeated MinionState opponent_board = 8;
+  repeated StatMod modifications = 9;
+  int64 start_time_unix = 10;
+  int64 end_time_unix = 11;
+  int32 placement = 12;
+}
+
+message GameEvent {
+  string type = 1;
+  int64 timestamp_unix = 2;
+  int32 entity_id = 3;
+  map<string, string> tags = 4;
+  string entity_name = 5;
+  string card_id = 6;
+}

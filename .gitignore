@@ -1,0 +1,48 @@
+# Binaries
+/battlestream
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Go workspace file
+go.work
+go.work.sum
+
+# Dependency directories
+vendor/
+
+# Build artifacts
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Battlestream data
+.battlestream/
+stats/
+
+# Config with secrets
+config.yaml
+
+# Generated protobuf files
+internal/api/grpc/gen/
+
+# Air live reload
+tmp/
