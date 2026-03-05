@@ -256,7 +256,11 @@ func cmdDiscover() *cobra.Command {
 			info, err := discovery.Discover()
 			if err != nil {
 				fmt.Printf("Auto-discovery failed: %v\n\n", err)
-				fmt.Print("Enter the path to your Hearthstone install or logs directory: ")
+				fmt.Println("Enter one of:")
+				fmt.Println("  • Hearthstone install dir  (contains Hearthstone.exe / Hearthstone.app)")
+				fmt.Println("  • Logs directory           (contains Power.log)")
+				fmt.Println("  • Wine/Proton prefix root  (contains drive_c/)  e.g. /chungus/battlenet")
+				fmt.Print("\nPath: ")
 
 				scanner := bufio.NewScanner(os.Stdin)
 				if !scanner.Scan() {

@@ -6,6 +6,23 @@ import (
 	"testing"
 )
 
+// makeWinePrefix builds a fake Wine prefix rooted at dir/prefix containing
+// a Hearthstone install and the expected users directory structure.
+func makeWinePrefix(t *testing.T, prefixRoot string) string {
+	t.Helper()
+	installDir := filepath.Join(prefixRoot, "drive_c", "Program Files (x86)", "Hearthstone")
+	if err := os.MkdirAll(installDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(installDir, "Hearthstone.exe"), nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(installDir, "Logs"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	return installDir
+}
+
 // makeInstallDir creates a temp directory that looks like a HS install root
 // (contains Hearthstone.exe and a Logs/ subdirectory).
 func makeInstallDir(t *testing.T) string {
@@ -122,6 +139,118 @@ func TestDiscoverFromRootFails(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for non-install directory")
 	}
+}
+
+// TestDiscoverFromRootWinePrefix verifies that providing a Wine/Proton prefix
+// root (a directory that has drive_c/ inside it) finds the install within it.
+func TestDiscoverFromRootWinePrefix(t *testing.T) {
+	prefix := t.TempDir()
+	installDir := makeWinePrefix(t, prefix)
+
+	info, err := DiscoverFromRoot(prefix)
+	if err != nil {
+		t.Fatalf("DiscoverFromRoot(winePrefix): %v", err)
+	}
+	if info.InstallRoot != installDir {
+		t.Errorf("InstallRoot: expected %q, got %q", installDir, info.InstallRoot)
+	}
+	if info.LogPath != filepath.Join(installDir, "Logs") {
+		t.Errorf("LogPath: expected %q, got %q", filepath.Join(installDir, "Logs"), info.LogPath)
+	}
+	// LogConfig should be inside the prefix, not in ~/.wine.
+	if !filepath.IsAbs(info.LogConfig) {
+		t.Errorf("LogConfig is not absolute: %q", info.LogConfig)
+	}
+	// Must contain the prefix root path.
+	if !isSubpath(info.LogConfig, prefix) {
+		t.Errorf("LogConfig %q is not under prefix %q", info.LogConfig, prefix)
+	}
+}
+
+// TestExtractWinePrefix covers the path-parsing helper directly.
+func TestExtractWinePrefix(t *testing.T) {
+	cases := []struct {
+		input  string
+		prefix string
+		ok     bool
+	}{
+		{"/chungus/battlenet/drive_c/Program Files/Hearthstone", "/chungus/battlenet", true},
+		{"/home/user/.wine/drive_c/Program Files (x86)/Hearthstone", "/home/user/.wine", true},
+		{"/pfx/drive_c/users/steamuser/AppData/Local", "/pfx", true},
+		{"/just/a/plain/path/Hearthstone", "", false},
+		{"/no/drive_c_here/Hearthstone", "", false},
+	}
+	for _, tc := range cases {
+		got, ok := extractWinePrefix(tc.input)
+		if ok != tc.ok {
+			t.Errorf("extractWinePrefix(%q): ok=%v, want %v", tc.input, ok, tc.ok)
+			continue
+		}
+		if ok && got != tc.prefix {
+			t.Errorf("extractWinePrefix(%q): prefix=%q, want %q", tc.input, got, tc.prefix)
+		}
+	}
+}
+
+// TestLogConfigInPrefixPrefersExistingUser verifies that logConfigInPrefix
+// returns a path under the first user directory that actually exists.
+func TestLogConfigInPrefixPrefersExistingUser(t *testing.T) {
+	prefix := t.TempDir()
+	home := t.TempDir() // fake home; base = last segment
+	username := filepath.Base(home)
+
+	// Create the steamuser directory but NOT the host-username directory.
+	steamUserDir := filepath.Join(prefix, "drive_c", "users", "steamuser")
+	if err := os.MkdirAll(steamUserDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	path := logConfigInPrefix(prefix, home)
+	if filepath.Base(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(path)))))) != "steamuser" {
+		// Check that "steamuser" appears in the path since that dir exists.
+		if !containsSegment(path, "steamuser") {
+			t.Errorf("expected steamuser in path %q (host user %q dir absent)", path, username)
+		}
+	}
+}
+
+// TestLogConfigInPrefixFallsBackToUsername verifies fallback when no user dir exists.
+func TestLogConfigInPrefixFallsBackToUsername(t *testing.T) {
+	prefix := t.TempDir()
+	home := t.TempDir()
+	username := filepath.Base(home)
+
+	path := logConfigInPrefix(prefix, home)
+	if !containsSegment(path, username) {
+		t.Errorf("expected username %q in fallback path %q", username, path)
+	}
+}
+
+// isSubpath reports whether child is lexically under parent.
+func isSubpath(child, parent string) bool {
+	rel, err := filepath.Rel(parent, child)
+	return err == nil && !filepath.IsAbs(rel) && rel != ".."
+}
+
+// containsSegment reports whether any path segment of p equals seg.
+func containsSegment(p, seg string) bool {
+	for _, part := range filepath.SplitList(p) {
+		_ = part
+	}
+	// Walk each component.
+	cur := p
+	for {
+		base := filepath.Base(cur)
+		if base == seg {
+			return true
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			break
+		}
+		cur = parent
+	}
+	return false
 }
 
 func TestWalkForInstall(t *testing.T) {
