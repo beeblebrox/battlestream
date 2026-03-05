@@ -197,6 +197,101 @@ func TestEnsureVerboseLogging(t *testing.T) {
 	}
 }
 
+func TestIsCompleteWhenCorrect(t *testing.T) {
+	cfg := &Config{}
+	cfg.Merge()
+	if !cfg.IsComplete() {
+		t.Error("expected IsComplete=true after Merge on empty config")
+	}
+}
+
+func TestIsCompleteWhenMissingSections(t *testing.T) {
+	cfg := &Config{}
+	if cfg.IsComplete() {
+		t.Error("expected IsComplete=false for empty config")
+	}
+}
+
+func TestIsCompleteWhenWrongValue(t *testing.T) {
+	content := `[Power]
+LogLevel=0
+FilePrinting=false
+ConsolePrinting=false
+ScreenPrinting=false
+
+[Zone]
+LogLevel=1
+FilePrinting=true
+ConsolePrinting=false
+ScreenPrinting=false
+
+[Decks]
+LogLevel=1
+FilePrinting=true
+ConsolePrinting=false
+ScreenPrinting=false
+
+[LoadingScreen]
+LogLevel=1
+FilePrinting=true
+ConsolePrinting=false
+ScreenPrinting=false
+`
+	cfg, err := Parse(writeTmp(t, content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.IsComplete() {
+		t.Error("expected IsComplete=false when Power.LogLevel=0")
+	}
+}
+
+func TestIsCompletePartialSections(t *testing.T) {
+	content := `[Power]
+LogLevel=1
+FilePrinting=true
+ConsolePrinting=false
+ScreenPrinting=false
+`
+	cfg, err := Parse(writeTmp(t, content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.IsComplete() {
+		t.Error("expected IsComplete=false with only Power section")
+	}
+}
+
+func TestEnsureVerboseLoggingSkipsWriteIfComplete(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "log.config")
+
+	// Write a complete config first.
+	cfg := &Config{}
+	cfg.Merge()
+	if err := cfg.Write(path); err != nil {
+		t.Fatal(err)
+	}
+
+	stat1, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// EnsureVerboseLogging on an already-complete file should not rewrite it.
+	if err := EnsureVerboseLogging(path); err != nil {
+		t.Fatal(err)
+	}
+
+	stat2, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stat2.ModTime() != stat1.ModTime() {
+		t.Error("EnsureVerboseLogging rewrote an already-complete config (mod time changed)")
+	}
+}
+
 // writeTmp writes content to a temp file and returns its path.
 func writeTmp(t *testing.T, content string) string {
 	t.Helper()

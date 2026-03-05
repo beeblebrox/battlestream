@@ -162,11 +162,32 @@ func (c *Config) Write(path string) error {
 	return os.Rename(tmp, path)
 }
 
+// IsComplete reports whether the config already contains all required sections
+// with the correct field values. If true, EnsureVerboseLogging skips the write.
+func (c *Config) IsComplete() bool {
+	for _, req := range requiredSections {
+		s := c.findSection(req.Name)
+		if s == nil {
+			return false
+		}
+		for k, v := range req.Fields {
+			if s.Fields[k] != v {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // EnsureVerboseLogging parses, merges required sections, and writes back.
+// If the config is already complete the write is skipped.
 func EnsureVerboseLogging(path string) error {
 	cfg, err := Parse(path)
 	if err != nil {
 		return err
+	}
+	if cfg.IsComplete() {
+		return nil
 	}
 	cfg.Merge()
 	return cfg.Write(path)
