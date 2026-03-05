@@ -10,15 +10,6 @@ import (
 // Parser parses raw Power.log lines into GameEvents.
 type Parser struct {
 	out chan<- GameEvent
-
-	// state for block parsing
-	inBlock    bool
-	blockType  EventType
-	entityID   int
-	entityName string
-	cardID     string
-	blockTags  map[string]string
-	blockTime  time.Time
 }
 
 // New creates a Parser that sends events to out.
@@ -40,8 +31,6 @@ var (
 	reEntityID = regexp.MustCompile(`\bid=(\d+)\b`)
 	// TAG_CHANGE Entity=... tag=... value=...
 	reTagChange = regexp.MustCompile(`TAG_CHANGE\s+Entity=(.+?)\s+tag=(\S+)\s+value=(\S+)`)
-	// tag=X value=Y within a block
-	reBlockTag = regexp.MustCompile(`\s+tag=(\S+)\s+value=(\S+)`)
 	// Timestamp prefix like "D 21:11:50.1234567 " or "W " etc.
 	reTimestamp = regexp.MustCompile(`^[DWIE]\s+(\d{2}:\d{2}:\d{2}\.\d+)\s+`)
 )

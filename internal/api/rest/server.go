@@ -47,7 +47,7 @@ func (s *Server) Serve(ctx context.Context, addr string) error {
 	mux.HandleFunc("GET /v1/stats/games", s.withAuth(s.handleListGames))
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`))
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 
 	// WebSocket hub
@@ -90,7 +90,9 @@ func (s *Server) Serve(ctx context.Context, addr string) error {
 		<-ctx.Done()
 		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		srv.Shutdown(shutCtx)
+		if err := srv.Shutdown(shutCtx); err != nil {
+			slog.Error("REST server shutdown", "err", err)
+		}
 	}()
 
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
