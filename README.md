@@ -44,7 +44,7 @@ curl http://localhost:8080/v1/stats/aggregate
 ### Build from source
 
 ```sh
-git clone https://github.com/fixates/battlestream
+git clone https://github.com/beeblebrox/battlestream
 cd battlestream
 go build -o battlestream ./cmd/battlestream
 ```

@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"time"
 
 	badger "github.com/dgraph-io/badger/v4"
 	"battlestream.fixates.io/internal/gamestate"
+	"battlestream.fixates.io/internal/stats"
 )
 
 const (
@@ -30,15 +32,6 @@ type GameMeta struct {
 	StartTime int64  `json:"start_time_unix"`
 	EndTime   int64  `json:"end_time_unix,omitempty"`
 	Placement int    `json:"placement"`
-}
-
-// AggregateStats holds persisted aggregate data.
-type AggregateStats struct {
-	Wins           int       `json:"wins"`
-	Losses         int       `json:"losses"`
-	Placements     []int     `json:"placements"`
-	GamesPlayed    int       `json:"games_played"`
-	AvgPlacement   float64   `json:"avg_placement"`
 }
 
 // Open opens (or creates) the BadgerDB at the given path.
@@ -91,59 +84,24 @@ func (s *Store) SaveGame(meta GameMeta, placement int) error {
 	})
 }
 
-// GetAggregate loads and computes aggregate stats from stored data.
-func (s *Store) GetAggregate() (AggregateStats, error) {
-	var agg AggregateStats
-	err := s.db.View(func(txn *badger.Txn) error {
-		// Get game list
-		item, err := txn.Get([]byte(prefixGameList))
-		if err == badger.ErrKeyNotFound {
-			return nil
+// GetAggregate loads all game metadata and delegates computation to the stats package.
+func (s *Store) GetAggregate() (stats.AggregateStats, error) {
+	metas, err := s.loadAllMetas()
+	if err != nil {
+		return stats.AggregateStats{}, err
+	}
+	results := make([]stats.GameResult, len(metas))
+	for i, m := range metas {
+		results[i] = stats.GameResult{
+			Placement: m.Placement,
+			EndTime:   time.Unix(m.EndTime, 0),
 		}
-		if err != nil {
-			return err
-		}
-
-		var ids []string
-		if err := item.Value(func(val []byte) error {
-			return json.Unmarshal(val, &ids)
-		}); err != nil {
-			return err
-		}
-
-		agg.GamesPlayed = len(ids)
-		var totalPlacement int
-
-		for _, id := range ids {
-			metaItem, err := txn.Get([]byte(prefixGameMeta + id))
-			if err != nil {
-				continue
-			}
-			var meta GameMeta
-			if err := metaItem.Value(func(val []byte) error {
-				return json.Unmarshal(val, &meta)
-			}); err != nil {
-				continue
-			}
-			agg.Placements = append(agg.Placements, meta.Placement)
-			totalPlacement += meta.Placement
-			if meta.Placement <= 4 {
-				agg.Wins++
-			} else {
-				agg.Losses++
-			}
-		}
-
-		if agg.GamesPlayed > 0 {
-			agg.AvgPlacement = float64(totalPlacement) / float64(agg.GamesPlayed)
-		}
-		return nil
-	})
-	return agg, err
+	}
+	return stats.Compute(results), nil
 }
 
-// ListGames returns game metadata with pagination.
-func (s *Store) ListGames(limit, offset int) ([]GameMeta, error) {
+// loadAllMetas returns all stored GameMeta records in insertion order.
+func (s *Store) loadAllMetas() ([]GameMeta, error) {
 	var metas []GameMeta
 	err := s.db.View(func(txn *badger.Txn) error {
 		item, err := txn.Get([]byte(prefixGameList))
@@ -153,27 +111,12 @@ func (s *Store) ListGames(limit, offset int) ([]GameMeta, error) {
 		if err != nil {
 			return err
 		}
-
 		var ids []string
 		if err := item.Value(func(val []byte) error {
 			return json.Unmarshal(val, &ids)
 		}); err != nil {
 			return err
 		}
-
-		// Reverse: newest first
-		for i, j := 0, len(ids)-1; i < j; i, j = i+1, j-1 {
-			ids[i], ids[j] = ids[j], ids[i]
-		}
-
-		if offset >= len(ids) {
-			return nil
-		}
-		ids = ids[offset:]
-		if limit > 0 && limit < len(ids) {
-			ids = ids[:limit]
-		}
-
 		for _, id := range ids {
 			metaItem, err := txn.Get([]byte(prefixGameMeta + id))
 			if err != nil {
@@ -190,6 +133,27 @@ func (s *Store) ListGames(limit, offset int) ([]GameMeta, error) {
 		return nil
 	})
 	return metas, err
+}
+
+// ListGames returns game metadata newest-first with optional pagination.
+// limit=0 returns all records.
+func (s *Store) ListGames(limit, offset int) ([]GameMeta, error) {
+	all, err := s.loadAllMetas()
+	if err != nil {
+		return nil, err
+	}
+	// Reverse: newest first.
+	for i, j := 0, len(all)-1; i < j; i, j = i+1, j-1 {
+		all[i], all[j] = all[j], all[i]
+	}
+	if offset >= len(all) {
+		return nil, nil
+	}
+	all = all[offset:]
+	if limit > 0 && limit < len(all) {
+		all = all[:limit]
+	}
+	return all, nil
 }
 
 // SaveFullGame persists the complete game state snapshot.

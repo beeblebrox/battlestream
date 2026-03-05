@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"battlestream.fixates.io/internal/gamestate"
-	"battlestream.fixates.io/internal/store"
+	"battlestream.fixates.io/internal/stats"
 )
 
 // Writer writes JSON stat files atomically.
@@ -116,7 +116,7 @@ func (w *Writer) WriteCurrentState(s gamestate.BGGameState) error {
 }
 
 // WriteAggregate writes the aggregate/summary.json file.
-func (w *Writer) WriteAggregate(agg store.AggregateStats) error {
+func (w *Writer) WriteAggregate(agg stats.AggregateStats) error {
 	return w.writeJSON(filepath.Join("aggregate", "summary.json"), SummaryFile{
 		GamesPlayed:  agg.GamesPlayed,
 		Wins:         agg.Wins,

@@ -114,28 +114,13 @@ func (s *Server) GetAggregate(_ context.Context, _ *bspb.GetAggregateRequest) (*
 		return nil, status.Errorf(codes.Internal, "getting aggregate: %v", err)
 	}
 
-	best := int32(8)
-	worst := int32(1)
-	for _, p := range agg.Placements {
-		if int32(p) < best {
-			best = int32(p)
-		}
-		if int32(p) > worst {
-			worst = int32(p)
-		}
-	}
-	if agg.GamesPlayed == 0 {
-		best = 0
-		worst = 0
-	}
-
 	return &bspb.AggregateStats{
 		GamesPlayed:    int32(agg.GamesPlayed),
 		Wins:           int32(agg.Wins),
 		Losses:         int32(agg.Losses),
 		AvgPlacement:   agg.AvgPlacement,
-		BestPlacement:  best,
-		WorstPlacement: worst,
+		BestPlacement:  int32(agg.BestPlacement),
+		WorstPlacement: int32(agg.WorstPlacement),
 	}, nil
 }
 

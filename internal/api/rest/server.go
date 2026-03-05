@@ -43,8 +43,11 @@ func (s *Server) Serve(ctx context.Context, addr string) error {
 
 	// REST endpoints
 	mux.HandleFunc("GET /v1/game/current", s.withAuth(s.handleGetCurrentGame))
+	mux.HandleFunc("GET /v1/game/{game_id}", s.withAuth(s.handleGetGame))
 	mux.HandleFunc("GET /v1/stats/aggregate", s.withAuth(s.handleGetAggregate))
 	mux.HandleFunc("GET /v1/stats/games", s.withAuth(s.handleListGames))
+	mux.HandleFunc("GET /v1/stats/games/{game_id}/modifications", s.withAuth(s.handleGetModifications))
+	mux.HandleFunc("GET /v1/player/{name}", s.withAuth(s.handleGetPlayer))
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
@@ -124,6 +127,85 @@ func (s *Server) handleListGames(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.writeJSON(w, games)
+}
+
+func (s *Server) handleGetGame(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("game_id")
+	if id == "" {
+		http.Error(w, "game_id required", http.StatusBadRequest)
+		return
+	}
+	gs, err := s.grpc.GetStore().GetGame(id)
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	s.writeJSON(w, gameStateToJSON(*gs))
+}
+
+func (s *Server) handleGetModifications(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("game_id")
+	if id == "" {
+		http.Error(w, "game_id required", http.StatusBadRequest)
+		return
+	}
+	gs, err := s.grpc.GetStore().GetGame(id)
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	type modsResponse struct {
+		GameID        string               `json:"game_id"`
+		Modifications []gamestate.StatMod  `json:"modifications"`
+	}
+	mods := gs.Modifications
+	if mods == nil {
+		mods = []gamestate.StatMod{}
+	}
+	s.writeJSON(w, modsResponse{GameID: id, Modifications: mods})
+}
+
+func (s *Server) handleGetPlayer(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		http.Error(w, "name required", http.StatusBadRequest)
+		return
+	}
+	metas, err := s.grpc.GetStore().ListGames(0, 0)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	type playerProfile struct {
+		Name          string   `json:"name"`
+		GamesPlayed   int      `json:"games_played"`
+		Wins          int      `json:"wins"`
+		Losses        int      `json:"losses"`
+		AvgPlacement  float64  `json:"avg_placement"`
+		BestPlacement int      `json:"best_placement,omitempty"`
+		GameIDs       []string `json:"game_ids"`
+	}
+	p := playerProfile{Name: name, BestPlacement: 8}
+	var total int
+	for _, m := range metas {
+		p.GamesPlayed++
+		p.GameIDs = append(p.GameIDs, m.GameID)
+		total += m.Placement
+		if m.Placement <= 4 {
+			p.Wins++
+		} else {
+			p.Losses++
+		}
+		if m.Placement < p.BestPlacement {
+			p.BestPlacement = m.Placement
+		}
+	}
+	if p.GamesPlayed > 0 {
+		p.AvgPlacement = float64(total) / float64(p.GamesPlayed)
+	} else {
+		p.BestPlacement = 0
+	}
+	s.writeJSON(w, p)
 }
 
 // --- WebSocket handler ---

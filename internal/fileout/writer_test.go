@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"battlestream.fixates.io/internal/gamestate"
-	"battlestream.fixates.io/internal/store"
+	"battlestream.fixates.io/internal/stats"
 )
 
 func newWriter(t *testing.T) *Writer {
@@ -108,7 +108,7 @@ func TestWriteCurrentState(t *testing.T) {
 func TestWriteAggregate(t *testing.T) {
 	w := newWriter(t)
 
-	agg := store.AggregateStats{
+	agg := stats.AggregateStats{
 		GamesPlayed:  10,
 		Wins:         7,
 		Losses:       3,
