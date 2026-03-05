@@ -75,3 +75,4 @@ Or as a user service (`~/.config/systemd/user/battlestream.service`):
 
 ```sh
 systemctl --user enable --now battlestream
+```

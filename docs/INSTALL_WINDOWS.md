@@ -11,7 +11,7 @@
 ### 1. Build or download battlestream
 
 ```powershell
-git clone https://github.com/fixates/battlestream
+git clone https://github.com/beeblebrox/battlestream
 cd battlestream
 go build -o battlestream.exe ./cmd/battlestream
 ```

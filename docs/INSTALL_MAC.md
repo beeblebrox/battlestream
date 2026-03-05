@@ -11,7 +11,7 @@
 ### 1. Build battlestream
 
 ```sh
-git clone https://github.com/fixates/battlestream
+git clone https://github.com/beeblebrox/battlestream
 cd battlestream
 go build -o battlestream ./cmd/battlestream
 sudo mv battlestream /usr/local/bin/

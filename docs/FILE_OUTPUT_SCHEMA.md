@@ -58,12 +58,11 @@ Updated every `output.write_interval_ms` milliseconds.
   "spell_power": 0,
   "triple_count": 2,
   "win_streak": 1,
-  "placement": 0,
   "updated_at": "2026-03-04T20:00:00Z"
 }
 ```
 
-`placement` is `0` during an active game, and `1–8` when the game ends.
+`placement` is omitted during an active game. When the game ends it is written as `1–8`.
 
 ---
 

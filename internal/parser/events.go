@@ -18,11 +18,10 @@ const (
 
 // GameEvent is a single parsed event from the Power.log stream.
 type GameEvent struct {
-	Type      EventType
-	Timestamp time.Time
-	EntityID  int
-	Tags      map[string]string // TAG -> VALUE
-	// Convenience fields populated by parser
-	EntityName string
-	CardID     string
+	Type       EventType         `json:"type"`
+	Timestamp  time.Time         `json:"timestamp"`
+	EntityID   int               `json:"entity_id,omitempty"`
+	Tags       map[string]string `json:"tags,omitempty"` // TAG -> VALUE
+	EntityName string            `json:"entity_name,omitempty"`
+	CardID     string            `json:"card_id,omitempty"`
 }
