@@ -284,28 +284,34 @@ func (s *Server) writeJSON(w http.ResponseWriter, v interface{}) {
 // --- JSON DTOs ---
 
 type gameStateJSON struct {
-	GameID        string                   `json:"game_id"`
-	Phase         string                   `json:"phase"`
-	Turn          int                      `json:"turn"`
-	TavernTier    int                      `json:"tavern_tier"`
-	Player        gamestate.PlayerState    `json:"player"`
-	Board         []gamestate.MinionState  `json:"board"`
-	Modifications []gamestate.StatMod      `json:"modifications"`
-	StartTimeUnix int64                    `json:"start_time_unix"`
-	Placement     int                      `json:"placement"`
+	GameID          string                       `json:"game_id"`
+	Phase           string                       `json:"phase"`
+	Turn            int                          `json:"turn"`
+	TavernTier      int                          `json:"tavern_tier"`
+	Player          gamestate.PlayerState        `json:"player"`
+	Board           []gamestate.MinionState      `json:"board"`
+	Modifications   []gamestate.StatMod          `json:"modifications"`
+	BuffSources     []gamestate.BuffSource       `json:"buff_sources,omitempty"`
+	AbilityCounters []gamestate.AbilityCounter   `json:"ability_counters,omitempty"`
+	Enchantments    []gamestate.Enchantment      `json:"enchantments,omitempty"`
+	StartTimeUnix   int64                        `json:"start_time_unix"`
+	Placement       int                          `json:"placement"`
 }
 
 func gameStateToJSON(s gamestate.BGGameState) gameStateJSON {
 	return gameStateJSON{
-		GameID:        s.GameID,
-		Phase:         string(s.Phase),
-		Turn:          s.Turn,
-		TavernTier:    s.TavernTier,
-		Player:        s.Player,
-		Board:         s.Board,
-		Modifications: s.Modifications,
-		StartTimeUnix: s.StartTime.Unix(),
-		Placement:     s.Placement,
+		GameID:          s.GameID,
+		Phase:           string(s.Phase),
+		Turn:            s.Turn,
+		TavernTier:      s.TavernTier,
+		Player:          s.Player,
+		Board:           s.Board,
+		Modifications:   s.Modifications,
+		BuffSources:     s.BuffSources,
+		AbilityCounters: s.AbilityCounters,
+		Enchantments:    s.Enchantments,
+		StartTimeUnix:   s.StartTime.Unix(),
+		Placement:       s.Placement,
 	}
 }
 

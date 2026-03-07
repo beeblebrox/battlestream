@@ -61,6 +61,12 @@ type ModificationsFile struct {
 	UpdatedAt     string              `json:"updated_at"`
 }
 
+// BuffSourcesFile is the JSON schema for current/buff_sources.json.
+type BuffSourcesFile struct {
+	BuffSources []gamestate.BuffSource `json:"buff_sources"`
+	UpdatedAt   string                 `json:"updated_at"`
+}
+
 // SummaryFile is the JSON schema for aggregate/summary.json.
 type SummaryFile struct {
 	GamesPlayed    int     `json:"games_played"`
@@ -108,6 +114,13 @@ func (w *Writer) WriteCurrentState(s gamestate.BGGameState) error {
 	if err := w.writeJSON(filepath.Join("current", "modifications.json"), ModificationsFile{
 		Modifications: s.Modifications,
 		UpdatedAt:     now,
+	}); err != nil {
+		return err
+	}
+
+	if err := w.writeJSON(filepath.Join("current", "buff_sources.json"), BuffSourcesFile{
+		BuffSources: s.BuffSources,
+		UpdatedAt:   now,
 	}); err != nil {
 		return err
 	}

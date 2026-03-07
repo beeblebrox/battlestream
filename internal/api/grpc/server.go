@@ -285,6 +285,15 @@ func gameStateToProto(s gamestate.BGGameState) *bspb.GameState {
 	for _, mod := range s.Modifications {
 		gs.Modifications = append(gs.Modifications, statModToProto(mod))
 	}
+	for _, bs := range s.BuffSources {
+		gs.BuffSources = append(gs.BuffSources, buffSourceToProto(bs))
+	}
+	for _, e := range s.Enchantments {
+		gs.Enchantments = append(gs.Enchantments, enchantmentToProto(e))
+	}
+	for _, ac := range s.AbilityCounters {
+		gs.AbilityCounters = append(gs.AbilityCounters, abilityCounterToProto(ac))
+	}
 	return gs
 }
 
@@ -301,7 +310,7 @@ func playerStateToProto(p gamestate.PlayerState) *bspb.PlayerStats {
 }
 
 func minionToProto(m gamestate.MinionState) *bspb.MinionState {
-	return &bspb.MinionState{
+	pb := &bspb.MinionState{
 		EntityId:   int32(m.EntityID),
 		CardId:     m.CardID,
 		Name:       m.Name,
@@ -311,15 +320,50 @@ func minionToProto(m gamestate.MinionState) *bspb.MinionState {
 		BuffAttack: int32(m.BuffAttack),
 		BuffHealth: int32(m.BuffHealth),
 	}
+	for _, e := range m.Enchantments {
+		pb.Enchantments = append(pb.Enchantments, enchantmentToProto(e))
+	}
+	return pb
 }
 
 func statModToProto(mod gamestate.StatMod) *bspb.StatMod {
 	return &bspb.StatMod{
-		Turn:   int32(mod.Turn),
-		Target: mod.Target,
-		Stat:   mod.Stat,
-		Delta:  int32(mod.Delta),
-		Source: mod.Source,
+		Turn:     int32(mod.Turn),
+		Target:   mod.Target,
+		Stat:     mod.Stat,
+		Delta:    int32(mod.Delta),
+		Source:   mod.Source,
+		Category: mod.Category,
+		CardId:   mod.CardID,
+	}
+}
+
+func buffSourceToProto(bs gamestate.BuffSource) *bspb.BuffSource {
+	return &bspb.BuffSource{
+		Category: bs.Category,
+		Attack:   int32(bs.Attack),
+		Health:   int32(bs.Health),
+	}
+}
+
+func enchantmentToProto(e gamestate.Enchantment) *bspb.Enchantment {
+	return &bspb.Enchantment{
+		EntityId:     int32(e.EntityID),
+		CardId:       e.CardID,
+		SourceCardId: e.SourceCardID,
+		SourceName:   e.SourceName,
+		TargetId:     int32(e.TargetID),
+		AttackBuff:   int32(e.AttackBuff),
+		HealthBuff:   int32(e.HealthBuff),
+		Category:     e.Category,
+	}
+}
+
+func abilityCounterToProto(ac gamestate.AbilityCounter) *bspb.AbilityCounter {
+	return &bspb.AbilityCounter{
+		Category: ac.Category,
+		Value:    int32(ac.Value),
+		Display:  ac.Display,
 	}
 }
 

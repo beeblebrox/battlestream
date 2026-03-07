@@ -26,6 +26,31 @@ message MinionState {
   string minion_type = 6;
   int32 buff_attack = 7;
   int32 buff_health = 8;
+  repeated Enchantment enchantments = 9;
+}
+
+message Enchantment {
+  int32 entity_id = 1;
+  string card_id = 2;
+  string source_card_id = 3;
+  string source_name = 4;
+  int32 target_id = 5;
+  int32 attack_buff = 6;
+  int32 health_buff = 7;
+  string category = 8;
+  reserved 9;
+}
+
+message AbilityCounter {
+  string category = 1;
+  int32 value = 2;
+  string display = 3;
+}
+
+message BuffSource {
+  string category = 1;
+  int32 attack = 2;
+  int32 health = 3;
 }
 
 message StatMod {
@@ -34,6 +59,8 @@ message StatMod {
   string stat = 3;
   int32 delta = 4;
   string source = 5;
+  string category = 6;
+  string card_id = 7;
 }
 
 message GameState {
@@ -49,6 +76,9 @@ message GameState {
   int64 start_time_unix = 10;
   int64 end_time_unix = 11;
   int32 placement = 12;
+  repeated BuffSource buff_sources = 13;
+  repeated Enchantment enchantments = 14;
+  repeated AbilityCounter ability_counters = 15;
 }
 
 message GameEvent {

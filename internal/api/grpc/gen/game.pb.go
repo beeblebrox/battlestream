@@ -255,6 +255,7 @@ type Enchantment struct {
 	AttackBuff    int32                  `protobuf:"varint,6,opt,name=attack_buff,json=attackBuff,proto3" json:"attack_buff,omitempty"`
 	HealthBuff    int32                  `protobuf:"varint,7,opt,name=health_buff,json=healthBuff,proto3" json:"health_buff,omitempty"`
 	Category      string                 `protobuf:"bytes,8,opt,name=category,proto3" json:"category,omitempty"`
+	IsPlayerLevel bool                   `protobuf:"varint,9,opt,name=is_player_level,json=isPlayerLevel,proto3" json:"is_player_level,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -343,6 +344,13 @@ func (x *Enchantment) GetCategory() string {
 		return x.Category
 	}
 	return ""
+}
+
+func (x *Enchantment) GetIsPlayerLevel() bool {
+	if x != nil {
+		return x.IsPlayerLevel
+	}
+	return false
 }
 
 type AbilityCounter struct {
@@ -831,7 +839,7 @@ const file_battlestream_v1_game_proto_rawDesc = "" +
 	"buffAttack\x12\x1f\n" +
 	"\vbuff_health\x18\b \x01(\x05R\n" +
 	"buffHealth\x12@\n" +
-	"\fenchantments\x18\t \x03(\v2\x1c.battlestream.v1.EnchantmentR\fenchantments\"\x8b\x02\n" +
+	"\fenchantments\x18\t \x03(\v2\x1c.battlestream.v1.EnchantmentR\fenchantments\"\xad\x02\n" +
 	"\vEnchantment\x12\x1b\n" +
 	"\tentity_id\x18\x01 \x01(\x05R\bentityId\x12\x17\n" +
 	"\acard_id\x18\x02 \x01(\tR\x06cardId\x12$\n" +
@@ -843,8 +851,8 @@ const file_battlestream_v1_game_proto_rawDesc = "" +
 	"attackBuff\x12\x1f\n" +
 	"\vhealth_buff\x18\a \x01(\x05R\n" +
 	"healthBuff\x12\x1a\n" +
-	"\bcategory\x18\b \x01(\tR\bcategoryJ\x04\b\t\x10\n" +
-	"\"\\\n" +
+	"\bcategory\x18\b \x01(\tR\bcategory\x12&\n" +
+	"\x0fis_player_level\x18\t \x01(\bR\risPlayerLevel\"\\\n" +
 	"\x0eAbilityCounter\x12\x1a\n" +
 	"\bcategory\x18\x01 \x01(\tR\bcategory\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\x05R\x05value\x12\x18\n" +
