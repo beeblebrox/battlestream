@@ -17,6 +17,7 @@ import (
 	grpcserver "battlestream.fixates.io/internal/api/grpc"
 	"battlestream.fixates.io/internal/api/rest"
 	"battlestream.fixates.io/internal/config"
+	"battlestream.fixates.io/internal/debugtui"
 	"battlestream.fixates.io/internal/discovery"
 	"battlestream.fixates.io/internal/fileout"
 	"battlestream.fixates.io/internal/gamestate"
@@ -48,6 +49,7 @@ persists aggregate stats, and exposes them via gRPC, REST, WebSocket, and file o
 	root.AddCommand(
 		cmdDaemon(),
 		cmdTUI(),
+		cmdDebug(),
 		cmdDiscover(),
 		cmdConfig(),
 		cmdReparse(),
@@ -269,6 +271,69 @@ func cmdTUI() *cobra.Command {
 	cmd.Flags().BoolVar(&dumpFlag, "dump", false, "dump rendered TUI to stdout (no TTY needed)")
 	cmd.Flags().IntVar(&widthFlag, "width", 120, "terminal width for --dump rendering")
 	return cmd
+}
+
+// --- debug ---
+
+func cmdDebug() *cobra.Command {
+	return &cobra.Command{
+		Use:   "debug [power.log...]",
+		Short: "Step through Power.log files interactively",
+		Long: `Opens a debug TUI to step through Power.log events one by one.
+
+If no file arguments are given, discovers log files from config (same locations
+as 'battlestream reparse'). All games found are listed for selection.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var logFiles []string
+
+			if len(args) > 0 {
+				logFiles = args
+			} else {
+				// Discover log files from config, same as reparse.
+				cfg, err := config.Load(cfgFile)
+				if err != nil {
+					return fmt.Errorf("loading config: %w", err)
+				}
+				profile, err := cfg.GetProfile(profileFlag)
+				if err != nil {
+					return err
+				}
+				logPath := profile.Hearthstone.LogPath
+				if logPath == "" {
+					info, dErr := discovery.Discover()
+					if dErr != nil {
+						return fmt.Errorf("auto-discovery failed: %w\nSpecify log files as arguments or run 'battlestream discover'", dErr)
+					}
+					logPath = info.LogPath
+				}
+				logFiles = findPowerLogs(logPath)
+				if len(logFiles) == 0 {
+					return fmt.Errorf("no Power.log files found in %s", logPath)
+				}
+			}
+
+			return debugtui.New(logFiles).Run()
+		},
+	}
+}
+
+// findPowerLogs returns all Power.log files in the given log directory.
+// Checks both session subdirs (Hearthstone_*/) and the dir itself.
+func findPowerLogs(logPath string) []string {
+	var files []string
+	entries, _ := os.ReadDir(logPath)
+	for _, e := range entries {
+		if e.IsDir() && strings.HasPrefix(e.Name(), "Hearthstone_") {
+			candidate := filepath.Join(logPath, e.Name(), "Power.log")
+			if fileExists(candidate) {
+				files = append(files, candidate)
+			}
+		}
+	}
+	if direct := filepath.Join(logPath, "Power.log"); fileExists(direct) {
+		files = append(files, direct)
+	}
+	return files
 }
 
 // --- discover ---
