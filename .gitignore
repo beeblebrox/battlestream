@@ -46,8 +46,10 @@ config.yaml
 # Air live reload
 tmp/
 
-# Reference parser repos (cloned for analysis, not part of this project)
+# Reference repos (cloned for analysis, not part of this project)
 reference/HSBG_LogParser/
 reference/hearthstone-parser/
 reference/python-hslog/
+reference/Hearthstone-Deck-Tracker/
+reference/HearthDb/
 reference/sample-power-log-*.txt
