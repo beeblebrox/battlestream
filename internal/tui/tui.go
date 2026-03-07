@@ -27,6 +27,19 @@ var (
 	colorDim     = lipgloss.Color("240")
 	colorMod     = lipgloss.Color("213")
 	colorHelp    = lipgloss.Color("241")
+
+	// Buff category colors
+	colorBloodgem  = lipgloss.Color("196") // red
+	colorNomi      = lipgloss.Color("208") // orange
+	colorLightfang = lipgloss.Color("226") // yellow
+	colorWhelp     = lipgloss.Color("39")  // blue
+	colorTavern    = lipgloss.Color("141") // purple
+	colorUndead    = lipgloss.Color("34")  // dark green
+	colorElemental = lipgloss.Color("202") // dark orange
+	colorBeetle    = lipgloss.Color("178") // dark yellow
+	colorRightmost = lipgloss.Color("105") // light purple
+	colorVolumizer = lipgloss.Color("81")  // cyan
+	colorGeneral   = lipgloss.Color("249") // gray
 	colorMuted   = lipgloss.Color("244")
 	colorHealthFg = lipgloss.Color("46")
 	colorHealthBg = lipgloss.Color("22")
@@ -86,6 +99,7 @@ type gameUpdateMsg struct{ game *bspb.GameState }
 type aggUpdateMsg struct{ agg *bspb.AggregateStats }
 type eventMsg struct{ event *bspb.GameEvent }
 type disconnectedMsg struct{ err error }
+type reconnectMsg struct{}
 type aggTickMsg struct{}
 
 // ============================================================
@@ -221,11 +235,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case disconnectedMsg:
 		m.connState = stateDisconnected
 		m.connErr = msg.err
-		// Retry after 3 seconds
+		if m.client != nil {
+			m.client.Close()
+			m.client = nil
+		}
+		m.eventCh = nil
 		return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
-			m.connState = stateConnecting
-			return nil
+			return reconnectMsg{}
 		})
+
+	case reconnectMsg:
+		m.connState = stateConnecting
+		return m, connectCmd(m.ctx, m.grpcAddr)
 
 	case gameUpdateMsg:
 		m.game = msg.game
@@ -396,27 +417,126 @@ func (m *Model) boardContent() string {
 
 func (m *Model) modsContent() string {
 	var b strings.Builder
-	b.WriteString(styleTitle.Render("MODIFICATIONS") + "\n")
+	b.WriteString(styleTitle.Render("BUFF SOURCES") + "\n")
 
-	if m.game == nil || len(m.game.Modifications) == 0 {
-		b.WriteString(styleDim.Render("(none this game)"))
-	} else {
-		mods := m.game.Modifications
-		if len(mods) > 8 {
-			mods = mods[len(mods)-8:]
-		}
-		for _, mod := range mods {
-			sign := "+"
-			if mod.Delta < 0 {
-				sign = ""
+	if m.game == nil || len(m.game.BuffSources) == 0 {
+		// Fall back to old modifications display if no buff sources tracked.
+		if m.game != nil && len(m.game.Modifications) > 0 {
+			mods := m.game.Modifications
+			if len(mods) > 8 {
+				mods = mods[len(mods)-8:]
 			}
-			line := fmt.Sprintf("T%-2d %s%d %-6s %s",
-				mod.Turn, sign, mod.Delta, mod.Stat, mod.Target)
-			b.WriteString(styleMod.Render(line) + "\n")
+			for _, mod := range mods {
+				sign := "+"
+				if mod.Delta < 0 {
+					sign = ""
+				}
+				line := fmt.Sprintf("T%-2d %s%d %-6s %s",
+					mod.Turn, sign, mod.Delta, mod.Stat, mod.Target)
+				b.WriteString(styleMod.Render(line) + "\n")
+			}
+		} else {
+			b.WriteString(styleDim.Render("(none this game)"))
+		}
+		return b.String()
+	}
+
+	// Sort by total buff magnitude (largest first).
+	sources := make([]*bspb.BuffSource, len(m.game.BuffSources))
+	copy(sources, m.game.BuffSources)
+	for i := 0; i < len(sources); i++ {
+		for j := i + 1; j < len(sources); j++ {
+			totalI := abs32(sources[i].Attack) + abs32(sources[i].Health)
+			totalJ := abs32(sources[j].Attack) + abs32(sources[j].Health)
+			if totalJ > totalI {
+				sources[i], sources[j] = sources[j], sources[i]
+			}
+		}
+	}
+
+	for _, bs := range sources {
+		if bs.Attack == 0 && bs.Health == 0 {
+			continue
+		}
+		name := buffCategoryDisplayName(bs.Category)
+		color := buffCategoryColor(bs.Category)
+		style := lipgloss.NewStyle().Foreground(color)
+		line := fmt.Sprintf("%-14s +%d/+%d", name, bs.Attack, bs.Health)
+		b.WriteString(style.Render(line) + "\n")
+	}
+
+	// Ability counters (e.g. Spellcraft stacks)
+	if m.game != nil && len(m.game.AbilityCounters) > 0 {
+		b.WriteString("\n" + styleTitle.Render("ABILITIES") + "\n")
+		for _, ac := range m.game.AbilityCounters {
+			name := buffCategoryDisplayName(ac.Category)
+			color := buffCategoryColor(ac.Category)
+			style := lipgloss.NewStyle().Foreground(color)
+			line := fmt.Sprintf("%-14s %s", name, ac.Display)
+			b.WriteString(style.Render(line) + "\n")
 		}
 	}
 
 	return b.String()
+}
+
+func buffCategoryDisplayName(cat string) string {
+	names := map[string]string{
+		"BLOODGEM":        "Bloodgems",
+		"BLOODGEM_BARRAGE": "BG Barrage",
+		"NOMI":            "Nomi",
+		"ELEMENTAL":       "Elementals",
+		"TAVERN_SPELL":    "Tavern Spells",
+		"WHELP":           "Whelps",
+		"BEETLE":          "Beetles",
+		"RIGHTMOST":       "Rightmost",
+		"UNDEAD":          "Undead",
+		"VOLUMIZER":       "Volumizer",
+		"LIGHTFANG":       "Lightfang",
+		"NOMI_ALL":        "Nomi Dream",
+		"SPELLCRAFT":      "Spellcraft",
+		"FREE_REFRESH":    "Refreshes",
+		"GOLD_NEXT_TURN":  "Bonus Gold",
+		"CONSUMED":        "Consumed",
+		"GENERAL":         "General",
+	}
+	if n, ok := names[cat]; ok {
+		return n
+	}
+	return cat
+}
+
+func buffCategoryColor(cat string) lipgloss.Color {
+	colors := map[string]lipgloss.Color{
+		"BLOODGEM":        colorBloodgem,
+		"BLOODGEM_BARRAGE": colorBloodgem,
+		"NOMI":            colorNomi,
+		"ELEMENTAL":       colorElemental,
+		"TAVERN_SPELL":    colorTavern,
+		"WHELP":           colorWhelp,
+		"BEETLE":          colorBeetle,
+		"RIGHTMOST":       colorRightmost,
+		"UNDEAD":          colorUndead,
+		"VOLUMIZER":       colorVolumizer,
+		"LIGHTFANG":       colorLightfang,
+		"NOMI_ALL":        colorNomi,
+		"SPELLCRAFT":      colorTavern,
+		"FREE_REFRESH":    colorGold,
+		"GOLD_NEXT_TURN":  colorGold,
+		"CONSUMED":        colorDim,
+		"GENERAL":         colorGeneral,
+	}
+	if c, ok := colors[cat]; ok {
+		return c
+	}
+	return colorMod
+}
+
+func abs32(x int32) int32 {
+	if x < 0 {
+		return -x
+	}
+	return x
 }
 
 func (m *Model) renderSessionBar(w int) string {
@@ -530,6 +650,11 @@ func renderMinion(mn *bspb.MinionState) string {
 	// Tribe
 	if mn.MinionType != "" && mn.MinionType != "INVALID" {
 		sb.WriteString(styleDim.Render(fmt.Sprintf(" [%s]", strings.ToLower(mn.MinionType))))
+	}
+
+	// Enchantment count
+	if len(mn.Enchantments) > 0 {
+		sb.WriteString(styleDim.Render(fmt.Sprintf(" %d buffs", len(mn.Enchantments))))
 	}
 
 	return sb.String()

@@ -28,6 +28,9 @@ type BGGameState struct {
 	Board         []MinionState
 	OpponentBoard []MinionState
 	Modifications []StatMod
+	BuffSources     []BuffSource     `json:"buff_sources,omitempty"`
+	AbilityCounters []AbilityCounter `json:"ability_counters,omitempty"`
+	Enchantments    []Enchantment    `json:"enchantments,omitempty"`
 	StartTime     time.Time
 	EndTime       *time.Time
 	Placement     int
@@ -48,23 +51,52 @@ type PlayerState struct {
 
 // MinionState describes a single minion on the board.
 type MinionState struct {
-	EntityID   int    `json:"entity_id"`
-	CardID     string `json:"card_id"`
-	Name       string `json:"name"`
-	Attack     int    `json:"attack"`
-	Health     int    `json:"health"`
-	MinionType string `json:"minion_type"`
-	BuffAttack int    `json:"buff_attack"`
-	BuffHealth int    `json:"buff_health"`
+	EntityID     int           `json:"entity_id"`
+	CardID       string        `json:"card_id"`
+	Name         string        `json:"name"`
+	Attack       int           `json:"attack"`
+	Health       int           `json:"health"`
+	MinionType   string        `json:"minion_type"`
+	BuffAttack   int           `json:"buff_attack"`
+	BuffHealth   int           `json:"buff_health"`
+	Enchantments []Enchantment `json:"enchantments,omitempty"`
 }
 
 // StatMod records a buff or nerf applied during the game.
 type StatMod struct {
-	Turn   int    `json:"turn"`
-	Target string `json:"target"` // "ALL", "BEAST", "MECH", entity name, etc.
-	Stat   string `json:"stat"`   // "ATTACK", "HEALTH", "SPELL_POWER"
-	Delta  int    `json:"delta"`
-	Source string `json:"source"` // card name
+	Turn     int    `json:"turn"`
+	Target   string `json:"target"`              // "ALL", "BEAST", "MECH", entity name, etc.
+	Stat     string `json:"stat"`                // "ATTACK", "HEALTH", "SPELL_POWER"
+	Delta    int    `json:"delta"`
+	Source   string `json:"source"`              // card name
+	Category string `json:"category,omitempty"`  // buff category label
+	CardID   string `json:"card_id,omitempty"`   // source card ID
+}
+
+// BuffSource holds the current effective value for a buff category.
+type BuffSource struct {
+	Category string `json:"category"` // "BLOODGEM", "NOMI", "WHELP", etc.
+	Attack   int    `json:"attack"`   // current effective ATK buff value
+	Health   int    `json:"health"`   // current effective HP buff value
+}
+
+// Enchantment represents a single enchantment entity attached to a minion.
+type Enchantment struct {
+	EntityID     int    `json:"entity_id"`
+	CardID       string `json:"card_id"`
+	SourceCardID string `json:"source_card_id"`
+	SourceName   string `json:"source_name"`
+	TargetID     int    `json:"target_id"`  // ATTACHED entity ID
+	AttackBuff   int    `json:"attack_buff"`
+	HealthBuff   int    `json:"health_buff"`
+	Category     string `json:"category"`
+}
+
+// AbilityCounter tracks a non-stat ability value (e.g. Spellcraft stacks).
+type AbilityCounter struct {
+	Category string `json:"category"`
+	Value    int    `json:"value"`   // raw tag value
+	Display  string `json:"display"` // computed display string
 }
 
 // Machine manages the BGGameState and applies events.
@@ -95,9 +127,16 @@ func (m *Machine) State() BGGameState {
 	defer m.mu.RUnlock()
 	s := m.state
 	// Deep copy slices
-	s.Board = append([]MinionState(nil), m.state.Board...)
+	s.Board = make([]MinionState, len(m.state.Board))
+	for i, mn := range m.state.Board {
+		s.Board[i] = mn
+		s.Board[i].Enchantments = append([]Enchantment(nil), mn.Enchantments...)
+	}
 	s.OpponentBoard = append([]MinionState(nil), m.state.OpponentBoard...)
 	s.Modifications = append([]StatMod(nil), m.state.Modifications...)
+	s.BuffSources = append([]BuffSource(nil), m.state.BuffSources...)
+	s.AbilityCounters = append([]AbilityCounter(nil), m.state.AbilityCounters...)
+	s.Enchantments = append([]Enchantment(nil), m.state.Enchantments...)
 	return s
 }
 
@@ -273,6 +312,88 @@ func applyTagToPlayer(p *PlayerState, tag, value string) {
 	case "PLAYER_TRIPLES":
 		p.TripleCount = parseInt(value)
 	}
+}
+
+// SetBuffSource upserts a buff source category with its current values.
+func (m *Machine) SetBuffSource(category string, atk, hp int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, bs := range m.state.BuffSources {
+		if bs.Category == category {
+			m.state.BuffSources[i].Attack = atk
+			m.state.BuffSources[i].Health = hp
+			return
+		}
+	}
+	m.state.BuffSources = append(m.state.BuffSources, BuffSource{
+		Category: category,
+		Attack:   atk,
+		Health:   hp,
+	})
+}
+
+// SetAbilityCounter upserts an ability counter by category.
+func (m *Machine) SetAbilityCounter(category string, value int, display string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, ac := range m.state.AbilityCounters {
+		if ac.Category == category {
+			m.state.AbilityCounters[i].Value = value
+			m.state.AbilityCounters[i].Display = display
+			return
+		}
+	}
+	m.state.AbilityCounters = append(m.state.AbilityCounters, AbilityCounter{
+		Category: category,
+		Value:    value,
+		Display:  display,
+	})
+}
+
+// AddEnchantment registers an enchantment and attaches it to the target minion.
+func (m *Machine) AddEnchantment(ench Enchantment) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	// Update existing enchantment if entity ID matches (script data update).
+	for i, e := range m.state.Enchantments {
+		if e.EntityID == ench.EntityID {
+			m.state.Enchantments[i] = ench
+			m.attachEnchantmentToMinion(ench)
+			return
+		}
+	}
+	m.state.Enchantments = append(m.state.Enchantments, ench)
+	m.attachEnchantmentToMinion(ench)
+}
+
+// attachEnchantmentToMinion adds or updates the enchantment on its target board minion.
+// Must be called with m.mu held.
+func (m *Machine) attachEnchantmentToMinion(ench Enchantment) {
+	for i, mn := range m.state.Board {
+		if mn.EntityID == ench.TargetID {
+			for j, e := range mn.Enchantments {
+				if e.EntityID == ench.EntityID {
+					m.state.Board[i].Enchantments[j] = ench
+					return
+				}
+			}
+			m.state.Board[i].Enchantments = append(m.state.Board[i].Enchantments, ench)
+			return
+		}
+	}
+}
+
+// RemoveEnchantmentsForEntity removes all enchantments targeting the given entity.
+func (m *Machine) RemoveEnchantmentsForEntity(entityID int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	filtered := m.state.Enchantments[:0]
+	for _, e := range m.state.Enchantments {
+		if e.TargetID != entityID {
+			filtered = append(filtered, e)
+		}
+	}
+	m.state.Enchantments = filtered
 }
 
 func parseInt(s string) int {

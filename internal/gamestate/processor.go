@@ -11,12 +11,16 @@ import (
 
 // entityInfo stores known properties of an entity for board tracking.
 type entityInfo struct {
-	CardID   string
-	Name     string
-	CardType string
-	Attack   int
-	Health   int
-	Zone     string
+	CardID      string
+	Name        string
+	CardType    string
+	Attack      int
+	Health      int
+	Zone        string
+	CreatorID   int
+	AttachedTo  int
+	ScriptData1 int
+	ScriptData2 int
 }
 
 // pendingStatChange buffers a stat change for batch analysis.
@@ -48,6 +52,21 @@ type Processor struct {
 
 	// Buffered stat changes for board-wide buff detection.
 	pendingStatChanges []pendingStatChange
+
+	// Buff source state: category → [ATK, HP] for player-level tag tracking.
+	buffSourceState map[string][2]int
+
+	// Counter state for Dnt enchantments (HDT-style counters).
+	// shopBuffPrev tracks previous SD values per entity for differential accumulation.
+	shopBuffPrev map[int][2]int
+	// nomiCounter tracks the running Nomi total [ATK, HP].
+	nomiCounter [2]int
+	// nomiAllCounter tracks the running Nomi (All) total [ATK, HP] for Timewarped Nomi.
+	nomiAllCounter [2]int
+
+	// Economy counters.
+	goldNextTurnSure   int // from BACON_PLAYER_EXTRA_GOLD_NEXT_TURN player tag
+	overconfidenceCount int // number of active Overconfidence Dnt enchantments in PLAY
 }
 
 // NewProcessor returns a Processor that updates the given Machine.
@@ -57,6 +76,8 @@ func NewProcessor(m *Machine) *Processor {
 		entityController: make(map[int]int),
 		heroEntities:     make(map[int]bool),
 		entityProps:      make(map[int]*entityInfo),
+		buffSourceState:  make(map[string][2]int),
+		shopBuffPrev:     make(map[int][2]int),
 	}
 }
 
@@ -72,6 +93,12 @@ func (p *Processor) Handle(e parser.GameEvent) {
 		p.entityController = make(map[int]int)
 		p.heroEntities = make(map[int]bool)
 		p.entityProps = make(map[int]*entityInfo)
+		p.buffSourceState = make(map[string][2]int)
+		p.shopBuffPrev = make(map[int][2]int)
+		p.nomiCounter = [2]int{}
+		p.nomiAllCounter = [2]int{}
+		p.goldNextTurnSure = 0
+		p.overconfidenceCount = 0
 		gameID := fmt.Sprintf("game-%d", p.gameSeq)
 		p.machine.GameStart(gameID, e.Timestamp)
 
@@ -197,14 +224,18 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 
 		case "ZONE":
 			if e.EntityID > 0 {
-				// Update stored zone.
-				if info := p.entityProps[e.EntityID]; info != nil {
+				// Update stored zone and track Overconfidence Dnt zone transitions.
+				info := p.entityProps[e.EntityID]
+				if info != nil {
+					prevZone := info.Zone
 					info.Zone = value
+					p.handleOverconfidenceZone(info.CardID, value, prevZone)
 				}
 			}
 			if value == "GRAVEYARD" || value == "REMOVEDFROMGAME" || value == "SETASIDE" {
 				if e.EntityID > 0 && p.machine.Phase() != PhaseGameOver {
 					p.machine.RemoveMinion(e.EntityID)
+					p.machine.RemoveEnchantmentsForEntity(e.EntityID)
 				}
 			} else if value == "PLAY" && e.EntityID > 0 {
 				// Minion moved to board — add if it's a local minion.
@@ -234,6 +265,47 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 					p.localHeroID = heroID
 					slog.Info("local hero entity updated", "heroID", heroID)
 				}
+			}
+
+		case "BACON_BLOODGEMBUFFATKVALUE", "BACON_BLOODGEMBUFFHEALTHVALUE",
+			"BACON_ELEMENTAL_BUFFATKVALUE", "BACON_ELEMENTAL_BUFFHEALTHVALUE",
+			"TAVERN_SPELL_ATTACK_INCREASE", "TAVERN_SPELL_HEALTH_INCREASE":
+			if p.isLocalPlayerEntity(e) || p.isLocalHero(e, controllerID) {
+				p.updateBuffSourceFromPlayerTag(tag, value)
+			}
+
+		case "BACON_FREE_REFRESH_COUNT":
+			if p.isLocalPlayerEntity(e) || p.isLocalHero(e, controllerID) {
+				raw, _ := strconv.Atoi(value)
+				if raw > 0 {
+					p.machine.SetAbilityCounter(CatFreeRefresh, raw, fmt.Sprintf("%d", raw))
+				}
+			}
+
+		case "BACON_PLAYER_EXTRA_GOLD_NEXT_TURN":
+			if p.isLocalPlayerEntity(e) || p.isLocalHero(e, controllerID) {
+				raw, _ := strconv.Atoi(value)
+				if raw < 0 {
+					raw = 0
+				}
+				p.goldNextTurnSure = raw
+				p.updateGoldNextTurnCounter()
+			}
+
+		case "TAG_SCRIPT_DATA_NUM_1", "TAG_SCRIPT_DATA_NUM_2":
+			if e.EntityID > 0 {
+				p.updateEnchantmentScriptData(e.EntityID, tag, value)
+				p.handleDntTagChange(e.EntityID, tag, parseInt(value))
+			}
+
+		case "3809":
+			// Spellcraft (Naga spell) stacks counter on local player.
+			if p.isLocalPlayerEntity(e) || p.isLocalHero(e, controllerID) {
+				raw, _ := strconv.Atoi(value)
+				stacks := 1 + (raw / 4)
+				progress := raw % 4
+				display := fmt.Sprintf("%d (%d/4)", stacks, progress)
+				p.machine.SetAbilityCounter(CatSpellcraft, raw, display)
 			}
 
 		case "CONTROLLER":
@@ -290,10 +362,28 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 	if zone, ok := e.Tags["ZONE"]; ok {
 		info.Zone = zone
 	}
+	if creator, ok := e.Tags["CREATOR"]; ok {
+		info.CreatorID = parseInt(creator)
+	}
+	if attached, ok := e.Tags["ATTACHED"]; ok {
+		info.AttachedTo = parseInt(attached)
+	}
+	if sd1, ok := e.Tags["TAG_SCRIPT_DATA_NUM_1"]; ok {
+		info.ScriptData1 = parseInt(sd1)
+	}
+	if sd2, ok := e.Tags["TAG_SCRIPT_DATA_NUM_2"]; ok {
+		info.ScriptData2 = parseInt(sd2)
+	}
 
 	// Register hero entity IDs.
 	if cardType == "HERO" && e.EntityID > 0 {
 		p.heroEntities[e.EntityID] = true
+	}
+
+	// Handle enchantment entities — track buff sources.
+	if cardType == "ENCHANTMENT" {
+		p.handleEnchantmentEntity(e, info)
+		return
 	}
 
 	// If this is a HERO entity owned by the local player, track its stats.
@@ -522,6 +612,285 @@ func cleanEntityName(s string) string {
 		}
 	}
 	return s
+}
+
+// handleEnchantmentEntity processes a FULL_ENTITY/SHOW_ENTITY with CARDTYPE=ENCHANTMENT.
+// Tracks per-minion enchantments in Enchantments[]; Dnt buff sources are handled
+// separately by handleDntTagChange via TAG_CHANGE events.
+func (p *Processor) handleEnchantmentEntity(e parser.GameEvent, info *entityInfo) {
+	if info.AttachedTo == 0 {
+		return // no target — skip
+	}
+
+	// Resolve the CREATOR entity to get source card info.
+	var sourceCardID, sourceName string
+	if info.CreatorID > 0 {
+		if creator := p.entityProps[info.CreatorID]; creator != nil {
+			sourceCardID = creator.CardID
+			sourceName = creator.Name
+		}
+	}
+
+	// Classify the enchantment.
+	category := ClassifyEnchantment(info.CardID)
+	if category == CatGeneral && sourceCardID != "" {
+		if cat, ok := ClassifyCreator(sourceCardID); ok {
+			category = cat
+		}
+	}
+
+	// Determine ATK/HP buff values from script data.
+	atkBuff := info.ScriptData1
+	hpBuff := info.ScriptData2
+	if IsNomiSticker(info.CardID) {
+		hpBuff = info.ScriptData1 // Nomi Sticker uses NUM_1 for both
+	}
+
+	// Check if the target is a local board minion.
+	targetCtrl := p.entityController[info.AttachedTo]
+	enchCtrl := p.entityController[e.EntityID]
+	isOnBoardMinion := targetCtrl == p.localPlayerID
+
+	if !isOnBoardMinion {
+		if enchCtrl != p.localPlayerID {
+			return
+		}
+		if category == CatGeneral {
+			return
+		}
+	}
+
+	ench := Enchantment{
+		EntityID:     e.EntityID,
+		CardID:       info.CardID,
+		SourceCardID: sourceCardID,
+		SourceName:   sourceName,
+		TargetID:     info.AttachedTo,
+		AttackBuff:   atkBuff,
+		HealthBuff:   hpBuff,
+		Category:     category,
+	}
+	p.machine.AddEnchantment(ench)
+
+	// Process initial SD values from FULL_ENTITY/SHOW_ENTITY as counter updates.
+	if info.ScriptData1 != 0 || info.ScriptData2 != 0 {
+		if info.ScriptData1 != 0 {
+			p.handleDntTagChange(e.EntityID, "TAG_SCRIPT_DATA_NUM_1", info.ScriptData1)
+		}
+		if info.ScriptData2 != 0 {
+			p.handleDntTagChange(e.EntityID, "TAG_SCRIPT_DATA_NUM_2", info.ScriptData2)
+		}
+	}
+}
+
+// handleDntTagChange dispatches TAG_SCRIPT_DATA changes on Dnt enchantment
+// entities to the appropriate HDT-style counter handler.
+func (p *Processor) handleDntTagChange(entityID int, tag string, value int) {
+	info := p.entityProps[entityID]
+	if info == nil {
+		return
+	}
+	// Only process enchantments controlled by local player.
+	ctrl := p.entityController[entityID]
+	if ctrl != p.localPlayerID {
+		return
+	}
+
+	cardID := info.CardID
+	isSD1 := tag == "TAG_SCRIPT_DATA_NUM_1"
+
+	switch cardID {
+	case "BG_ShopBuff_Elemental":
+		// Nomi: DIFFERENTIAL accumulation (HDT pattern).
+		p.handleShopBuffDnt(entityID, isSD1, value)
+	case "BG30_MagicItem_544pe":
+		// Nomi Sticker: SD1 applies to BOTH atk and hp (differential).
+		p.handleNomiStickerDnt(entityID, isSD1, value)
+	case "BG34_855pe":
+		// Timewarped Nomi (Kitchen Dream): DIFFERENTIAL, buffs ALL minions.
+		p.handleNomiAllDnt(entityID, isSD1, value)
+	case "BG31_808pe":
+		// Beetle: ABSOLUTE, base stats 1/1.
+		p.handleAbsoluteDnt(CatBeetle, isSD1, value, 1, 1)
+	case "BG34_854pe":
+		// Rightmost: ABSOLUTE.
+		p.handleAbsoluteDnt(CatRightmost, isSD1, value, 0, 0)
+	case "BG34_402pe":
+		// Whelp: ABSOLUTE.
+		p.handleAbsoluteDnt(CatWhelp, isSD1, value, 0, 0)
+	case "BG25_011pe":
+		// Undead: SD1 only (ATK only), ABSOLUTE.
+		if isSD1 {
+			p.machine.SetBuffSource(CatUndead, value, 0)
+		}
+	case "BG34_170e":
+		// Volumizer: ABSOLUTE.
+		p.handleAbsoluteDnt(CatVolumizer, isSD1, value, 0, 0)
+	case "BG34_689e2":
+		// BloodGem Barrage: ABSOLUTE.
+		p.handleAbsoluteDnt(CatBloodgemBarrage, isSD1, value, 0, 0)
+	}
+}
+
+// handleAbsoluteDnt sets a buff source from an absolute Dnt value plus base offset.
+func (p *Processor) handleAbsoluteDnt(category string, isSD1 bool, value, baseAtk, baseHp int) {
+	state := p.buffSourceState[category]
+	if isSD1 {
+		state[0] = baseAtk + value
+	} else {
+		state[1] = baseHp + value
+	}
+	p.buffSourceState[category] = state
+	p.machine.SetBuffSource(category, state[0], state[1])
+}
+
+// handleShopBuffDnt handles BG_ShopBuff_Elemental with differential accumulation.
+// The Dnt tracks cumulative totals; we compute delta = value - prevValue.
+func (p *Processor) handleShopBuffDnt(entityID int, isSD1 bool, value int) {
+	prev := p.shopBuffPrev[entityID]
+	var delta int
+	if isSD1 {
+		delta = value - prev[0]
+		prev[0] = value
+	} else {
+		delta = value - prev[1]
+		prev[1] = value
+	}
+	p.shopBuffPrev[entityID] = prev
+
+	if isSD1 {
+		p.nomiCounter[0] += delta
+	} else {
+		p.nomiCounter[1] += delta
+	}
+	p.machine.SetBuffSource(CatNomi, p.nomiCounter[0], p.nomiCounter[1])
+}
+
+// handleNomiAllDnt handles BG34_855pe (Timewarped Nomi / Kitchen Dream) with differential
+// accumulation. Same pattern as regular Nomi but tracked under CatNomiAll.
+func (p *Processor) handleNomiAllDnt(entityID int, isSD1 bool, value int) {
+	prev := p.shopBuffPrev[entityID]
+	var delta int
+	if isSD1 {
+		delta = value - prev[0]
+		prev[0] = value
+	} else {
+		delta = value - prev[1]
+		prev[1] = value
+	}
+	p.shopBuffPrev[entityID] = prev
+
+	if isSD1 {
+		p.nomiAllCounter[0] += delta
+	} else {
+		p.nomiAllCounter[1] += delta
+	}
+	p.machine.SetBuffSource(CatNomiAll, p.nomiAllCounter[0], p.nomiAllCounter[1])
+}
+
+// handleNomiStickerDnt handles BG30_MagicItem_544pe where SD1 applies to BOTH atk and hp.
+func (p *Processor) handleNomiStickerDnt(entityID int, isSD1 bool, value int) {
+	prev := p.shopBuffPrev[entityID]
+	if isSD1 {
+		delta := value - prev[0]
+		prev[0] = value
+		p.shopBuffPrev[entityID] = prev
+		// SD1 applies to both ATK and HP.
+		p.nomiCounter[0] += delta
+		p.nomiCounter[1] += delta
+	} else {
+		// SD2 not used for Nomi Sticker.
+		prev[1] = value
+		p.shopBuffPrev[entityID] = prev
+	}
+	p.machine.SetBuffSource(CatNomi, p.nomiCounter[0], p.nomiCounter[1])
+}
+
+// updateBuffSourceFromPlayerTag handles player-level buff tags like
+// BACON_BLOODGEMBUFFATKVALUE, TAVERN_SPELL_ATTACK_INCREASE, etc.
+func (p *Processor) updateBuffSourceFromPlayerTag(tag, value string) {
+	category, isATK, ok := ClassifyPlayerTag(tag)
+	if !ok {
+		return
+	}
+
+	rawVal := parseInt(value)
+
+	// Apply category-specific value computation.
+	var computedVal int
+	switch category {
+	case CatBloodgem:
+		computedVal = ComputeBloodgemValue(rawVal)
+	case CatElemental:
+		computedVal = ComputeElementalValue(rawVal)
+	default:
+		computedVal = rawVal
+	}
+
+	state := p.buffSourceState[category]
+	if isATK {
+		state[0] = computedVal
+	} else {
+		state[1] = computedVal
+	}
+	p.buffSourceState[category] = state
+
+	p.machine.SetBuffSource(category, state[0], state[1])
+}
+
+// updateEnchantmentScriptData handles TAG_CHANGE for TAG_SCRIPT_DATA_NUM_1/2
+// on existing enchantment entities. Updates stored values only; counter-based
+// buff source tracking is handled by handleDntTagChange.
+func (p *Processor) updateEnchantmentScriptData(entityID int, tag, value string) {
+	info := p.entityProps[entityID]
+	if info == nil || info.CardType != "ENCHANTMENT" {
+		return
+	}
+
+	val := parseInt(value)
+	switch tag {
+	case "TAG_SCRIPT_DATA_NUM_1":
+		info.ScriptData1 = val
+	case "TAG_SCRIPT_DATA_NUM_2":
+		info.ScriptData2 = val
+	}
+}
+
+// overconfidenceCardID is the Dnt enchantment for Overconfidence (BG28_884e).
+const overconfidenceCardID = "BG28_884e"
+
+// handleOverconfidenceZone tracks Overconfidence Dnt enchantments entering/leaving PLAY.
+// Each active Overconfidence contributes +3 potential gold next turn.
+func (p *Processor) handleOverconfidenceZone(cardID, newZone, prevZone string) {
+	if cardID != overconfidenceCardID {
+		return
+	}
+	if newZone == "PLAY" && prevZone != "PLAY" {
+		p.overconfidenceCount++
+		p.updateGoldNextTurnCounter()
+	} else if newZone != "PLAY" && prevZone == "PLAY" {
+		p.overconfidenceCount--
+		if p.overconfidenceCount < 0 {
+			p.overconfidenceCount = 0
+		}
+		p.updateGoldNextTurnCounter()
+	}
+}
+
+// updateGoldNextTurnCounter updates the GoldNextTurn ability counter display.
+func (p *Processor) updateGoldNextTurnCounter() {
+	sure := p.goldNextTurnSure
+	bonus := p.overconfidenceCount * 3
+	if sure == 0 && p.overconfidenceCount == 0 {
+		return
+	}
+	var display string
+	if bonus > 0 {
+		display = fmt.Sprintf("%d (%d)", sure, sure+bonus)
+	} else {
+		display = fmt.Sprintf("%d", sure)
+	}
+	p.machine.SetAbilityCounter(CatGoldNextTurn, sure, display)
 }
 
 // extractCardID extracts the cardId from bracketed entity notation.

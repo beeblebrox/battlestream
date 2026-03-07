@@ -7,13 +7,20 @@ import (
 	"time"
 )
 
+// blockContext tracks the source entity of a BLOCK_START for attribution.
+type blockContext struct {
+	entityID int
+	cardID   string
+}
+
 // Parser parses raw Power.log lines into GameEvents.
 // It maintains a small block state for FULL_ENTITY / SHOW_ENTITY entries whose
 // ATK/HEALTH tags appear on subsequent indented lines.
 type Parser struct {
-	out     chan<- GameEvent
-	inBlock bool
-	pending GameEvent
+	out        chan<- GameEvent
+	inBlock    bool
+	pending    GameEvent
+	blockStack []blockContext
 }
 
 // New creates a Parser that sends events to out.
@@ -66,6 +73,15 @@ var (
 	//   "GameState.DebugPrintPower() -     tag=ATK value=2"
 	// Requires at least 4 spaces after the " - " separator.
 	reBlockTag = regexp.MustCompile(`-\s{4,}tag=(\S+)\s+value=(\S*)`)
+
+	// BLOCK_START BlockType=PLAY Entity=[entityName=... cardId=BG_LOE_077 player=8] EffectCardId=...
+	reBlockStart = regexp.MustCompile(`BLOCK_START\s+BlockType=\w+\s+Entity=(.+?)\s+EffectCardId=`)
+
+	// BLOCK_END
+	reBlockEnd = regexp.MustCompile(`BLOCK_END`)
+
+	// cardId= field from bracketed entity notation
+	reCardIDField = regexp.MustCompile(`\bcardId=(\S+?)[\s\]]`)
 )
 
 // Feed processes a single raw log line.
@@ -88,6 +104,23 @@ func (p *Parser) Feed(line string) {
 		}
 		// Non-continuation line: flush the accumulated entity event.
 		p.flushPending()
+	}
+
+	// Handle BLOCK_START/BLOCK_END for context tracking.
+	if reBlockEnd.MatchString(stripped) {
+		if len(p.blockStack) > 0 {
+			p.blockStack = p.blockStack[:len(p.blockStack)-1]
+		}
+		return
+	}
+	if m := reBlockStart.FindStringSubmatch(stripped); m != nil {
+		entity := strings.TrimSpace(m[1])
+		bc := blockContext{
+			entityID: extractEntityID(entity),
+			cardID:   extractCardIDField(entity),
+		}
+		p.blockStack = append(p.blockStack, bc)
+		return
 	}
 
 	switch {
@@ -159,6 +192,7 @@ func (p *Parser) Feed(line string) {
 			CardID:     cardID,
 			Tags:       map[string]string{},
 		}
+		p.applyBlockContext(&p.pending)
 
 	case reTurnStart.MatchString(stripped):
 		m := reTurnStart.FindStringSubmatch(stripped)
@@ -176,14 +210,16 @@ func (p *Parser) Feed(line string) {
 		value := m[3]
 		id := extractEntityID(entity)
 		playerID := extractPlayerField(entity)
-		p.emit(GameEvent{
+		ev := GameEvent{
 			Type:       EventTagChange,
 			Timestamp:  ts,
 			EntityID:   id,
 			PlayerID:   playerID,
 			EntityName: entity,
 			Tags:       map[string]string{tag: value},
-		})
+		}
+		p.applyBlockContext(&ev)
+		p.emit(ev)
 	}
 }
 
@@ -253,4 +289,21 @@ func extractPlayerField(s string) int {
 	}
 	id, _ := strconv.Atoi(m[1])
 	return id
+}
+
+func extractCardIDField(s string) string {
+	m := reCardIDField.FindStringSubmatch(s)
+	if m == nil {
+		return ""
+	}
+	return m[1]
+}
+
+// applyBlockContext sets the block source fields from the current top of stack.
+func (p *Parser) applyBlockContext(e *GameEvent) {
+	if len(p.blockStack) > 0 {
+		top := p.blockStack[len(p.blockStack)-1]
+		e.BlockSource = top.entityID
+		e.BlockCardID = top.cardID
+	}
 }

@@ -20,11 +20,13 @@ const (
 
 // GameEvent is a single parsed event from the Power.log stream.
 type GameEvent struct {
-	Type       EventType         `json:"type"`
-	Timestamp  time.Time         `json:"timestamp"`
-	EntityID   int               `json:"entity_id,omitempty"`
-	PlayerID   int               `json:"player_id,omitempty"` // CONTROLLER / player= field
-	Tags       map[string]string `json:"tags,omitempty"`      // TAG -> VALUE
-	EntityName string            `json:"entity_name,omitempty"`
-	CardID     string            `json:"card_id,omitempty"`
+	Type        EventType         `json:"type"`
+	Timestamp   time.Time         `json:"timestamp"`
+	EntityID    int               `json:"entity_id,omitempty"`
+	PlayerID    int               `json:"player_id,omitempty"` // CONTROLLER / player= field
+	Tags        map[string]string `json:"tags,omitempty"`      // TAG -> VALUE
+	EntityName  string            `json:"entity_name,omitempty"`
+	CardID      string            `json:"card_id,omitempty"`
+	BlockSource int               `json:"block_source,omitempty"` // entity ID from enclosing BLOCK_START
+	BlockCardID string            `json:"block_card_id,omitempty"` // card ID from enclosing BLOCK_START
 }

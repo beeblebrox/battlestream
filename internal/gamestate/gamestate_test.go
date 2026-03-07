@@ -2,6 +2,7 @@ package gamestate
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -698,4 +699,670 @@ func TestIntegrationPowerLog(t *testing.T) {
 				mod.Target, mod.Turn, mod.Stat, mod.Delta)
 		}
 	}
+
+	// BuffSources and Enchantments should be populated from the test fixture.
+	// The fixture has TAVERN_SPELL_* tags and ENCHANTMENT entities.
+	if len(s.Enchantments) == 0 {
+		t.Log("Note: no enchantments tracked (may need local player minion attachments in fixture)")
+	}
+	// Log buff sources for visibility
+	for _, bs := range s.BuffSources {
+		t.Logf("BuffSource: %s +%d/+%d", bs.Category, bs.Attack, bs.Health)
+	}
+}
+
+// ── Enchantment/BuffSource tests ─────────────────────────────────────────────
+
+func TestProcessorEnchantmentTracking(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+
+	// Add a minion to the board
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventEntityUpdate,
+		EntityID: 100,
+		PlayerID: 7,
+		CardID:   "BG_MINION_001",
+		Tags: map[string]string{
+			"ATK": "5", "HEALTH": "5", "CONTROLLER": "7",
+			"CARDTYPE": "MINION", "ZONE": "PLAY",
+		},
+		EntityName: "Test Minion",
+	})
+
+	if len(m.State().Board) != 1 {
+		t.Fatalf("expected 1 minion on board, got %d", len(m.State().Board))
+	}
+
+	// Create an enchantment attached to the minion with CREATOR pointing to a source
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventEntityUpdate,
+		EntityID: 200,
+		CardID:   "BG20_303e", // Nomi enchantment (should match ElementalShopBuff pattern if we add it)
+		Tags: map[string]string{
+			"CARDTYPE":              "ENCHANTMENT",
+			"ATTACHED":             "100",
+			"CREATOR":             "50",
+			"TAG_SCRIPT_DATA_NUM_1": "10",
+			"TAG_SCRIPT_DATA_NUM_2": "8",
+			"CONTROLLER":           "7",
+		},
+	})
+
+	s := m.State()
+	if len(s.Enchantments) != 1 {
+		t.Fatalf("expected 1 enchantment, got %d", len(s.Enchantments))
+	}
+	ench := s.Enchantments[0]
+	if ench.TargetID != 100 {
+		t.Errorf("enchantment target: expected 100, got %d", ench.TargetID)
+	}
+	if ench.AttackBuff != 10 || ench.HealthBuff != 8 {
+		t.Errorf("enchantment buffs: expected +10/+8, got +%d/+%d", ench.AttackBuff, ench.HealthBuff)
+	}
+
+	// Check per-minion enchantment
+	board := s.Board
+	if len(board[0].Enchantments) != 1 {
+		t.Errorf("expected 1 enchantment on minion, got %d", len(board[0].Enchantments))
+	}
+
+	// Per-minion enchantments should NOT create BuffSources (only Dnt enchantments do).
+	for _, bs := range s.BuffSources {
+		if bs.Category == CatGeneral && (bs.Attack != 0 || bs.Health != 0) {
+			t.Errorf("per-minion enchantment should not create GENERAL buff source, got +%d/+%d", bs.Attack, bs.Health)
+		}
+	}
+}
+
+func TestProcessorBuffSourceFromPlayerTag(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+
+	// Simulate TAVERN_SPELL_ATTACK_INCREASE on local player
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventTagChange,
+		EntityName: "Moch#1358",
+		Tags:       map[string]string{"TAVERN_SPELL_ATTACK_INCREASE": "3"},
+	})
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventTagChange,
+		EntityName: "Moch#1358",
+		Tags:       map[string]string{"TAVERN_SPELL_HEALTH_INCREASE": "2"},
+	})
+
+	s := m.State()
+	var found bool
+	for _, bs := range s.BuffSources {
+		if bs.Category == CatTavernSpell {
+			found = true
+			if bs.Attack != 3 || bs.Health != 2 {
+				t.Errorf("tavern spell buff: expected +3/+2, got +%d/+%d", bs.Attack, bs.Health)
+			}
+		}
+	}
+	if !found {
+		t.Error("expected TAVERN_SPELL buff source, not found")
+	}
+}
+
+func TestProcessorBloodgemValueComputation(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+
+	// Bloodgem ATK value 0 → effective +1, value 2 → effective +3
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventTagChange,
+		EntityName: "Moch#1358",
+		Tags:       map[string]string{"BACON_BLOODGEMBUFFATKVALUE": "2"},
+	})
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventTagChange,
+		EntityName: "Moch#1358",
+		Tags:       map[string]string{"BACON_BLOODGEMBUFFHEALTHVALUE": "1"},
+	})
+
+	s := m.State()
+	for _, bs := range s.BuffSources {
+		if bs.Category == CatBloodgem {
+			if bs.Attack != 3 {
+				t.Errorf("bloodgem ATK: expected 3 (raw 2 + 1), got %d", bs.Attack)
+			}
+			if bs.Health != 2 {
+				t.Errorf("bloodgem HP: expected 2 (raw 1 + 1), got %d", bs.Health)
+			}
+			return
+		}
+	}
+	t.Error("expected BLOODGEM buff source, not found")
+}
+
+func TestProcessorEnchantmentCleanupOnDeath(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+
+	// Add minion
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventEntityUpdate,
+		EntityID: 100,
+		PlayerID: 7,
+		CardID:   "BG_MINION_001",
+		Tags: map[string]string{
+			"ATK": "5", "HEALTH": "5", "CONTROLLER": "7",
+			"CARDTYPE": "MINION", "ZONE": "PLAY",
+		},
+	})
+
+	// Add enchantment
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventEntityUpdate,
+		EntityID: 200,
+		CardID:   "TEST_ENCHANT",
+		Tags: map[string]string{
+			"CARDTYPE":              "ENCHANTMENT",
+			"ATTACHED":             "100",
+			"CREATOR":             "50",
+			"TAG_SCRIPT_DATA_NUM_1": "5",
+			"CONTROLLER":           "7",
+		},
+	})
+
+	if len(m.State().Enchantments) != 1 {
+		t.Fatalf("expected 1 enchantment, got %d", len(m.State().Enchantments))
+	}
+
+	// Kill the minion
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventTagChange,
+		EntityID: 100,
+		Tags:     map[string]string{"ZONE": "GRAVEYARD"},
+	})
+
+	if len(m.State().Enchantments) != 0 {
+		t.Errorf("expected 0 enchantments after minion death, got %d", len(m.State().Enchantments))
+	}
+
+	// Per-minion enchantments don't create BuffSources, so nothing to check for zeroing.
+}
+
+func TestCategoryClassification(t *testing.T) {
+	tests := []struct {
+		cardID   string
+		expected string
+	}{
+		{"BG_ShopBuff_Elemental", CatNomi},
+		{"BG34_402pe", CatWhelp},
+		{"BG25_011pe", CatUndead},
+		{"BG34_170e", CatVolumizer},
+		{"BG34_854pe", CatRightmost},
+		{"BG31_808pe", CatBeetle},
+		{"BG34_689e2", CatBloodgemBarrage},
+		{"BG30_MagicItem_544pe", CatNomi},
+		{"UNKNOWN_CARD_ID", CatGeneral},
+	}
+	for _, tt := range tests {
+		got := ClassifyEnchantment(tt.cardID)
+		if got != tt.expected {
+			t.Errorf("ClassifyEnchantment(%q): expected %q, got %q", tt.cardID, tt.expected, got)
+		}
+	}
+}
+
+func TestBloodgemValueComputation(t *testing.T) {
+	if v := ComputeBloodgemValue(0); v != 1 {
+		t.Errorf("BloodGem(0): expected 1, got %d", v)
+	}
+	if v := ComputeBloodgemValue(2); v != 3 {
+		t.Errorf("BloodGem(2): expected 3, got %d", v)
+	}
+	if v := ComputeBloodgemValue(-2); v != 1 {
+		t.Errorf("BloodGem(-2): expected 1, got %d", v)
+	}
+}
+
+// ── Counter-based BuffSource tests (HDT-style) ──────────────────────────────
+
+// setupDntEntity creates a Dnt enchantment entity in the entity registry
+// with the given CardID and initial SD values, controlled by the local player.
+func setupDntEntity(p *Processor, entityID int, cardID string, sd1, sd2 int) {
+	p.entityController[entityID] = 7
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventEntityUpdate,
+		EntityID: entityID,
+		CardID:   cardID,
+		Tags: map[string]string{
+			"CARDTYPE":              "ENCHANTMENT",
+			"ATTACHED":              "20",
+			"CREATOR":               "50",
+			"TAG_SCRIPT_DATA_NUM_1": fmt.Sprintf("%d", sd1),
+			"TAG_SCRIPT_DATA_NUM_2": fmt.Sprintf("%d", sd2),
+			"CONTROLLER":            "7",
+		},
+	})
+}
+
+// sendSD sends a TAG_CHANGE for TAG_SCRIPT_DATA_NUM_1 or NUM_2 on an entity.
+func sendSD(p *Processor, entityID int, num int, value int) {
+	tag := "TAG_SCRIPT_DATA_NUM_1"
+	if num == 2 {
+		tag = "TAG_SCRIPT_DATA_NUM_2"
+	}
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventTagChange,
+		EntityID: entityID,
+		Tags:     map[string]string{tag: fmt.Sprintf("%d", value)},
+	})
+}
+
+func TestCounterNomiShopBuff(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+
+	// Create Dnt with initial SD1=0, SD2=0 (no buffs yet).
+	setupDntEntity(p, 300, "BG_ShopBuff_Elemental", 0, 0)
+
+	// SD1: 0→2→5 (differential: +2, +3 = total 5)
+	sendSD(p, 300, 1, 2)
+	sendSD(p, 300, 1, 5)
+	// SD2: 0→2→5 (differential: +2, +3 = total 5)
+	sendSD(p, 300, 2, 2)
+	sendSD(p, 300, 2, 5)
+
+	found := findBuffSource(m, CatNomi)
+	if found == nil {
+		t.Fatal("expected NOMI buff source, not found")
+	}
+	if found.Attack != 5 || found.Health != 5 {
+		t.Errorf("Nomi ShopBuff: expected +5/+5, got +%d/+%d", found.Attack, found.Health)
+	}
+}
+
+func TestCounterNomiStickerDifferential(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+
+	// Nomi Sticker: SD1 applies to BOTH atk and hp.
+	setupDntEntity(p, 301, "BG30_MagicItem_544pe", 0, 0)
+
+	// SD1: 0→3→7 (differential: +3, +4 = total 7) → applies to both atk AND hp
+	sendSD(p, 301, 1, 3)
+	sendSD(p, 301, 1, 7)
+
+	found := findBuffSource(m, CatNomi)
+	if found == nil {
+		t.Fatal("expected NOMI buff source from sticker, not found")
+	}
+	if found.Attack != 7 || found.Health != 7 {
+		t.Errorf("Nomi Sticker: expected +7/+7, got +%d/+%d", found.Attack, found.Health)
+	}
+}
+
+func TestCounterNomiCombined(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+
+	// ShopBuff SD1=10, SD2=10
+	setupDntEntity(p, 300, "BG_ShopBuff_Elemental", 0, 0)
+	sendSD(p, 300, 1, 10)
+	sendSD(p, 300, 2, 10)
+
+	// Sticker SD1=5 (applies to both)
+	setupDntEntity(p, 301, "BG30_MagicItem_544pe", 0, 0)
+	sendSD(p, 301, 1, 5)
+
+	found := findBuffSource(m, CatNomi)
+	if found == nil {
+		t.Fatal("expected NOMI buff source, not found")
+	}
+	// ShopBuff +10/+10 + Sticker +5/+5 = +15/+15
+	if found.Attack != 15 || found.Health != 15 {
+		t.Errorf("Nomi combined: expected +15/+15, got +%d/+%d", found.Attack, found.Health)
+	}
+}
+
+func TestCounterNomiAllDifferential(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+
+	// Timewarped Nomi (Kitchen Dream): differential accumulation, same as regular Nomi.
+	setupDntEntity(p, 310, "BG34_855pe", 0, 0)
+
+	// SD1: 0→3→8 (differential: +3, +5 = total 8)
+	sendSD(p, 310, 1, 3)
+	sendSD(p, 310, 1, 8)
+	// SD2: 0→2→6 (differential: +2, +4 = total 6)
+	sendSD(p, 310, 2, 2)
+	sendSD(p, 310, 2, 6)
+
+	found := findBuffSource(m, CatNomiAll)
+	if found == nil {
+		t.Fatal("expected NOMI_ALL buff source, not found")
+	}
+	if found.Attack != 8 || found.Health != 6 {
+		t.Errorf("Nomi All: expected +8/+6, got +%d/+%d", found.Attack, found.Health)
+	}
+
+	// Regular Nomi should be unaffected.
+	nomi := findBuffSource(m, CatNomi)
+	if nomi != nil && (nomi.Attack != 0 || nomi.Health != 0) {
+		t.Errorf("regular Nomi should be 0/0, got +%d/+%d", nomi.Attack, nomi.Health)
+	}
+}
+
+func TestCounterNomiAllSeparateFromNomi(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+
+	// Both regular Nomi and Timewarped Nomi active simultaneously.
+	setupDntEntity(p, 300, "BG_ShopBuff_Elemental", 0, 0)
+	setupDntEntity(p, 310, "BG34_855pe", 0, 0)
+
+	// Regular Nomi: +5/+5
+	sendSD(p, 300, 1, 5)
+	sendSD(p, 300, 2, 5)
+
+	// Timewarped Nomi: +10/+10
+	sendSD(p, 310, 1, 10)
+	sendSD(p, 310, 2, 10)
+
+	nomi := findBuffSource(m, CatNomi)
+	if nomi == nil || nomi.Attack != 5 || nomi.Health != 5 {
+		t.Errorf("regular Nomi: expected +5/+5, got %+v", nomi)
+	}
+
+	nomiAll := findBuffSource(m, CatNomiAll)
+	if nomiAll == nil || nomiAll.Attack != 10 || nomiAll.Health != 10 {
+		t.Errorf("Nomi All: expected +10/+10, got %+v", nomiAll)
+	}
+}
+
+func TestCounterBeetleBaseOnly(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+
+	// Beetle Dnt with SD1=2, SD2=1 → absolute with base 1/1 → 1+2=3, 1+1=2
+	setupDntEntity(p, 302, "BG31_808pe", 2, 1)
+
+	found := findBuffSource(m, CatBeetle)
+	if found == nil {
+		t.Fatal("expected BEETLE buff source, not found")
+	}
+	if found.Attack != 3 || found.Health != 2 {
+		t.Errorf("Beetle base: expected +3/+2, got +%d/+%d", found.Attack, found.Health)
+	}
+}
+
+func TestCounterBeetleWithBuffs(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+
+	// Initial SD1=2, SD2=1
+	setupDntEntity(p, 302, "BG31_808pe", 2, 1)
+
+	// SD1: 2→5, SD2: 1→4 (absolute, not differential)
+	sendSD(p, 302, 1, 5)
+	sendSD(p, 302, 2, 4)
+
+	found := findBuffSource(m, CatBeetle)
+	if found == nil {
+		t.Fatal("expected BEETLE buff source, not found")
+	}
+	// Absolute: base 1 + SD = 1+5=6, 1+4=5
+	if found.Attack != 6 || found.Health != 5 {
+		t.Errorf("Beetle buffed: expected +6/+5, got +%d/+%d", found.Attack, found.Health)
+	}
+}
+
+func TestCounterRightmostAbsolute(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+
+	setupDntEntity(p, 303, "BG34_854pe", 10, 10)
+
+	found := findBuffSource(m, CatRightmost)
+	if found == nil {
+		t.Fatal("expected RIGHTMOST buff source, not found")
+	}
+	if found.Attack != 10 || found.Health != 10 {
+		t.Errorf("Rightmost: expected +10/+10, got +%d/+%d", found.Attack, found.Health)
+	}
+}
+
+func TestCounterUndeadAtkOnly(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+
+	// Undead: SD1 only → ATK only
+	setupDntEntity(p, 304, "BG25_011pe", 15, 5)
+
+	found := findBuffSource(m, CatUndead)
+	if found == nil {
+		t.Fatal("expected UNDEAD buff source, not found")
+	}
+	if found.Attack != 15 || found.Health != 0 {
+		t.Errorf("Undead: expected +15/+0, got +%d/+%d", found.Attack, found.Health)
+	}
+}
+
+// findBuffSource returns a pointer to the BuffSource for the given category, or nil.
+func findBuffSource(m *Machine, category string) *BuffSource {
+	for _, bs := range m.State().BuffSources {
+		if bs.Category == category {
+			return &bs
+		}
+	}
+	return nil
+}
+
+func TestProcessorSpellcraftCounter(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+
+	// Tag 3809 value=9 → stacks=1+(9/4)=3, progress=9%4=1 → "3 (1/4)"
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventTagChange,
+		EntityName: "Moch#1358",
+		Tags:       map[string]string{"3809": "9"},
+	})
+
+	s := m.State()
+	if len(s.AbilityCounters) != 1 {
+		t.Fatalf("expected 1 ability counter, got %d", len(s.AbilityCounters))
+	}
+	ac := s.AbilityCounters[0]
+	if ac.Category != CatSpellcraft {
+		t.Errorf("expected SPELLCRAFT category, got %q", ac.Category)
+	}
+	if ac.Value != 9 {
+		t.Errorf("expected raw value 9, got %d", ac.Value)
+	}
+	if ac.Display != "3 (1/4)" {
+		t.Errorf("expected display \"3 (1/4)\", got %q", ac.Display)
+	}
+}
+
+func TestProcessorSpellcraftCounterUpdate(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+
+	// First update
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventTagChange,
+		EntityName: "Moch#1358",
+		Tags:       map[string]string{"3809": "4"},
+	})
+	// Second update — should replace, not add
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventTagChange,
+		EntityName: "Moch#1358",
+		Tags:       map[string]string{"3809": "29"},
+	})
+
+	s := m.State()
+	if len(s.AbilityCounters) != 1 {
+		t.Fatalf("expected 1 ability counter after updates, got %d", len(s.AbilityCounters))
+	}
+	ac := s.AbilityCounters[0]
+	// 29 → stacks=1+(29/4)=8, progress=29%4=1 → "8 (1/4)"
+	if ac.Display != "8 (1/4)" {
+		t.Errorf("expected display \"8 (1/4)\", got %q", ac.Display)
+	}
+}
+
+func TestCounterFreeRefresh(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+
+	// BACON_FREE_REFRESH_COUNT on local player entity.
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventTagChange,
+		EntityName: "Moch#1358",
+		Tags:       map[string]string{"BACON_FREE_REFRESH_COUNT": "3"},
+	})
+
+	ac := findAbilityCounter(m, CatFreeRefresh)
+	if ac == nil {
+		t.Fatal("expected FREE_REFRESH ability counter, not found")
+	}
+	if ac.Value != 3 {
+		t.Errorf("expected value 3, got %d", ac.Value)
+	}
+	if ac.Display != "3" {
+		t.Errorf("expected display \"3\", got %q", ac.Display)
+	}
+}
+
+func TestCounterFreeRefreshUpdate(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventTagChange,
+		EntityName: "Moch#1358",
+		Tags:       map[string]string{"BACON_FREE_REFRESH_COUNT": "1"},
+	})
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventTagChange,
+		EntityName: "Moch#1358",
+		Tags:       map[string]string{"BACON_FREE_REFRESH_COUNT": "5"},
+	})
+
+	s := m.State()
+	count := 0
+	for _, ac := range s.AbilityCounters {
+		if ac.Category == CatFreeRefresh {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 FREE_REFRESH counter, got %d", count)
+	}
+	ac := findAbilityCounter(m, CatFreeRefresh)
+	if ac.Display != "5" {
+		t.Errorf("expected display \"5\", got %q", ac.Display)
+	}
+}
+
+func TestCounterGoldNextTurnBasic(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+
+	// BACON_PLAYER_EXTRA_GOLD_NEXT_TURN on local player entity.
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventTagChange,
+		EntityName: "Moch#1358",
+		Tags:       map[string]string{"BACON_PLAYER_EXTRA_GOLD_NEXT_TURN": "4"},
+	})
+
+	ac := findAbilityCounter(m, CatGoldNextTurn)
+	if ac == nil {
+		t.Fatal("expected GOLD_NEXT_TURN ability counter, not found")
+	}
+	if ac.Value != 4 {
+		t.Errorf("expected value 4, got %d", ac.Value)
+	}
+	if ac.Display != "4" {
+		t.Errorf("expected display \"4\", got %q", ac.Display)
+	}
+}
+
+func TestCounterGoldNextTurnWithOverconfidence(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+
+	// Set base gold.
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventTagChange,
+		EntityName: "Moch#1358",
+		Tags:       map[string]string{"BACON_PLAYER_EXTRA_GOLD_NEXT_TURN": "2"},
+	})
+
+	// Create an Overconfidence Dnt entity (BG28_884e) controlled by local player.
+	p.entityController[500] = 7
+	p.entityProps[500] = &entityInfo{CardID: "BG28_884e", Zone: ""}
+
+	// Move Overconfidence Dnt into PLAY → overconfidence++
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventTagChange,
+		EntityID: 500,
+		Tags:     map[string]string{"ZONE": "PLAY"},
+	})
+
+	ac := findAbilityCounter(m, CatGoldNextTurn)
+	if ac == nil {
+		t.Fatal("expected GOLD_NEXT_TURN counter after Overconfidence enters PLAY")
+	}
+	// Display should show "2 (5)" — 2 sure + 3 from overconfidence
+	if ac.Display != "2 (5)" {
+		t.Errorf("expected display \"2 (5)\", got %q", ac.Display)
+	}
+
+	// Remove Overconfidence from PLAY → overconfidence--
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventTagChange,
+		EntityID: 500,
+		Tags:     map[string]string{"ZONE": "GRAVEYARD"},
+	})
+
+	ac = findAbilityCounter(m, CatGoldNextTurn)
+	if ac.Display != "2" {
+		t.Errorf("after Overconfidence removed, expected display \"2\", got %q", ac.Display)
+	}
+}
+
+func TestCounterGoldNextTurnMultipleOverconfidence(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventTagChange,
+		EntityName: "Moch#1358",
+		Tags:       map[string]string{"BACON_PLAYER_EXTRA_GOLD_NEXT_TURN": "1"},
+	})
+
+	// Two Overconfidence Dnts.
+	for _, eid := range []int{501, 502} {
+		p.entityController[eid] = 7
+		p.entityProps[eid] = &entityInfo{CardID: "BG28_884e", Zone: ""}
+		p.Handle(parser.GameEvent{
+			Type:     parser.EventTagChange,
+			EntityID: eid,
+			Tags:     map[string]string{"ZONE": "PLAY"},
+		})
+	}
+
+	ac := findAbilityCounter(m, CatGoldNextTurn)
+	// 1 sure + 2*3=6 bonus = 7 total
+	if ac.Display != "1 (7)" {
+		t.Errorf("expected display \"1 (7)\", got %q", ac.Display)
+	}
+}
+
+func findAbilityCounter(m *Machine, category string) *AbilityCounter {
+	for _, ac := range m.State().AbilityCounters {
+		if ac.Category == category {
+			return &ac
+		}
+	}
+	return nil
 }
