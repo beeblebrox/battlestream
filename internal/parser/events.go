@@ -12,8 +12,6 @@ const (
 	EventTurnStart    EventType = "TURN_START"
 	EventEntityUpdate EventType = "ENTITY_UPDATE"
 	EventTagChange    EventType = "TAG_CHANGE"
-	EventPlayerUpdate EventType = "PLAYER_UPDATE"
-	EventZoneChange   EventType = "ZONE_CHANGE"
 	EventPlayerDef    EventType = "PLAYER_DEF"  // Player entity definition from CREATE_GAME
 	EventPlayerName   EventType = "PLAYER_NAME" // PlayerID → PlayerName mapping
 )

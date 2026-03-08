@@ -31,21 +31,21 @@ tasks with a log of what is done and what remains.
 
 | # | File | Issue |
 |---|------|-------|
-| 01 | [01-parseint-negative.md](01-parseint-negative.md) | `parseInt` ignores minus sign — negative tag values silently become positive |
-| 02 | [02-parser-state-reset.md](02-parser-state-reset.md) | Parser block state not reset on `EventGameStart` — stale state corrupts next game |
+| 01 | [01-parseint-negative.md](01-parseint-negative.md) | ~~`parseInt` ignores minus sign — negative tag values silently become positive~~ **DONE** — uses `strconv.Atoi` |
+| 02 | [02-parser-state-reset.md](02-parser-state-reset.md) | ~~Parser block state not reset on `EventGameStart` — stale state corrupts next game~~ **DONE** — block state reset on CREATE_GAME |
 | 03 | [03-catspellcraft-rename.md](03-catspellcraft-rename.md) | ~~`CatSpellcraft` tracks Naga spells, not Spellcraft keyword~~ **DONE** — renamed `CatNagaSpells` |
-| 04 | [04-tavern-tier-attribution.md](04-tavern-tier-attribution.md) | `handleTagChange` may apply opponent's tier to local player when `controllerID == 0` |
+| 04 | [04-tavern-tier-attribution.md](04-tavern-tier-attribution.md) | ~~`handleTagChange` may apply opponent's tier to local player when `controllerID == 0`~~ **DONE** — controllerID!=0 guard added |
 | 34 | [34-hero-damage-tracking.md](34-hero-damage-tracking.md) | ~~Hero DAMAGE tag not tracked — health never updates~~ **DONE** — DAMAGE tag handled, effective HP = HEALTH - DAMAGE |
 
 ## HIGH
 
 | # | File | Issue |
 |---|------|-------|
-| 05 | [05-pending-stat-changes-bound.md](05-pending-stat-changes-bound.md) | `pendingStatChanges` unbounded — missed turn boundary leaks cross-turn grouping |
-| 06 | [06-board-snapshot-restore.md](06-board-snapshot-restore.md) | Board snapshot/restore unconditional — may restore combat-copy base stats on game over |
-| 07 | [07-parser-processor-coupling.md](07-parser-processor-coupling.md) | Parser→Processor channel undocumented/unbuffered — processor block stalls log tail |
-| 08 | [08-local-player-name-match.md](08-local-player-name-match.md) | `isLocalPlayerEntity` name-string match can false-positive — wrong stat attribution |
-| 09 | [09-cat-lightfang-consumed-dnt.md](09-cat-lightfang-consumed-dnt.md) | `CatLightfang`/`CatConsumed` have no Dnt handlers — counters stuck at 0 |
+| 05 | [05-pending-stat-changes-bound.md](05-pending-stat-changes-bound.md) | ~~`pendingStatChanges` unbounded — missed turn boundary leaks cross-turn grouping~~ **DONE** — capped at 200 with early flush |
+| 06 | [06-board-snapshot-restore.md](06-board-snapshot-restore.md) | ~~Board snapshot/restore unconditional — may restore combat-copy base stats on game over~~ **DONE** — snapshot gated to recruit phase |
+| 07 | [07-parser-processor-coupling.md](07-parser-processor-coupling.md) | ~~Parser→Processor channel undocumented/unbuffered — processor block stalls log tail~~ **DONE** — buffered at 512 with non-blocking send |
+| 08 | [08-local-player-name-match.md](08-local-player-name-match.md) | ~~`isLocalPlayerEntity` name-string match can false-positive — wrong stat attribution~~ **DONE** — name demoted to last resort |
+| 09 | [09-cat-lightfang-consumed-dnt.md](09-cat-lightfang-consumed-dnt.md) | ~~`CatLightfang`/`CatConsumed` have no Dnt handlers — counters stuck at 0~~ **DONE** — confirmed no Dnt counters exist; per-minion only |
 | 35 | [35-max-health-from-hero.md](35-max-health-from-hero.md) | ~~Max health hardcoded to 40 in TUI~~ **DONE** — MaxHealth tracked from hero HEALTH tag |
 
 ## MEDIUM
@@ -55,21 +55,21 @@ tasks with a log of what is done and what remains.
 | 10 | [10-opponent-tracking.md](10-opponent-tracking.md) | No opponent tracking — `BGGameState.Opponent`/`OpponentBoard` never populated |
 | 11 | [11-stat-mod-source.md](11-stat-mod-source.md) | `Modifications[]` Source/Category/CardID always empty — block context not used |
 | 12 | [12-win-loss-streak.md](12-win-loss-streak.md) | ~~`WinStreak`/`LossStreak` declared but never set~~ **DONE** — tracked via PREDAMAGE/TURN |
-| 13 | [13-gold-tracking.md](13-gold-tracking.md) | `CurrentGold` declared but never set |
+| 13 | [13-gold-tracking.md](13-gold-tracking.md) | ~~`CurrentGold` declared but never set~~ **DONE** — tracked via RESOURCES/RESOURCES_USED tags |
 | 33 | [33-loss-streak-overcounting.md](33-loss-streak-overcounting.md) | **DONE** — Fixed: use PREDAMAGE tag instead of armor decrease to detect combat losses |
 | 34 | [34-hero-damage-tracking.md](34-hero-damage-tracking.md) | Hero DAMAGE tag not tracked — health never updates (effective HP = HEALTH - DAMAGE) |
 | 35 | [35-max-health-from-hero.md](35-max-health-from-hero.md) | ~~Max health hardcoded to 40 in TUI~~ **DONE** — MaxHealth tracked from hero HEALTH tag |
-| 14 | [14-parser-panic-recovery.md](14-parser-panic-recovery.md) | No panic recovery in `Feed()` — unexpected log format crashes daemon |
-| 15 | [15-dead-event-constants.md](15-dead-event-constants.md) | `EventPlayerUpdate`/`EventZoneChange` declared but never emitted — consumer dead-lock |
+| 14 | [14-parser-panic-recovery.md](14-parser-panic-recovery.md) | ~~No panic recovery in `Feed()`~~ **DONE** — defer recover() with slog.Error |
+| 15 | [15-dead-event-constants.md](15-dead-event-constants.md) | ~~`EventPlayerUpdate`/`EventZoneChange` declared but never emitted~~ **DONE** — removed dead constants |
 | 16 | [16-timestamp-date.md](16-timestamp-date.md) | Timestamp uses today's date — reparse of old logs assigns wrong date; midnight wrap |
-| 17 | [17-enchantment-table-staleness.md](17-enchantment-table-staleness.md) | `categories.go` CardID map manually curated — new mechanics missed silently (display name duplication now fixed via TODO-04; CardID map still manual) |
+| 17 | [17-enchantment-table-staleness.md](17-enchantment-table-staleness.md) | ~~`categories.go` CardID map manually curated~~ **DONE** — runtime slog.Debug warning for untracked Dnt enchantments |
 
 ## LOW
 
 | # | File | Issue |
 |---|------|-------|
 | 18 | [18-block-indent-threshold.md](18-block-indent-threshold.md) | `reBlockTag` hard-codes 4-space indent — breaks if Blizzard changes indentation |
-| 19 | [19-retagchange-ordering.md](19-retagchange-ordering.md) | `reTagChange` catch-all has no documented priority over `reTurnStart` |
+| 19 | [19-retagchange-ordering.md](19-retagchange-ordering.md) | ~~`reTagChange` catch-all undocumented priority~~ **DONE** — ordering comment added |
 | 20 | [20-block-type-parsing.md](20-block-type-parsing.md) | `BLOCK_START` `BlockType` ignored — can't distinguish attack/spell/play blocks |
 | 21 | [21-zone-position.md](21-zone-position.md) | `ZONE_POSITION` tag ignored — board order and position-dependent buffs wrong |
 | 22 | [22-combat-damage-tags.md](22-combat-damage-tags.md) | No `DAMAGED`/`DEFENDING`/`ATTACKING` handling — combat buff suppression heuristic fragile |

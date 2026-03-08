@@ -113,8 +113,10 @@ type AbilityCounter struct {
 type Machine struct {
 	mu              sync.RWMutex
 	state           BGGameState
-	gameEntityTurn  int // internal doubled turn from GameEntity
+	gameEntityTurn  int           // internal doubled turn from GameEntity
 	boardSnapshot   []MinionState // board state before combat, restored on game over
+	goldTotal       int           // last RESOURCES value
+	goldUsed        int           // last RESOURCES_USED value
 }
 
 // New creates a new Machine in IDLE phase.
@@ -324,6 +326,19 @@ func (m *Machine) SetTavernTier(tier int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.state.TavernTier = tier
+}
+
+// UpdateGold tracks RESOURCES (total) and RESOURCES_USED (spent) to compute current gold.
+func (m *Machine) UpdateGold(tag string, value int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	switch tag {
+	case "RESOURCES":
+		m.goldTotal = value
+	case "RESOURCES_USED":
+		m.goldUsed = value
+	}
+	m.state.Player.CurrentGold = m.goldTotal - m.goldUsed
 }
 
 func applyTagToPlayer(p *PlayerState, tag, value string) {

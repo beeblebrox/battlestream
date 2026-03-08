@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"fmt"
 	"log/slog"
 	"regexp"
 	"strconv"
@@ -87,6 +88,12 @@ var (
 
 // Feed processes a single raw log line.
 func (p *Parser) Feed(line string) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("parser panic recovered", "error", fmt.Sprint(r), "line", line)
+		}
+	}()
+
 	// Only process GameState.DebugPrintPower/Game lines.
 	// Skip PowerTaskList to avoid duplicate events.
 	if !reGameStateSource.MatchString(line) {
@@ -210,6 +217,11 @@ func (p *Parser) Feed(line string) {
 		}
 		p.applyBlockContext(&p.pending)
 
+	// IMPORTANT: reTurnStart must be checked BEFORE reTagChange because both
+	// match TAG_CHANGE lines. reTurnStart matches the specific pattern
+	// "tag=TURN value=N" and emits EventTurnStart; reTagChange is the general
+	// catch-all for all TAG_CHANGE lines. If reordered, turn changes would be
+	// emitted as generic EventTagChange instead of EventTurnStart.
 	case reTurnStart.MatchString(stripped):
 		m := reTurnStart.FindStringSubmatch(stripped)
 		turn, _ := strconv.Atoi(m[1])

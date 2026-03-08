@@ -279,6 +279,13 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 				p.machine.UpdatePlayerTag(tag, value)
 			}
 
+		case "RESOURCES", "RESOURCES_USED":
+			// Gold tracking: RESOURCES = total gold, RESOURCES_USED = spent gold.
+			// These fire on the player entity (not hero), so use isLocalPlayerEntity.
+			if p.isLocalPlayerEntity(e) {
+				p.machine.UpdateGold(tag, parseInt(value))
+			}
+
 		case "PLAYER_LEADERBOARD_PLACE":
 			// Only track placement for the local player.
 			if p.isLocalPlayerEntity(e) {
@@ -917,6 +924,12 @@ func (p *Processor) handleDntTagChange(entityID int, tag string, value int) {
 	// per-minion enchantments with no player-level Dnt counter in HDT.
 	// HDT has no LightfangCounter.cs or ConsumedCounter.cs.
 	// Their enchantments are tracked via handleEnchantmentEntity instead.
+	default:
+		// Warn about unrecognized Dnt enchantment CardIDs that carry ScriptData.
+		// This surfaces new mechanics added by patches that need handler support.
+		if cardID != "" && value != 0 {
+			slog.Debug("untracked Dnt enchantment", "cardID", cardID, "tag", tag, "value", value, "entityID", entityID)
+		}
 	}
 }
 

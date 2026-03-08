@@ -1,7 +1,12 @@
 # 19 — [RISK] `reTagChange` catch-all has no documented priority over `reTurnStart`
 
 **Priority:** LOW
+**Status:** DONE
 **Area:** `internal/parser/parser.go`
+
+**Resolution:** Added block comment above the `reTurnStart` case documenting why it must
+precede `reTagChange` — both match TAG_CHANGE lines but reTurnStart handles the specific
+`tag=TURN` pattern.
 
 ## Problem
 

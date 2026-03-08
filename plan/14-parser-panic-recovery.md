@@ -1,7 +1,11 @@
 # 14 — [IMPROVEMENT] No panic recovery in `Feed()` — daemon crashes on unexpected log format
 
 **Priority:** MEDIUM
+**Status:** DONE
 **Area:** `internal/parser/parser.go` — `Feed()`
+
+**Resolution:** Added `defer recover()` at top of `Feed()` that logs the panic and
+offending line via `slog.Error`, then continues processing.
 
 ## Problem
 

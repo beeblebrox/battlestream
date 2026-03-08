@@ -1,7 +1,12 @@
 # 17 — [RISK] Enchantment CardID table manually curated — new mechanics missed silently
 
 **Priority:** MEDIUM
-**Area:** `internal/gamestate/categories.go`
+**Status:** DONE (Step 1 — runtime warning)
+**Area:** `internal/gamestate/categories.go`, `internal/gamestate/processor.go`
+
+**Resolution:** Added `slog.Debug` warning in `handleDntTagChange` default case for
+unrecognized Dnt enchantment CardIDs with non-zero ScriptData. Surfaces new mechanics
+in daemon logs after patches. Steps 2-3 (automated audit, documentation) remain optional.
 
 ## Problem
 

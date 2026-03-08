@@ -1,7 +1,12 @@
 # 13 — [IMPROVEMENT] `CurrentGold` not tracked
 
 **Priority:** MEDIUM
-**Area:** `internal/gamestate/processor.go`, `internal/gamestate/machine.go`
+**Status:** DONE
+**Area:** `internal/gamestate/processor.go`, `internal/gamestate/state.go`
+
+**Resolution:** Added `RESOURCES`/`RESOURCES_USED` TAG_CHANGE handling in `handleTagChange`.
+`Machine.UpdateGold()` tracks both values and computes `CurrentGold = total - used`.
+Gold fields stored on Machine as `goldTotal`/`goldUsed`.
 
 ## Problem
 

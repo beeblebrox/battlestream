@@ -1,7 +1,11 @@
 # 15 — [BUG] `EventPlayerUpdate` and `EventZoneChange` declared but never emitted
 
 **Priority:** MEDIUM
-**Area:** `internal/parser/events.go`, `internal/parser/parser.go`
+**Status:** DONE
+**Area:** `internal/parser/events.go`
+
+**Resolution:** Removed dead constants `EventPlayerUpdate` and `EventZoneChange` from
+`events.go` (Option A). No external consumers depend on them.
 
 ## Problem
 
