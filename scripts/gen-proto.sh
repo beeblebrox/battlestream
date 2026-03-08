@@ -32,12 +32,16 @@ if [[ ! -x "${PROTOC}" ]]; then
     PROTOC="${HOME}/bin/protoc"
     echo "protoc installed at ${PROTOC}"
 else
-    # Find bundled includes next to the binary
+    # Find bundled includes: check next to binary first (~/bin/include),
+    # then standard layout (../include relative to binary dir).
     PROTOC_BIN_DIR="$(dirname "${PROTOC}")"
-    PROTOC_INCLUDE="${PROTOC_BIN_DIR}/../include"
-    if [[ ! -d "${PROTOC_INCLUDE}" ]]; then
-        # Fallback: check alongside our downloaded copy
-        PROTOC_INCLUDE="/tmp/protoc-dist/include"
+    PROTOC_INCLUDE="${PROTOC_BIN_DIR}/include"
+    if [[ ! -d "${PROTOC_INCLUDE}/google/protobuf" ]]; then
+        PROTOC_INCLUDE="${PROTOC_BIN_DIR}/../include"
+    fi
+    if [[ ! -d "${PROTOC_INCLUDE}/google/protobuf" ]]; then
+        echo "ERROR: protoc well-known type includes not found. Run: /gen-proto install"
+        exit 1
     fi
 fi
 

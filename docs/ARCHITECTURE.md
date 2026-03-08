@@ -57,7 +57,25 @@ HTTP server on `localhost:8080`. Provides:
 - SSE endpoint at `/v1/events`
 
 ### `internal/tui`
-Bubbletea TUI dashboard. Connects to the daemon (via gRPC in production) and renders a multi-panel layout using lipgloss.
+Live dashboard. Connects to the daemon via gRPC and renders board state, buff
+sources, and session stats in a scrollable two-column layout. Panels use
+`bubbles/viewport` with visual scrollbars; mouse-wheel and scrollbar
+click/drag scrolling are supported. Launched via `battlestream tui`.
+
+### `internal/debugtui`
+Step-through Power.log replay viewer. Parses a log file offline into a `Replay`
+(slice of `Step` snapshots) and lets the user step through events, filter by
+type, and jump to any BG turn. Panels: header, player stats, board, buff
+sources, changes diff, event summary, raw log — all viewports with scrollbars
+and full mouse support.
+
+Launch interactively: `battlestream replay <log-file>` (or `battlestream debug`)
+Dump to stdout: `battlestream replay --dump --turn N <log-file>`
+
+Both TUIs share the same panel conventions (colours, borders, viewport
+scrollbars, mouse routing). See [docs/DEBUGTUI.md](DEBUGTUI.md) for the full
+design reference covering panel sizing, scrollbar mechanics, mouse routing,
+Bubbles components, and the rules for adding new panels to either TUI.
 
 ### `internal/discovery`
 Cross-platform Hearthstone install detection. Searches platform-specific paths and falls back to interactive user input.

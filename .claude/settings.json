@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:hearthstone.blizzard.com)",
+      "WebFetch(domain:hearthstonejson.com)",
+      "WebFetch(domain:api.hearthstonejson.com)",
+      "WebFetch(domain:develop.battle.net)",
+      "WebFetch(domain:community.developer.battle.net)",
+      "Read(//home/moch/.claude/**)",
+      "Bash(jq --version)",
+      "Bash(jq '[.[] | select\\(.set == \"\"BATTLEGROUNDS\"\"\\) | {id,name,attack,health,techLevel,text,mechanics}] | .[0:3]')",
+      "Bash(TERM=\"rat pack\")",
+      "Read(//chungus/projects/battlestream/[.[] | select\\(.name /**)",
+      "Bash(QUERY=\"rat pack\")",
+      "Read(//chungus/projects/battlestream/**)",
+      "Bash(jq '[.[] | select\\(.name == \"\"Rat Pack\"\"\\)] | length')",
+      "Bash(python3 .claude/skills/hs-card/hs_card.py quillboar --bg --tier 7 --limit 20)",
+      "Bash(python3 .claude/skills/hs-card/hs_card.py quillboar --bg --limit 20)",
+      "Bash(python3 .claude/skills/hs-card/hs_card.py quillboar --limit 20)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "Bash(python3 -c \":*)",
+      "Read(//chungus/battlenet/drive_c/Program Files \\(x86\\)/Hearthstone/Logs/Hearthstone_2026_03_07_12_40_40/**)",
+      "Bash(LOG=\"/chungus/battlenet/drive_c/Program Files \\(x86\\)/Hearthstone/Logs/Hearthstone_2026_03_07_12_40_40/Power.log\")",
+      "Read(//chungus/battlenet/drive_c/**)",
+      "Read(//Hearthstone/Logs/Hearthstone_2026_03_07_12_40_40/**)",
+      "Bash(python3:*)",
+      "Bash(/chungus/projects/battlestream/.claude/skills/hs-card/hs_card.py --id BG25_HERO_103_SKIN_D)",
+      "Bash(/chungus/projects/battlestream/.claude/skills/hs-card/hs_card.py --id TB_BaconShop_HERO_90_SKIN_E)",
+      "Read(//tmp/**)",
+      "Bash(.claude/skills/gen-card-names/gen_card_names.py)",
+      "Bash(~/go/bin/grpcurl -plaintext 127.0.0.1:50051 battlestream.v1.BattlestreamService/GetCurrentGame)",
+      "Bash(/chungus/projects/battlestream/.claude/skills/hs-card/hs_card.py \"timewarped shadowdancer\")",
+      "Bash(pgrep -a battlestream)",
+      "Bash(lsof /home/moch/.battlestream/profiles/beeblebrox/data/LOCK)"
+    ],
+    "additionalDirectories": [
+      "/chungus/projects/battlestream/.claude/skills",
+      "/chungus/projects/battlestream/internal/debugtui/testdata",
+      "/chungus/projects/battlestream/plan"
+    ]
+  }
+}

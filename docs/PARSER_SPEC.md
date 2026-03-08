@@ -271,7 +271,7 @@ entry is copied into `e.BlockSource` / `e.BlockCardID`.
 | `BACON_FREE_REFRESH_COUNT` | local player | `SetAbilityCounter(CatFreeRefresh)` |
 | `BACON_PLAYER_EXTRA_GOLD_NEXT_TURN` | local player | `goldNextTurnSure` + `updateGoldNextTurnCounter` |
 | `TAG_SCRIPT_DATA_NUM_1/2` | enchantment entity | `handleDntTagChange` → Dnt counter dispatch |
-| `3809` (Spellcraft) | local player | `SetAbilityCounter(CatSpellcraft, stacks formula)` |
+| `3809` (SpellsPlayedForNagasCounter) | local player | `SetAbilityCounter(CatNagaSpells, stacks formula)` |
 
 ---
 
@@ -292,6 +292,8 @@ entry is copied into `e.BlockSource` / `e.BlockCardID`.
 Differential: `counter += SD_new - SD_prev` per entity.
 Absolute: `value = base + SD`.
 
+`CatLightfang` and `CatConsumed` are per-minion only; they have no player-level Dnt counter and no `handleDntTagChange` case. HDT has no `LightfangCounter.cs` or `ConsumedCounter.cs`. Their enchantments are tracked via `handleEnchantmentEntity` instead.
+
 ---
 
 ## 11. Value computation rules
@@ -302,5 +304,5 @@ Absolute: `value = base + SD`.
 | `BLOODGEM` | `BACON_BLOODGEMBUFFHEALTHVALUE` | `raw + 1` | Same offset |
 | `ELEMENTAL` | `BACON_ELEMENTAL_BUFF*` | `max(0, raw)` | Clamp at zero |
 | `TAVERN_SPELL` | `TAVERN_SPELL_*` | `raw` | Direct |
-| `SPELLCRAFT` | tag `3809` | stacks=`1 + raw/4`, progress=`raw%4` | Display: `"N (M/4)"` |
+| `NAGA_SPELLS` | tag `3809` (SpellsPlayedForNagasCounter — NOT Spellcraft keyword) | stacks=`1 + raw/4`, progress=`raw%4` | Display: `"Tier N · M/4"` |
 | `GOLD_NEXT_TURN` | player tag + Overconfidence | `sure + overconfidenceCount * 3` | Display: `"N (N+bonus)"` if bonus > 0 |

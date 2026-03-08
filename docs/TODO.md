@@ -209,6 +209,31 @@ be updated — the TUI panel will show them as `0/0` or not at all.
 Verify whether these categories actually use Dnt counters (they may be purely
 per-minion enchantments), and document the answer explicitly.
 
+### ~~[BUG] `CatSpellcraft` is a misnomer — this counter tracks Naga spells, not Spellcraft~~ RESOLVED
+
+The constant `CatSpellcraft` and all associated display labels are incorrect. Tag `3809`
+is **not** related to the Spellcraft keyword mechanic (which gives a temporary spell each
+turn to Spellcraft minions). It is HDT's `SpellsPlayedForNagasCounter` — it counts the
+**total number of spells cast this game** specifically for Naga minions whose permanent
+buff scales with spells played (Arcane Cannoneer, Thaumaturgist, Showy Cyclist,
+Groundbreaker). These minions receive a growing permanent buff per spell cast, and the
+buff amount increases by +1 for every 4 spells played over the course of the game.
+
+**Display is also wrong.** The current display formula `stacks (progress/4)` is copied
+from HDT but never explained, and the label "Spellcraft" in the TUI will mislead any
+user who knows what the Spellcraft keyword actually does.
+
+**Fixes needed:**
+1. Rename `CatSpellcraft` → `CatNagaSpells` (or similar) in `categories.go`,
+   `processor.go`, and `CategoryDisplayName`.
+2. Update `CategoryDisplayName` label from `"Spellcraft"` to something like
+   `"Naga Spells"` or `"Spells Cast"`.
+3. Update `PARSER_SPEC.md` and `PARSER.md` documentation which currently describe
+   this counter incorrectly as "Spellcraft stacks".
+4. Clarify the display: `N (M/4)` means "current buff-per-spell tier is +N
+   (M of 4 spells into the next tier)". Consider a clearer format such as
+   `"Tier N · M/4 spells"` or add a tooltip/label in the TUI.
+
 ### [IMPROVEMENT] No support for trinkets / artifacts (post-2025 mechanic)
 
 Trinkets introduced in later BG patches may add new buff tag patterns or
@@ -248,6 +273,10 @@ combat round.
 `testdata/power_log_game.txt` (92K lines) covers one specific game. Edge cases
 like Nomi All, Timewarped mechanics, late-game high-health scenarios, and games
 ending during combat are not covered by automated tests.
+
+The debug TUI provides golden-file screenshot tests (`internal/debugtui/testdata/golden/`)
+for turn 1, mid-game, and last-turn views. See [docs/DEBUGTUI.md](DEBUGTUI.md)
+for the full test strategy and how to add new golden files.
 
 ---
 

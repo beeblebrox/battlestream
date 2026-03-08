@@ -249,7 +249,7 @@ The processor implements all 13 HDT BG counter types:
 - `TAVERN_SPELL_ATTACK_INCREASE` / `HEALTH_INCREASE` → `CatTavernSpell`
 - `BACON_FREE_REFRESH_COUNT` → `CatFreeRefresh` (AbilityCounter)
 - `BACON_PLAYER_EXTRA_GOLD_NEXT_TURN` → `CatGoldNextTurn` (AbilityCounter)
-- Tag `3809` (Spellcraft) → `CatSpellcraft` (AbilityCounter, stacks formula: `1 + raw/4`)
+- Tag `3809` (SpellsPlayedForNagasCounter — NOT the Spellcraft keyword) → `CatNagaSpells` (AbilityCounter, stacks formula: `1 + raw/4`)
 
 **Dnt enchantment counters** (SD1/SD2 on player-level enchantment entities):
 - `BG_ShopBuff_Elemental` → `CatNomi` (differential accumulation)

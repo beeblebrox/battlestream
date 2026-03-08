@@ -34,9 +34,16 @@
       "Write",
       "Bash(protoc:*)",
       "Bash(bash:*)",
+      "Bash(.claude/skills/hs-card/hs_card.py *)",
+      "Bash(xdg-open .claude/skills/hs-card/cache/*)",
       "WebFetch(domain:github.com)",
       "WebSearch",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "WebFetch(domain:hearthstone.wiki.gg)",
+      "WebFetch(domain:hearthstonebgguide.com)",
+      "WebFetch(domain:hearthstone.blizzard.com)",
+      "Bash(PROTOC=/home/moch/bin/protoc bash:*)",
+      "Bash(awk:*)"
     ]
   }
 }
