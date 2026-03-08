@@ -1,7 +1,12 @@
 # 18 — [BUG] `reBlockTag` hard-codes 4-space indent — breaks on Blizzard format change
 
 **Priority:** LOW
+**Status:** DONE
 **Area:** `internal/parser/parser.go`
+
+**Resolution:** Extracted magic number to `blockTagMinIndent = 4` constant. Added
+`slog.Warn` in `flushPending` when a block is flushed with empty Tags (signals indent
+regex mismatch).
 
 ## Problem
 

@@ -227,14 +227,28 @@ func setupGame(p *Processor) {
 }
 
 func TestProcessorGameStartIncrementsID(t *testing.T) {
+	// Zero timestamps fall back to sequential game-<n> IDs (used when no
+	// log timestamp is available, e.g. synthetic events in tests).
 	m, p := newProc()
-	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Time{}})
 	if m.State().GameID != "game-1" {
 		t.Errorf("expected game-1, got %q", m.State().GameID)
 	}
-	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Time{}})
 	if m.State().GameID != "game-2" {
 		t.Errorf("expected game-2, got %q", m.State().GameID)
+	}
+}
+
+func TestProcessorGameStartTimestampID(t *testing.T) {
+	// Non-zero timestamps produce a stable game-<unixmilli> ID so that
+	// IDs survive daemon restarts and reparsing.
+	m, p := newProc()
+	ts := time.Date(2026, 3, 8, 10, 0, 0, 0, time.UTC)
+	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: ts})
+	want := fmt.Sprintf("game-%d", ts.UnixMilli())
+	if m.State().GameID != want {
+		t.Errorf("expected %q, got %q", want, m.State().GameID)
 	}
 }
 
@@ -643,8 +657,10 @@ func TestFullPipeline(t *testing.T) {
 	}
 
 	s := m.State()
-	if s.GameID != "game-1" {
-		t.Errorf("GameID: expected game-1, got %q", s.GameID)
+	// GameID is timestamp-based (game-<unixmilli>) when a real log timestamp
+	// is available; just verify it is non-empty and has the right prefix.
+	if !strings.HasPrefix(s.GameID, "game-") {
+		t.Errorf("GameID: expected prefix %q, got %q", "game-", s.GameID)
 	}
 	if s.Phase != PhaseGameOver {
 		t.Errorf("Phase: expected GAME_OVER, got %s", s.Phase)

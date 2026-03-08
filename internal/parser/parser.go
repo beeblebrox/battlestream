@@ -23,12 +23,26 @@ type Parser struct {
 	inBlock    bool
 	pending    GameEvent
 	blockStack []blockContext
+	refDate    time.Time // reference date for timestamps (default: time.Now())
+	lastTS     time.Time // last emitted timestamp for midnight wrap detection
 }
 
 // New creates a Parser that sends events to out.
 func New(out chan<- GameEvent) *Parser {
 	return &Parser{out: out}
 }
+
+// SetReferenceDate sets the date used for timestamp construction.
+// Use the log file's modification time for reparse, or time.Now() for live tailing.
+// Also handles midnight wrap: if a timestamp appears earlier than the previous one,
+// the reference date is advanced by one day.
+func (p *Parser) SetReferenceDate(t time.Time) {
+	p.refDate = t.Truncate(24 * time.Hour)
+}
+
+// blockTagMinIndent is the minimum number of leading spaces for block tag
+// continuation lines. Update if Blizzard changes the Power.log indentation.
+const blockTagMinIndent = 4
 
 // Power.log regex patterns
 var (
@@ -73,8 +87,9 @@ var (
 
 	// Indented block tag lines:
 	//   "GameState.DebugPrintPower() -     tag=ATK value=2"
-	// Requires at least 4 spaces after the " - " separator.
-	reBlockTag = regexp.MustCompile(`-\s{4,}tag=(\S+)\s+value=(\S*)`)
+	// Requires at least blockTagMinIndent spaces after the " - " separator.
+	// If Blizzard changes the log indentation, update this constant.
+	reBlockTag = regexp.MustCompile(`-\s{` + strconv.Itoa(blockTagMinIndent) + `,}tag=(\S+)\s+value=(\S*)`)
 
 	// BLOCK_START BlockType=PLAY Entity=[entityName=... cardId=BG_LOE_077 player=8] EffectCardId=...
 	reBlockStart = regexp.MustCompile(`BLOCK_START\s+BlockType=\w+\s+Entity=(.+?)\s+EffectCardId=`)
@@ -100,7 +115,7 @@ func (p *Parser) Feed(line string) {
 		return
 	}
 
-	ts := extractTimestamp(line)
+	ts := p.extractTimestamp(line)
 	stripped := stripTimestamp(line)
 
 	// If we're inside a FULL_ENTITY / SHOW_ENTITY block, check for
@@ -259,6 +274,10 @@ func (p *Parser) Flush() {
 
 func (p *Parser) flushPending() {
 	if p.inBlock {
+		if len(p.pending.Tags) == 0 {
+			slog.Warn("flushing entity block with empty Tags — indent regex may need update",
+				"entity", p.pending.EntityName, "entityID", p.pending.EntityID)
+		}
 		// Resolve the CONTROLLER from block tags if present.
 		if ctrl, ok := p.pending.Tags["CONTROLLER"]; ok && p.pending.PlayerID == 0 {
 			p.pending.PlayerID, _ = strconv.Atoi(ctrl)
@@ -282,17 +301,29 @@ func (p *Parser) emit(e GameEvent) {
 	}
 }
 
-func extractTimestamp(line string) time.Time {
+func (p *Parser) extractTimestamp(line string) time.Time {
 	m := reTimestamp.FindStringSubmatch(line)
 	if m == nil {
 		return time.Now()
 	}
-	now := time.Now()
 	t, err := time.Parse("15:04:05.9999999", m[1])
 	if err != nil {
-		return now
+		return time.Now()
 	}
-	return time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), now.Location())
+	ref := p.refDate
+	if ref.IsZero() {
+		ref = time.Now().Truncate(24 * time.Hour)
+		p.refDate = ref
+	}
+	ts := time.Date(ref.Year(), ref.Month(), ref.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), ref.Location())
+	// Midnight wrap detection: if this timestamp is before the last one by more
+	// than 12 hours, assume we crossed midnight and advance the reference date.
+	if !p.lastTS.IsZero() && ts.Before(p.lastTS) && p.lastTS.Sub(ts) > 12*time.Hour {
+		p.refDate = p.refDate.Add(24 * time.Hour)
+		ts = ts.Add(24 * time.Hour)
+	}
+	p.lastTS = ts
+	return ts
 }
 
 func stripTimestamp(line string) string {

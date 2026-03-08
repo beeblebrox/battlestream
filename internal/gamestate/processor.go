@@ -124,7 +124,15 @@ func (p *Processor) Handle(e parser.GameEvent) {
 		p.seenTribes = make(map[string]bool)
 		p.entityTribeReg = make(map[int]string)
 		p.tribeConfirmCount = make(map[string]int)
-		gameID := fmt.Sprintf("game-%d", p.gameSeq)
+		// Derive game ID from CREATE_GAME timestamp for stability across
+		// daemon restarts and reparse (plans 23+24). Falls back to gameSeq
+		// if timestamp is zero.
+		var gameID string
+		if !e.Timestamp.IsZero() {
+			gameID = fmt.Sprintf("game-%d", e.Timestamp.UnixMilli())
+		} else {
+			gameID = fmt.Sprintf("game-%d", p.gameSeq)
+		}
 		p.machine.GameStart(gameID, e.Timestamp)
 
 	case parser.EventPlayerDef:

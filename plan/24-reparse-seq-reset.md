@@ -1,7 +1,11 @@
 # 24 — [IMPROVEMENT] Reparse does not reset `gameSeq`
 
 **Priority:** LOW
+**Status:** DONE (moot — resolved by plan 23)
 **Area:** `cmd/battlestream/` — reparse subcommand, `internal/gamestate/`
+
+**Resolution:** Timestamp-based game IDs (plan 23) eliminate the counter dependency.
+Same log produces same game ID regardless of daemon/reparse context.
 
 ## Problem
 

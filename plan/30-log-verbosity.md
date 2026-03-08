@@ -1,7 +1,12 @@
 # 30 — [IMPROVEMENT] Log verbosity not configurable at runtime
 
 **Priority:** LOW
+**Status:** DONE
 **Area:** `cmd/battlestream/main.go`, `internal/config/`
+
+**Resolution:** Already implemented — `setupLogging()` reads `cfg.Logging.Level`
+(debug/info/warn/error) and configures slog handler. Supports `logging.level` in
+config YAML and file output via `logging.file`.
 
 ## Problem
 

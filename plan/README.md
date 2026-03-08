@@ -61,26 +61,26 @@ tasks with a log of what is done and what remains.
 | 35 | [35-max-health-from-hero.md](35-max-health-from-hero.md) | ~~Max health hardcoded to 40 in TUI~~ **DONE** — MaxHealth tracked from hero HEALTH tag |
 | 14 | [14-parser-panic-recovery.md](14-parser-panic-recovery.md) | ~~No panic recovery in `Feed()`~~ **DONE** — defer recover() with slog.Error |
 | 15 | [15-dead-event-constants.md](15-dead-event-constants.md) | ~~`EventPlayerUpdate`/`EventZoneChange` declared but never emitted~~ **DONE** — removed dead constants |
-| 16 | [16-timestamp-date.md](16-timestamp-date.md) | Timestamp uses today's date — reparse of old logs assigns wrong date; midnight wrap |
+| 16 | [16-timestamp-date.md](16-timestamp-date.md) | ~~Timestamp uses today's date~~ **DONE** — refDate + midnight wrap detection |
 | 17 | [17-enchantment-table-staleness.md](17-enchantment-table-staleness.md) | ~~`categories.go` CardID map manually curated~~ **DONE** — runtime slog.Debug warning for untracked Dnt enchantments |
 
 ## LOW
 
 | # | File | Issue |
 |---|------|-------|
-| 18 | [18-block-indent-threshold.md](18-block-indent-threshold.md) | `reBlockTag` hard-codes 4-space indent — breaks if Blizzard changes indentation |
+| 18 | [18-block-indent-threshold.md](18-block-indent-threshold.md) | ~~`reBlockTag` hard-codes 4-space indent~~ **DONE** — extracted to const + empty Tags warning |
 | 19 | [19-retagchange-ordering.md](19-retagchange-ordering.md) | ~~`reTagChange` catch-all undocumented priority~~ **DONE** — ordering comment added |
 | 20 | [20-block-type-parsing.md](20-block-type-parsing.md) | `BLOCK_START` `BlockType` ignored — can't distinguish attack/spell/play blocks |
 | 21 | [21-zone-position.md](21-zone-position.md) | `ZONE_POSITION` tag ignored — board order and position-dependent buffs wrong |
 | 22 | [22-combat-damage-tags.md](22-combat-damage-tags.md) | No `DAMAGED`/`DEFENDING`/`ATTACKING` handling — combat buff suppression heuristic fragile |
-| 23 | [23-gameid-stable.md](23-gameid-stable.md) | `gameSeq` resets on restart — ID collisions in store after daemon restart |
-| 24 | [24-reparse-seq-reset.md](24-reparse-seq-reset.md) | Reparse does not reset `gameSeq` — inconsistent IDs during live reparse |
+| 23 | [23-gameid-stable.md](23-gameid-stable.md) | ~~`gameSeq` resets on restart~~ **DONE** — timestamp-based game IDs |
+| 24 | [24-reparse-seq-reset.md](24-reparse-seq-reset.md) | ~~Reparse `gameSeq` inconsistent~~ **DONE** — moot via plan 23 |
 | 25 | [25-snapshot-isolation.md](25-snapshot-isolation.md) | No historical board state query — all state is live and mutable |
 | 26 | [26-integration-test-coverage.md](26-integration-test-coverage.md) | Integration tests cover only one log — edge cases untested |
 | 27 | [27-rest-deep-copy.md](27-rest-deep-copy.md) | `machine.State()` deep-copies on every poll — GC pressure for polling clients |
 | 28 | [28-game-history-pagination.md](28-game-history-pagination.md) | `/v1/stats/games` returns all games — unbounded response as store grows |
 | 29 | [29-ws-sse-delta.md](29-ws-sse-delta.md) | WS/SSE broadcast full state on every event — high-frequency combat floods clients |
-| 30 | [30-log-verbosity.md](30-log-verbosity.md) | Log verbosity not configurable at runtime — noise requires recompile to reduce |
+| 30 | [30-log-verbosity.md](30-log-verbosity.md) | ~~Log verbosity not configurable~~ **DONE** — setupLogging reads config level |
 | 31 | [31-metrics.md](31-metrics.md) | No metrics/observability — no Prometheus or similar export |
 | 32 | [32-trinkets-artifacts.md](32-trinkets-artifacts.md) | No trinkets/artifacts support — post-2025 mechanics not covered |
 | 36 | [36-placement-in-result.md](36-placement-in-result.md) | ~~TUI shows WIN/LOSS without placement number~~ **DONE** — displays "WIN #4" / "LOSS #7" |

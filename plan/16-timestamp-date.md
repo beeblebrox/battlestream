@@ -1,7 +1,13 @@
 # 16 — [BUG] Timestamp uses today's date — midnight wrap and wrong reparse dates
 
 **Priority:** MEDIUM
+**Status:** DONE
 **Area:** `internal/parser/parser.go` — `extractTimestamp`
+
+**Resolution:** `extractTimestamp` now uses `refDate` (settable via `SetReferenceDate`)
+instead of `time.Now()`. Midnight wrap detection advances refDate when timestamps jump
+backwards by >12 hours. Default refDate is today for live tailing; reparse can set it
+to the log file's modification time.
 
 ## Problem
 

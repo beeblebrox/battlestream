@@ -1,7 +1,12 @@
 # 23 — [IMPROVEMENT] `gameSeq` not stable across restarts
 
 **Priority:** LOW
-**Area:** `internal/gamestate/`, daemon startup
+**Status:** DONE
+**Area:** `internal/gamestate/processor.go`
+
+**Resolution:** Game ID now derived from CREATE_GAME timestamp (`game-<unixmilli>`).
+Stable across daemon restarts and reparse. Falls back to sequential `game-<n>` only
+when timestamp is zero.
 
 ## Problem
 
