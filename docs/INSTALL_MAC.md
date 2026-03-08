@@ -4,11 +4,27 @@
 
 - macOS 12+
 - Hearthstone installed via Battle.net
-- Go 1.24+ (or download pre-built binary)
+- Git (Xcode Command Line Tools or Homebrew)
 
 ## Steps
 
-### 1. Build battlestream
+### 1. Install Go
+
+Install Go 1.24 or later via Homebrew:
+
+```sh
+brew install go
+```
+
+Or download the `.pkg` installer from https://go.dev/dl/ — it installs to `/usr/local/go` and updates your PATH.
+
+Verify the install:
+```sh
+go version
+# should print go1.24 or later
+```
+
+### 2. Build battlestream
 
 ```sh
 git clone https://github.com/beeblebrox/battlestream
@@ -17,7 +33,7 @@ go build -o battlestream ./cmd/battlestream
 sudo mv battlestream /usr/local/bin/
 ```
 
-### 2. Run discovery
+### 3. Run discovery
 
 ```sh
 battlestream discover
@@ -31,13 +47,13 @@ Searches:
 ~/Library/Preferences/Blizzard/Hearthstone/log.config
 ```
 
-### 3. Start the daemon
+### 4. Start the daemon
 
 ```sh
 battlestream daemon
 ```
 
-### 4. Run as a launchd service (optional)
+### 5. Run as a launchd service (optional)
 
 Create `~/Library/LaunchAgents/io.fixates.battlestream.plist`:
 
@@ -71,7 +87,7 @@ launchctl load ~/Library/LaunchAgents/io.fixates.battlestream.plist
 launchctl start io.fixates.battlestream
 ```
 
-### 5. Verify
+### 6. Verify
 
 ```sh
 curl http://localhost:8080/v1/health

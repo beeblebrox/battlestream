@@ -2,6 +2,43 @@
 
 Hearthstone on Linux runs via Wine or Proton (Steam). battlestream supports both.
 
+## Install Go
+
+Install Go 1.24 or later. The official tarball works on all distros:
+
+```sh
+curl -fsSL https://go.dev/dl/go1.24.4.linux-amd64.tar.gz | sudo tar -C /usr/local -xzf -
+echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.profile
+source ~/.profile
+```
+
+Or use your package manager:
+
+```sh
+# Arch
+sudo pacman -S go
+
+# Ubuntu/Debian (may ship an older version — prefer the tarball above)
+sudo apt install golang-go
+
+# Fedora
+sudo dnf install golang
+
+# openSUSE
+sudo zypper install go
+```
+
+Verify: `go version` should print `go1.24` or later.
+
+## Build battlestream
+
+```sh
+git clone https://github.com/beeblebrox/battlestream
+cd battlestream
+go build -o battlestream ./cmd/battlestream
+sudo mv battlestream /usr/local/bin/
+```
+
 ## Wine
 
 ### Log paths

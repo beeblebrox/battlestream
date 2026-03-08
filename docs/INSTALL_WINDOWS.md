@@ -4,11 +4,27 @@
 
 - Windows 10/11
 - Hearthstone installed via Battle.net
-- Go 1.24+ (for building from source) or download a pre-built binary
+- Git (for cloning the repo)
 
 ## Steps
 
-### 1. Build or download battlestream
+### 1. Install Go
+
+Install Go 1.24 or later. The easiest method is winget:
+
+```powershell
+winget install GoLang.Go
+```
+
+Or download the MSI installer from https://go.dev/dl/ and run it. The installer adds Go to your PATH automatically.
+
+Verify the install:
+```powershell
+go version
+# should print go1.24 or later
+```
+
+### 2. Build battlestream
 
 ```powershell
 git clone https://github.com/beeblebrox/battlestream
@@ -16,7 +32,7 @@ cd battlestream
 go build -o battlestream.exe ./cmd/battlestream
 ```
 
-### 2. Run discovery
+### 3. Run discovery
 
 ```powershell
 .\battlestream.exe discover
@@ -33,13 +49,13 @@ Hearthstone install paths searched automatically:
 %LOCALAPPDATA%\Blizzard\Hearthstone\log.config
 ```
 
-### 3. Start the daemon
+### 4. Start the daemon
 
 ```powershell
 .\battlestream.exe daemon
 ```
 
-### 4. Run as a Windows Service (optional)
+### 5. Run as a Windows Service (optional)
 
 Use NSSM (Non-Sucking Service Manager):
 
@@ -49,7 +65,7 @@ nssm set battlestream AppDirectory "C:\path\to\"
 nssm start battlestream
 ```
 
-### 5. Verify
+### 6. Verify
 
 ```powershell
 curl http://localhost:8080/v1/health

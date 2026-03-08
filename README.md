@@ -34,12 +34,50 @@ curl http://localhost:8080/v1/stats/aggregate
 | Command | Description |
 |---|---|
 | `daemon` | Start background service (gRPC + REST + WS + file output) |
-| `tui` | Live TUI dashboard (connects to running daemon) |
+| `tui` | Live TUI dashboard (connects to running daemon via gRPC) |
+| `replay` | Offline step-through Power.log replay viewer |
 | `discover` | Interactive install discovery wizard |
 | `config` | Show/validate current configuration |
+| `reparse` | Re-process all stored Power.log data |
+| `db-reset` | Reset the BadgerDB database |
 | `version` | Print version info |
 
 ## Installation
+
+### Install Go
+
+battlestream requires **Go 1.24+** to build from source.
+
+**Windows** (winget):
+```powershell
+winget install GoLang.Go
+```
+
+**macOS** (Homebrew):
+```sh
+brew install go
+```
+
+**Linux** (official tarball — works on all distros):
+```sh
+curl -fsSL https://go.dev/dl/go1.24.4.linux-amd64.tar.gz | sudo tar -C /usr/local -xzf -
+echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.profile
+source ~/.profile
+```
+
+Or use your package manager:
+```sh
+# Arch
+sudo pacman -S go
+
+# Ubuntu/Debian (may be an older version — prefer the tarball above)
+sudo apt install golang-go
+
+# Fedora
+sudo dnf install golang
+```
+
+Verify: `go version` should print `go1.24` or later.
 
 ### Build from source
 
