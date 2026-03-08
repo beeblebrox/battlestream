@@ -28,7 +28,7 @@ import (
 	"battlestream.fixates.io/internal/watcher"
 )
 
-const version = "0.1.0-dev"
+var version = "dev"
 
 var (
 	cfgFile     string

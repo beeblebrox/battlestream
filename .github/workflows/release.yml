@@ -1,0 +1,135 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.5.0-beta)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    name: Build & Release
+    needs: ci
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Building release for $TAG"
+
+      - name: Build Linux amd64
+        env:
+          GOOS: linux
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: |
+          go build -trimpath -ldflags="-s -w -X main.version=${{ steps.version.outputs.tag }}" \
+            -o dist/battlestream-linux-amd64 ./cmd/battlestream
+
+      - name: Build Linux arm64
+        env:
+          GOOS: linux
+          GOARCH: arm64
+          CGO_ENABLED: "0"
+        run: |
+          go build -trimpath -ldflags="-s -w -X main.version=${{ steps.version.outputs.tag }}" \
+            -o dist/battlestream-linux-arm64 ./cmd/battlestream
+
+      - name: Build Windows amd64
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: |
+          go build -trimpath -ldflags="-s -w -X main.version=${{ steps.version.outputs.tag }}" \
+            -o dist/battlestream-windows-amd64.exe ./cmd/battlestream
+
+      - name: Build macOS amd64
+        env:
+          GOOS: darwin
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: |
+          go build -trimpath -ldflags="-s -w -X main.version=${{ steps.version.outputs.tag }}" \
+            -o dist/battlestream-darwin-amd64 ./cmd/battlestream
+
+      - name: Build macOS arm64
+        env:
+          GOOS: darwin
+          GOARCH: arm64
+          CGO_ENABLED: "0"
+        run: |
+          go build -trimpath -ldflags="-s -w -X main.version=${{ steps.version.outputs.tag }}" \
+            -o dist/battlestream-darwin-arm64 ./cmd/battlestream
+
+      - name: Create macOS universal binary
+        run: |
+          # Install lipo alternative for Linux (makefat)
+          go install github.com/randall77/makefat@latest
+          makefat dist/battlestream-darwin-universal \
+            dist/battlestream-darwin-amd64 \
+            dist/battlestream-darwin-arm64
+
+      - name: Create archives
+        run: |
+          cd dist
+          TAG="${{ steps.version.outputs.tag }}"
+
+          tar czf "battlestream-${TAG}-linux-amd64.tar.gz" battlestream-linux-amd64
+          tar czf "battlestream-${TAG}-linux-arm64.tar.gz" battlestream-linux-arm64
+          zip "battlestream-${TAG}-windows-amd64.zip" battlestream-windows-amd64.exe
+          tar czf "battlestream-${TAG}-darwin-universal.tar.gz" battlestream-darwin-universal
+
+          sha256sum *.tar.gz *.zip > checksums.txt
+
+      - name: Determine prerelease
+        id: prerelease
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          if echo "$TAG" | grep -qE '(alpha|beta|rc)'; then
+            echo "flag=--prerelease" >> "$GITHUB_OUTPUT"
+          else
+            echo "flag=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --generate-notes \
+            ${{ steps.prerelease.outputs.flag }} \
+            dist/battlestream-${TAG}-linux-amd64.tar.gz \
+            dist/battlestream-${TAG}-linux-arm64.tar.gz \
+            dist/battlestream-${TAG}-windows-amd64.zip \
+            dist/battlestream-${TAG}-darwin-universal.tar.gz \
+            dist/checksums.txt
