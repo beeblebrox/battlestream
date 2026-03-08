@@ -1,6 +1,7 @@
 # 02 — [RISK] Parser state not reset between games
 
 **Priority:** CRITICAL
+**Status:** DONE
 **Area:** `internal/parser/parser.go`
 
 ## Problem
@@ -43,9 +44,8 @@ any test setup paths.
 
 Low — two or three lines in the right place.
 
-## Verification
+## Resolution
 
-- Add a test that feeds a partial block (unclosed `BLOCK_START`), then feeds a new
-  `CREATE_GAME` line, and asserts the resulting events do not include any garbage
-  `EventEntityUpdate` before `EventGameStart`.
-- Confirm the integration test still passes after the change.
+Fixed: `parser.go` resets block state in two places when `reCreateGame` matches:
+1. Inside the `if p.inBlock` check (line ~108): discards stale partial event.
+2. In the main `switch` case for `reCreateGame` (line ~137): resets `inBlock`, `pending`, and `blockStack`.

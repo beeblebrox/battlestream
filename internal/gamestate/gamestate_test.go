@@ -1496,6 +1496,55 @@ func TestCounterGoldNextTurnMultipleOverconfidence(t *testing.T) {
 	}
 }
 
+func TestCounterGoldNextTurnOverconfidenceResetOnTurnBoundary(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+
+	// Set base gold.
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventTagChange,
+		PlayerID:   7,
+		EntityName: "Moch#1358",
+		Tags:       map[string]string{"BACON_PLAYER_EXTRA_GOLD_NEXT_TURN": "1"},
+	})
+
+	// Create an Overconfidence Dnt in PLAY.
+	p.entityController[500] = 7
+	p.entityProps[500] = &entityInfo{CardID: "BG28_884e", Zone: ""}
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventTagChange,
+		EntityID: 500,
+		Tags:     map[string]string{"ZONE": "PLAY"},
+	})
+
+	ac := findAbilityCounter(m, CatGoldNextTurn)
+	if ac == nil || ac.Display != "1 (+3 if win)" {
+		t.Fatalf("before turn boundary: expected \"1 (+3 if win)\", got %v", ac)
+	}
+
+	// Simulate turn boundary: local player TURN tag changes.
+	// Need bgTurnsStarted > 0 for the reset path.
+	p.bgTurnsStarted = 1
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventTagChange,
+		PlayerID:   7,
+		EntityName: "Moch#1358",
+		Tags:       map[string]string{"TURN": "9"},
+	})
+
+	// Overconfidence should be reset — the Dnt may still be in PLAY
+	// but the combat it applied to has resolved.
+	ac = findAbilityCounter(m, CatGoldNextTurn)
+	if ac.Display != "1" {
+		t.Errorf("after turn boundary: expected display \"1\" (no overconfidence), got %q", ac.Display)
+	}
+
+	// Verify overconfidenceCount is actually zero.
+	if p.overconfidenceCount != 0 {
+		t.Errorf("overconfidenceCount should be 0 after turn boundary, got %d", p.overconfidenceCount)
+	}
+}
+
 func TestParseInt(t *testing.T) {
 	cases := []struct {
 		input string

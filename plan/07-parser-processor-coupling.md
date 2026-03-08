@@ -1,6 +1,7 @@
 # 07 — [RISK] Parser→Processor channel undocumented/unbuffered
 
 **Priority:** HIGH
+**Status:** DONE
 **Area:** `internal/parser/parser.go`, daemon startup, `internal/watcher/`
 
 ## Problem
@@ -57,8 +58,9 @@ is designed to be stateful and tolerant of missing intermediate events.
 
 Low — buffer size change + comment. Non-blocking send is optional but adds safety.
 
-## Verification
+## Resolution
 
-- Confirm no integration test relies on channel synchrony (i.e., synchronous processing
-  in tests is fine; this only affects the production goroutine model).
-- Manually verify reparse of the 92K-line log completes without hanging.
+Fixed: All three steps implemented.
+- Channel buffered at 512 in `cmd/battlestream/main.go` (both daemon and reparse paths).
+- Parser `emit()` uses non-blocking `select` with a `default` case that logs a warning
+  and drops the event rather than blocking the tail reader.

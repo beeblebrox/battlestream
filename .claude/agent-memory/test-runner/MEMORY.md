@@ -43,6 +43,13 @@
 
 See `patterns.md` for more architectural details.
 
+## GameID Scheme (changed — timestamp-based)
+- Production code generates `game-<unixmilli>` when EventGameStart has a non-zero Timestamp
+- Falls back to sequential `game-<n>` only when Timestamp is zero
+- Tests using sequential IDs must pass `Timestamp: time.Time{}` (zero value)
+- Tests asserting on the ID format should use `strings.HasPrefix(id, "game-")` or compute the expected value via `fmt.Sprintf("game-%d", ts.UnixMilli())`
+- `TestProcessorGameStartTimestampID` covers the timestamp path; `TestProcessorGameStartIncrementsID` covers sequential fallback
+
 ## Win/Loss Streak Detection Bug (fixed 2026-03-07)
 - BG GameState log contains TWO types of PROPOSED_ATTACKER events:
   1. Real-time combat block: fires during actual combat, reliable for win/loss

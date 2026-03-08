@@ -346,6 +346,16 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 					p.lastCombatHeroAttackerID = 0
 					p.bgTurnsStarted++
 					p.flushPendingStatChanges()
+
+					// Reset Overconfidence count at turn boundary.
+					// The Dnt enchantment may linger in PLAY zone well
+					// into the next turn, but its effect was consumed by
+					// the combat that just resolved.
+					if p.overconfidenceCount > 0 {
+						p.overconfidenceCount = 0
+						p.updateGoldNextTurnCounter()
+					}
+
 					p.machine.SetTurn(turn)
 				}
 			}

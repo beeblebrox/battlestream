@@ -1,6 +1,7 @@
 # 06 — [RISK] Board snapshot/restore unconditional on non-empty
 
 **Priority:** HIGH
+**Status:** DONE
 **Area:** `internal/gamestate/processor.go` — `GameEnd` handler, `UpdateBoardSnapshot`
 
 ## Problem
@@ -58,8 +59,8 @@ Option A is simpler and sufficient.
 Low — one guard condition, but requires careful verification with the integration test
 log to confirm the phase at the time `UpdateBoardSnapshot` is called.
 
-## Verification
+## Resolution
 
-- Run integration test and assert final board stats match expected buffed values, not base stats.
-- Add a test with a simulated combat-then-game-end sequence to confirm snapshot is
-  not overwritten during combat.
+Fixed with Option A (snapshot phase gate): `tryAddMinionFromRegistry` only calls
+`UpdateBoardSnapshot()` when `p.machine.Phase() == PhaseRecruit`. Combat copies
+arriving during PhaseCombat do not overwrite the recruit board snapshot.

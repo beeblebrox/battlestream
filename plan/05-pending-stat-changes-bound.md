@@ -1,6 +1,7 @@
 # 05 — [RISK] `pendingStatChanges` is never bounded
 
 **Priority:** HIGH
+**Status:** DONE
 **Area:** `internal/gamestate/processor.go`
 
 ## Problem
@@ -44,8 +45,8 @@ Both options should be applied.
 
 Low — a few lines of guard code.
 
-## Verification
+## Resolution
 
-- Unit test: append >200 changes without a turn boundary event; assert flush is triggered
-  and a warning is logged.
-- Confirm integration test still passes.
+Fixed: Both options implemented.
+- `maxPendingStatChanges = 200` constant defined and enforced after each append with a warning log.
+- `flushPendingStatChanges()` called on `EventGameStart` and `EventGameEnd` in the Handle switch.

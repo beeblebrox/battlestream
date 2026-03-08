@@ -1,6 +1,7 @@
 # 04 — [BUG] `handleTagChange` may apply opponent's tier to local player
 
 **Priority:** CRITICAL
+**Status:** DONE
 **Area:** `internal/gamestate/processor.go` — `handleTagChange`
 
 ## Problem
@@ -50,8 +51,9 @@ than `0` so that an unset ID can never accidentally match `controllerID == 0`.
 
 Low — guard condition tightening.
 
-## Verification
+## Resolution
 
-- Unit test: emit a `TAG_CHANGE` for an entity with `controllerID == 0` and assert
-  `machine.SetTavernTier` is NOT called when `localPlayerID` is unset.
-- Integration test: confirm local player's tavern tier is correct throughout the sample log.
+Fixed: `handleTagChange` PLAYER_TECH_LEVEL/TAVERN_TIER case now requires
+`controllerID != 0` before matching against `localPlayerID`. Falls back to
+`isLocalPlayerEntity` only when controllerID is unknown (0). This prevents
+`controllerID==0==localPlayerID` from matching when localPlayerID is unset.

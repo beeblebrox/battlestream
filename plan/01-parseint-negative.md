@@ -1,6 +1,7 @@
 # 01 — [BUG] `parseInt` silently accepts negative numbers as positive
 
 **Priority:** CRITICAL
+**Status:** DONE
 **Area:** `internal/gamestate/processor.go` (or wherever `parseInt` is defined)
 
 ## Problem
@@ -59,12 +60,7 @@ variant and audit all call sites to choose the appropriate default.
 Low — mechanical replacement. Requires a grep for all `parseInt(` call sites to verify
 none depend on the sign-stripping behaviour.
 
-## Verification
+## Resolution
 
-Add a unit test:
-```go
-assertEqual(parseInt("-5"), -5)
-assertEqual(parseInt("0"), 0)
-assertEqual(parseInt("42"), 42)
-assertEqual(parseInt("bad"), 0)
-```
+Fixed: `parseInt` in `internal/gamestate/state.go` now uses `strconv.Atoi(strings.TrimSpace(s))`,
+which correctly handles negative numbers and returns 0 on error.

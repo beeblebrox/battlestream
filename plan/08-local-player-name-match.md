@@ -1,6 +1,7 @@
 # 08 — [BUG] `isLocalPlayerEntity` name-string match can false-positive
 
 **Priority:** HIGH
+**Status:** DONE
 **Area:** `internal/gamestate/processor.go` — `isLocalPlayerEntity`
 
 ## Problem
@@ -57,8 +58,9 @@ Option A is safer as a first step; Option B once confirmed by testing.
 
 Low — guard condition change + optional warning log.
 
-## Verification
+## Resolution
 
-- Unit test: `isLocalPlayerEntity` should return `false` when `localHeroID` is set but
-  does not match the event entity, even if name matches.
-- Integration test should still correctly identify local player throughout the sample log.
+Fixed with Option A (demoted name to last resort with warning):
+- Prefers `PlayerID` match (most reliable).
+- Only uses name fallback when `localPlayerID == 0` (with `slog.Warn`).
+- Additional safe bare-name fallback for events with `e.PlayerID == 0` when localPlayerID is known.

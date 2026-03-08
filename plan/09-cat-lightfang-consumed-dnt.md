@@ -1,6 +1,7 @@
 # 09 — [RISK] `CatLightfang` and `CatConsumed` have no Dnt handlers
 
 **Priority:** HIGH
+**Status:** DONE
 **Area:** `internal/gamestate/processor.go` — `handleDntTagChange`, `categories.go`
 
 ## Problem
@@ -52,7 +53,9 @@ Exact field mapping depends on what the HDT counter class reveals.
 Low-medium — requires research before coding. The buff-scout agent workflow is the right
 tool for the research phase.
 
-## Verification
+## Resolution
 
-- Run buff-scout against HDT reference for Lightfang and Consumed enchantment CardIDs.
-- If counters exist, feed a game log that triggers them and verify TUI shows non-zero values.
+Investigation complete: CatLightfang and CatConsumed have no player-level Dnt counters.
+HDT has no LightfangCounter.cs or ConsumedCounter.cs. They are purely per-minion
+enchantments tracked via `handleEnchantmentEntity`. Explicit comment added in
+`handleDntTagChange` documenting this finding.
