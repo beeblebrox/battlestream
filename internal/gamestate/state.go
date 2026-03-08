@@ -2,6 +2,8 @@
 package gamestate
 
 import (
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -31,6 +33,7 @@ type BGGameState struct {
 	BuffSources     []BuffSource     `json:"buff_sources,omitempty"`
 	AbilityCounters []AbilityCounter `json:"ability_counters,omitempty"`
 	Enchantments    []Enchantment    `json:"enchantments,omitempty"`
+	AvailableTribes []string         `json:"available_tribes,omitempty"`
 	StartTime     time.Time
 	EndTime       *time.Time
 	Placement     int
@@ -41,12 +44,19 @@ type PlayerState struct {
 	Name        string `json:"name"`
 	HeroCardID  string `json:"hero_card_id"`
 	Health      int    `json:"health"`
+	MaxHealth   int    `json:"max_health"`
+	Damage      int    `json:"damage"`
 	Armor       int    `json:"armor"`
 	CurrentGold int    `json:"current_gold"`
 	SpellPower  int    `json:"spell_power"`
 	TripleCount int    `json:"triple_count"`
 	WinStreak   int    `json:"win_streak"`
 	LossStreak  int    `json:"loss_streak"`
+}
+
+// EffectiveHealth returns the current effective health (Health - Damage).
+func (p PlayerState) EffectiveHealth() int {
+	return p.Health - p.Damage
 }
 
 // MinionState describes a single minion on the board.
@@ -137,6 +147,7 @@ func (m *Machine) State() BGGameState {
 	s.BuffSources = append([]BuffSource(nil), m.state.BuffSources...)
 	s.AbilityCounters = append([]AbilityCounter(nil), m.state.AbilityCounters...)
 	s.Enchantments = append([]Enchantment(nil), m.state.Enchantments...)
+	s.AvailableTribes = append([]string(nil), m.state.AvailableTribes...)
 	return s
 }
 
@@ -148,7 +159,7 @@ func (m *Machine) GameStart(gameID string, t time.Time) {
 		GameID:    gameID,
 		Phase:     PhaseLobby,
 		StartTime: t,
-		Player:    PlayerState{Health: 40},
+		Player:    PlayerState{},
 	}
 	m.gameEntityTurn = 0
 }
@@ -292,6 +303,22 @@ func (m *Machine) AddMod(mod StatMod) {
 	m.state.Modifications = append(m.state.Modifications, mod)
 }
 
+// RecordRoundWin increments the win streak and resets the loss streak.
+func (m *Machine) RecordRoundWin() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.state.Player.WinStreak++
+	m.state.Player.LossStreak = 0
+}
+
+// RecordRoundLoss increments the loss streak and resets the win streak.
+func (m *Machine) RecordRoundLoss() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.state.Player.LossStreak++
+	m.state.Player.WinStreak = 0
+}
+
 // SetTavernTier updates the current tavern tier.
 func (m *Machine) SetTavernTier(tier int) {
 	m.mu.Lock()
@@ -302,7 +329,14 @@ func (m *Machine) SetTavernTier(tier int) {
 func applyTagToPlayer(p *PlayerState, tag, value string) {
 	switch tag {
 	case "HEALTH":
-		p.Health = parseInt(value)
+		v := parseInt(value)
+		p.Health = v
+		// Track max health from the first (highest) HEALTH value seen.
+		if v > p.MaxHealth {
+			p.MaxHealth = v
+		}
+	case "DAMAGE":
+		p.Damage = parseInt(value)
 	case "ARMOR":
 		p.Armor = parseInt(value)
 	case "SPELL_POWER":
@@ -311,6 +345,31 @@ func applyTagToPlayer(p *PlayerState, tag, value string) {
 		// handled separately
 	case "PLAYER_TRIPLES":
 		p.TripleCount = parseInt(value)
+	}
+}
+
+// AddAvailableTribe adds a tribe to the available tribes list if not already present.
+func (m *Machine) AddAvailableTribe(tribe string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, t := range m.state.AvailableTribes {
+		if t == tribe {
+			return
+		}
+	}
+	m.state.AvailableTribes = append(m.state.AvailableTribes, tribe)
+}
+
+// RemoveAvailableTribe removes a tribe from the available list (used when a
+// provisionally-registered tribe is discovered to be from a multi-tribe entity).
+func (m *Machine) RemoveAvailableTribe(tribe string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, t := range m.state.AvailableTribes {
+		if t == tribe {
+			m.state.AvailableTribes = append(m.state.AvailableTribes[:i], m.state.AvailableTribes[i+1:]...)
+			return
+		}
 	}
 }
 
@@ -348,6 +407,18 @@ func (m *Machine) SetAbilityCounter(category string, value int, display string) 
 		Value:    value,
 		Display:  display,
 	})
+}
+
+// RemoveAbilityCounter removes the ability counter for the given category (no-op if absent).
+func (m *Machine) RemoveAbilityCounter(category string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, ac := range m.state.AbilityCounters {
+		if ac.Category == category {
+			m.state.AbilityCounters = append(m.state.AbilityCounters[:i], m.state.AbilityCounters[i+1:]...)
+			return
+		}
+	}
 }
 
 // AddEnchantment registers an enchantment and attaches it to the target minion.
@@ -397,11 +468,9 @@ func (m *Machine) RemoveEnchantmentsForEntity(entityID int) {
 }
 
 func parseInt(s string) int {
-	n := 0
-	for _, c := range s {
-		if c >= '0' && c <= '9' {
-			n = n*10 + int(c-'0')
-		}
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil {
+		return 0
 	}
 	return n
 }

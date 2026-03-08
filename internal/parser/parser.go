@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"log/slog"
 	"regexp"
 	"strconv"
 	"strings"
@@ -102,8 +103,16 @@ func (p *Parser) Feed(line string) {
 			p.pending.Tags[m[1]] = m[2]
 			return
 		}
-		// Non-continuation line: flush the accumulated entity event.
-		p.flushPending()
+		// A new game trumps any pending block state — discard the stale
+		// partial event rather than flushing it as garbage.
+		if reCreateGame.MatchString(stripped) {
+			p.inBlock = false
+			p.pending = GameEvent{}
+			p.blockStack = p.blockStack[:0]
+		} else {
+			// Non-continuation line: flush the accumulated entity event.
+			p.flushPending()
+		}
 	}
 
 	// Handle BLOCK_START/BLOCK_END for context tracking.
@@ -125,6 +134,10 @@ func (p *Parser) Feed(line string) {
 
 	switch {
 	case reCreateGame.MatchString(stripped):
+		// Reset any leftover block state from the previous game.
+		p.inBlock = false
+		p.pending = GameEvent{}
+		p.blockStack = p.blockStack[:0]
 		p.emit(GameEvent{
 			Type:      EventGameStart,
 			Timestamp: ts,
@@ -137,17 +150,20 @@ func (p *Parser) Feed(line string) {
 		playerID, _ := strconv.Atoi(m[2])
 		hi := m[3]
 		lo := m[4]
-		p.emit(GameEvent{
-			Type:      EventPlayerDef,
+		// Use block mode so that subsequent indented tag= lines (e.g. HERO_ENTITY)
+		// are captured in p.pending.Tags before the event is emitted.
+		p.pending = GameEvent{
+			Type:     EventPlayerDef,
 			Timestamp: ts,
-			EntityID:  entityID,
-			PlayerID:  playerID,
+			EntityID: entityID,
+			PlayerID: playerID,
 			Tags: map[string]string{
 				"hi":        hi,
 				"lo":        lo,
 				"PLAYER_ID": m[2],
 			},
-		})
+		}
+		p.inBlock = true
 
 	case rePlayerNameLine.MatchString(stripped):
 		m := rePlayerNameLine.FindStringSubmatch(stripped)
@@ -242,8 +258,15 @@ func (p *Parser) flushPending() {
 }
 
 func (p *Parser) emit(e GameEvent) {
-	if p.out != nil {
-		p.out <- e
+	if p.out == nil {
+		return
+	}
+	select {
+	case p.out <- e:
+	default:
+		// Channel full — drop event rather than blocking the log tail reader.
+		// This should be extremely rare if the channel is adequately buffered.
+		slog.Warn("parser event channel full, dropping event", "type", e.Type)
 	}
 }
 

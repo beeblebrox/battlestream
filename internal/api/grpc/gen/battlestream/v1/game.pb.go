@@ -33,6 +33,8 @@ type PlayerStats struct {
 	WinStreak     int32                  `protobuf:"varint,8,opt,name=win_streak,json=winStreak,proto3" json:"win_streak,omitempty"`
 	Placement     int32                  `protobuf:"varint,9,opt,name=placement,proto3" json:"placement,omitempty"`
 	LossStreak    int32                  `protobuf:"varint,10,opt,name=loss_streak,json=lossStreak,proto3" json:"loss_streak,omitempty"`
+	MaxHealth     int32                  `protobuf:"varint,11,opt,name=max_health,json=maxHealth,proto3" json:"max_health,omitempty"`
+	Damage        int32                  `protobuf:"varint,12,opt,name=damage,proto3" json:"damage,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -133,6 +135,20 @@ func (x *PlayerStats) GetPlacement() int32 {
 func (x *PlayerStats) GetLossStreak() int32 {
 	if x != nil {
 		return x.LossStreak
+	}
+	return 0
+}
+
+func (x *PlayerStats) GetMaxHealth() int32 {
+	if x != nil {
+		return x.MaxHealth
+	}
+	return 0
+}
+
+func (x *PlayerStats) GetDamage() int32 {
+	if x != nil {
+		return x.Damage
 	}
 	return 0
 }
@@ -574,6 +590,7 @@ type GameState struct {
 	BuffSources     []*BuffSource          `protobuf:"bytes,13,rep,name=buff_sources,json=buffSources,proto3" json:"buff_sources,omitempty"`
 	Enchantments    []*Enchantment         `protobuf:"bytes,14,rep,name=enchantments,proto3" json:"enchantments,omitempty"`
 	AbilityCounters []*AbilityCounter      `protobuf:"bytes,15,rep,name=ability_counters,json=abilityCounters,proto3" json:"ability_counters,omitempty"`
+	AvailableTribes []string               `protobuf:"bytes,16,rep,name=available_tribes,json=availableTribes,proto3" json:"available_tribes,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -713,6 +730,13 @@ func (x *GameState) GetAbilityCounters() []*AbilityCounter {
 	return nil
 }
 
+func (x *GameState) GetAvailableTribes() []string {
+	if x != nil {
+		return x.AvailableTribes
+	}
+	return nil
+}
+
 type GameEvent struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Type          string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
@@ -801,7 +825,7 @@ var File_battlestream_v1_game_proto protoreflect.FileDescriptor
 
 const file_battlestream_v1_game_proto_rawDesc = "" +
 	"\n" +
-	"\x1abattlestream/v1/game.proto\x12\x0fbattlestream.v1\"\xb4\x02\n" +
+	"\x1abattlestream/v1/game.proto\x12\x0fbattlestream.v1\"\xeb\x02\n" +
 	"\vPlayerStats\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\fhero_card_id\x18\x02 \x01(\tR\n" +
@@ -818,7 +842,10 @@ const file_battlestream_v1_game_proto_rawDesc = "" +
 	"\tplacement\x18\t \x01(\x05R\tplacement\x12\x1f\n" +
 	"\vloss_streak\x18\n" +
 	" \x01(\x05R\n" +
-	"lossStreak\"\xac\x02\n" +
+	"lossStreak\x12\x1d\n" +
+	"\n" +
+	"max_health\x18\v \x01(\x05R\tmaxHealth\x12\x16\n" +
+	"\x06damage\x18\f \x01(\x05R\x06damage\"\xac\x02\n" +
 	"\vMinionState\x12\x1b\n" +
 	"\tentity_id\x18\x01 \x01(\x05R\bentityId\x12\x17\n" +
 	"\acard_id\x18\x02 \x01(\tR\x06cardId\x12\x12\n" +
@@ -861,7 +888,7 @@ const file_battlestream_v1_game_proto_rawDesc = "" +
 	"\x05delta\x18\x04 \x01(\x05R\x05delta\x12\x16\n" +
 	"\x06source\x18\x05 \x01(\tR\x06source\x12\x1a\n" +
 	"\bcategory\x18\x06 \x01(\tR\bcategory\x12\x17\n" +
-	"\acard_id\x18\a \x01(\tR\x06cardId\"\xd0\x05\n" +
+	"\acard_id\x18\a \x01(\tR\x06cardId\"\xfb\x05\n" +
 	"\tGameState\x12\x17\n" +
 	"\agame_id\x18\x01 \x01(\tR\x06gameId\x12\x14\n" +
 	"\x05phase\x18\x02 \x01(\tR\x05phase\x12\x12\n" +
@@ -879,7 +906,8 @@ const file_battlestream_v1_game_proto_rawDesc = "" +
 	"\tplacement\x18\f \x01(\x05R\tplacement\x12>\n" +
 	"\fbuff_sources\x18\r \x03(\v2\x1b.battlestream.v1.BuffSourceR\vbuffSources\x12@\n" +
 	"\fenchantments\x18\x0e \x03(\v2\x1c.battlestream.v1.EnchantmentR\fenchantments\x12J\n" +
-	"\x10ability_counters\x18\x0f \x03(\v2\x1f.battlestream.v1.AbilityCounterR\x0fabilityCounters\"\x90\x02\n" +
+	"\x10ability_counters\x18\x0f \x03(\v2\x1f.battlestream.v1.AbilityCounterR\x0fabilityCounters\x12)\n" +
+	"\x10available_tribes\x18\x10 \x03(\tR\x0favailableTribes\"\x90\x02\n" +
 	"\tGameEvent\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12%\n" +
 	"\x0etimestamp_unix\x18\x02 \x01(\x03R\rtimestampUnix\x12\x1b\n" +

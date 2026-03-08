@@ -10,6 +10,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -52,28 +55,82 @@ type Model struct {
 	steps     []Step // slice of replay.Steps for selected game
 	filtered  []int  // indices into steps after applying filter
 	cursor    int    // position in filtered slice
-	logScroll int
 	width     int
 	height    int
-	inputMode bool
-	input     string
+	inputMode bool        // true while jump-to-turn input is active
+	jumpInput textinput.Model // bubbles/textinput for jump-to-turn
 	filter    int // index into eventTypeNames; 0 = ALL
+
+	// bubbles/spinner for the async loading screen.
+	loadSpinner spinner.Model
+
+	// Viewport components (bubbles/viewport) for scrollable panels.
+	// rawVP handles the raw log at the bottom (j/k + mouse wheel).
+	// boardVP / buffVP / changesVP handle the middle panels (J/K, synced).
+	rawVP     viewport.Model
+	boardVP   viewport.Model
+	buffVP    viewport.Model
+	changesVP viewport.Model
+
+	// Panel positions (updated each View frame) for mouse routing and scrubbing.
+	row2StartY int
+	row3StartY int
+	rawStartY  int
+	halfWBound int // X boundary between left and right half panels
+
+	// Per-panel scrollbar column X and viewport Y/height.
+	boardScrollX, boardVPY, boardVPH     int
+	buffScrollX, buffVPY, buffVPH        int
+	changesScrollX, changesVPY, changesVPH int
+	rawScrollX, rawVPY, rawVPH           int
+
+	// Drag-scrubbing state.
+	scrubbing  bool
+	scrubPanel int // 0=board 1=buff 2=changes 3=raw
+	scrubTrackY int
+	scrubTrackH int
+}
+
+func newJumpInput() textinput.Model {
+	ti := textinput.New()
+	ti.Placeholder = "turn #"
+	ti.CharLimit = 6
+	ti.Validate = func(s string) error {
+		for _, c := range s {
+			if c < '0' || c > '9' {
+				return fmt.Errorf("digits only")
+			}
+		}
+		return nil
+	}
+	return ti
+}
+
+func newLoadSpinner() spinner.Model {
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+	sp.Style = lipgloss.NewStyle().Foreground(colorPurple)
+	return sp
 }
 
 // New creates a debug TUI Model that loads replay data asynchronously.
 func New(paths []string) *Model {
 	return &Model{
-		loading:  true,
-		paths:    paths,
-		progress: &loadProgress{},
+		loading:     true,
+		paths:       paths,
+		progress:    &loadProgress{},
+		jumpInput:   newJumpInput(),
+		loadSpinner: newLoadSpinner(),
 	}
 }
 
 // NewFromReplay creates a debug TUI Model from a pre-loaded replay (for tests).
 func NewFromReplay(replay *Replay) *Model {
 	m := &Model{
-		replay:  replay,
-		picking: len(replay.Games) > 1,
+		replay:      replay,
+		picking:     len(replay.Games) > 1,
+		jumpInput:   newJumpInput(),
+		loadSpinner: newLoadSpinner(),
 	}
 	if len(replay.Games) == 1 {
 		m.selectGame(0)
@@ -83,7 +140,7 @@ func NewFromReplay(replay *Replay) *Model {
 
 // Run starts the Bubbletea program.
 func (m *Model) Run() error {
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err := p.Run()
 	return err
 }
@@ -96,10 +153,32 @@ func (m *Model) selectGame(idx int) {
 	m.gameIdx = idx
 	m.steps = m.replay.Steps[g.StepStart:g.StepEnd]
 	m.cursor = 0
-	m.logScroll = 0
 	m.filter = 0
 	m.picking = false
 	m.rebuildFiltered()
+	m.resetScrollAll()
+}
+
+// resetScrollAll resets all viewport scroll positions to the top.
+func (m *Model) resetScrollAll() {
+	m.rawVP.GotoTop()
+	m.boardVP.GotoTop()
+	m.buffVP.GotoTop()
+	m.changesVP.GotoTop()
+}
+
+// resetPanelScroll resets only the middle panel viewports.
+func (m *Model) resetPanelScroll() {
+	m.boardVP.GotoTop()
+	m.buffVP.GotoTop()
+	m.changesVP.GotoTop()
+}
+
+// syncPanelScroll copies boardVP's YOffset to buffVP and changesVP so all
+// three middle panels scroll in lockstep.
+func (m *Model) syncPanelScroll() {
+	m.buffVP.YOffset = m.boardVP.YOffset
+	m.changesVP.YOffset = m.boardVP.YOffset
 }
 
 func (m *Model) rebuildFiltered() {
@@ -136,6 +215,7 @@ func (m *Model) Init() tea.Cmd {
 		return tea.Batch(
 			loadReplayCmd(m.paths, m.progress),
 			tickProgressCmd(),
+			m.loadSpinner.Tick,
 		)
 	}
 	return nil
@@ -165,6 +245,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 
+	case spinner.TickMsg:
+		if m.loading {
+			var cmd tea.Cmd
+			m.loadSpinner, cmd = m.loadSpinner.Update(msg)
+			return m, cmd
+		}
+		return m, nil
+
 	case loadProgressMsg:
 		if m.loading {
 			return m, tickProgressCmd()
@@ -188,6 +276,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case tea.MouseMsg:
+		if !m.loading && !m.picking && m.loadErr == nil {
+			return m.handleMouse(msg)
+		}
+
 	case tea.KeyMsg:
 		if m.loading {
 			if msg.String() == "q" || msg.String() == "ctrl+c" {
@@ -205,6 +298,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleInputMode(msg)
 		}
 		return m.handleNormalMode(msg)
+	}
+	// Forward non-key messages to jumpInput when active (cursor blink etc.).
+	if m.inputMode {
+		var cmd tea.Cmd
+		m.jumpInput, cmd = m.jumpInput.Update(msg)
+		return m, cmd
 	}
 	return m, nil
 }
@@ -239,22 +338,19 @@ func (m *Model) handleInputMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
 		m.inputMode = false
-		if turn, err := strconv.Atoi(m.input); err == nil {
+		if turn, err := strconv.Atoi(m.jumpInput.Value()); err == nil {
 			m.jumpToTurn(turn)
 		}
-		m.input = ""
+		m.jumpInput.SetValue("")
+		m.jumpInput.Blur()
 	case "esc":
 		m.inputMode = false
-		m.input = ""
-	case "backspace":
-		if len(m.input) > 0 {
-			m.input = m.input[:len(m.input)-1]
-		}
+		m.jumpInput.SetValue("")
+		m.jumpInput.Blur()
 	default:
-		ch := msg.String()
-		if len(ch) == 1 && ch[0] >= '0' && ch[0] <= '9' {
-			m.input += ch
-		}
+		var cmd tea.Cmd
+		m.jumpInput, cmd = m.jumpInput.Update(msg)
+		return m, cmd
 	}
 	return m, nil
 }
@@ -283,27 +379,131 @@ func (m *Model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.prevPhase()
 	case "g":
 		m.cursor = 0
-		m.logScroll = 0
+		m.resetScrollAll()
 	case "G":
 		if len(m.filtered) > 0 {
 			m.cursor = len(m.filtered) - 1
 		}
-		m.logScroll = 0
+		m.resetScrollAll()
 	case "t":
 		m.inputMode = true
-		m.input = ""
+		m.jumpInput.SetValue("")
+		m.jumpInput.Focus()
 	case "j", "down":
-		m.logScroll++
+		m.rawVP.ScrollDown(1)
 	case "k", "up":
-		if m.logScroll > 0 {
-			m.logScroll--
-		}
+		m.rawVP.ScrollUp(1)
+	case "J":
+		m.boardVP.ScrollDown(1)
+		m.syncPanelScroll()
+	case "K":
+		m.boardVP.ScrollUp(1)
+		m.syncPanelScroll()
 	case "f":
 		m.filter = (m.filter + 1) % len(eventTypeNames)
 		m.rebuildFiltered()
-		m.logScroll = 0
+		m.rawVP.GotoTop()
 	}
 	return m, nil
+}
+
+// ── Mouse handling ───────────────────────────────────────────────
+
+func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	// Wheel events: route to the panel under the cursor.
+	if tea.MouseEvent(msg).IsWheel() {
+		var cmd tea.Cmd
+		switch {
+		case msg.Y >= m.rawStartY:
+			m.rawVP, cmd = m.rawVP.Update(msg)
+		case msg.Y >= m.row3StartY && msg.X < m.halfWBound:
+			m.buffVP, cmd = m.buffVP.Update(msg)
+		case msg.Y >= m.row3StartY:
+			m.changesVP, cmd = m.changesVP.Update(msg)
+		case msg.Y >= m.row2StartY && msg.X >= m.halfWBound:
+			m.boardVP, cmd = m.boardVP.Update(msg)
+		}
+		return m, cmd
+	}
+
+	switch msg.Action {
+	case tea.MouseActionPress:
+		if msg.Button == tea.MouseButtonLeft {
+			panel, trackY, trackH := m.identifyScrollbar(msg.X, msg.Y)
+			if panel >= 0 {
+				m.scrubbing = true
+				m.scrubPanel = panel
+				m.scrubTrackY = trackY
+				m.scrubTrackH = trackH
+				m.scrubAt(msg.Y)
+			}
+		}
+	case tea.MouseActionMotion:
+		if m.scrubbing && msg.Button == tea.MouseButtonLeft {
+			m.scrubAt(msg.Y)
+		}
+	case tea.MouseActionRelease:
+		m.scrubbing = false
+	}
+	return m, nil
+}
+
+// identifyScrollbar returns the panel index and track info if (x,y) falls on a scrollbar.
+// Returns panel=-1 if not on a scrollbar.
+func (m *Model) identifyScrollbar(x, y int) (panel, trackY, trackH int) {
+	switch {
+	case x == m.boardScrollX && y >= m.boardVPY && y < m.boardVPY+m.boardVPH:
+		return 0, m.boardVPY, m.boardVPH
+	case x == m.buffScrollX && y >= m.buffVPY && y < m.buffVPY+m.buffVPH:
+		return 1, m.buffVPY, m.buffVPH
+	case x == m.changesScrollX && y >= m.changesVPY && y < m.changesVPY+m.changesVPH:
+		return 2, m.changesVPY, m.changesVPH
+	case x == m.rawScrollX && y >= m.rawVPY && y < m.rawVPY+m.rawVPH:
+		return 3, m.rawVPY, m.rawVPH
+	}
+	return -1, 0, 0
+}
+
+func (m *Model) vpForPanel(panel int) *viewport.Model {
+	switch panel {
+	case 0:
+		return &m.boardVP
+	case 1:
+		return &m.buffVP
+	case 2:
+		return &m.changesVP
+	case 3:
+		return &m.rawVP
+	}
+	return nil
+}
+
+func (m *Model) scrubAt(y int) {
+	if vp := m.vpForPanel(m.scrubPanel); vp != nil {
+		scrollbarJump(vp, y, m.scrubTrackY, m.scrubTrackH)
+	}
+}
+
+// scrollbarJump moves vp's scroll position to match a click at (clickY) in a
+// scrollbar track that spans trackY..trackY+trackH-1.
+func scrollbarJump(vp *viewport.Model, clickY, trackY, trackH int) {
+	relY := clickY - trackY
+	if relY < 0 || relY >= trackH || trackH <= 1 {
+		return
+	}
+	maxOffset := vp.TotalLineCount() - trackH
+	if maxOffset <= 0 {
+		return
+	}
+	pct := float64(relY) / float64(trackH-1)
+	target := int(pct * float64(maxOffset))
+	if target < 0 {
+		target = 0
+	}
+	if target > maxOffset {
+		target = maxOffset
+	}
+	vp.YOffset = target
 }
 
 func (m *Model) moveCursor(delta int) {
@@ -314,7 +514,7 @@ func (m *Model) moveCursor(delta int) {
 	if m.cursor >= len(m.filtered) {
 		m.cursor = len(m.filtered) - 1
 	}
-	m.logScroll = 0
+	m.resetScrollAll()
 }
 
 func (m *Model) nextTurn() {
@@ -323,7 +523,7 @@ func (m *Model) nextTurn() {
 		for i := m.cursor + 1; i < len(m.filtered); i++ {
 			if m.steps[m.filtered[i]].Turn > currentTurn {
 				m.cursor = i
-				m.logScroll = 0
+				m.resetScrollAll()
 				return
 			}
 		}
@@ -339,12 +539,12 @@ func (m *Model) prevTurn() {
 				for j := i; j >= 0; j-- {
 					if m.steps[m.filtered[j]].Turn < targetTurn {
 						m.cursor = j + 1
-						m.logScroll = 0
+						m.resetScrollAll()
 						return
 					}
 				}
 				m.cursor = 0
-				m.logScroll = 0
+				m.resetScrollAll()
 				return
 			}
 		}
@@ -357,7 +557,7 @@ func (m *Model) nextPhase() {
 		for i := m.cursor + 1; i < len(m.filtered); i++ {
 			if m.steps[m.filtered[i]].State.Phase != currentPhase {
 				m.cursor = i
-				m.logScroll = 0
+				m.resetScrollAll()
 				return
 			}
 		}
@@ -374,12 +574,12 @@ func (m *Model) prevPhase() {
 				for j := i; j >= 0; j-- {
 					if m.steps[m.filtered[j]].State.Phase != targetPhase {
 						m.cursor = j + 1
-						m.logScroll = 0
+						m.resetScrollAll()
 						return
 					}
 				}
 				m.cursor = 0
-				m.logScroll = 0
+				m.resetScrollAll()
 				return
 			}
 		}
@@ -387,10 +587,26 @@ func (m *Model) prevPhase() {
 }
 
 func (m *Model) jumpToTurn(turn int) {
+	// Land on the last step of the requested turn so the caller sees
+	// end-of-turn state (after end-of-turn effects) rather than the boundary.
+	last := -1
+	for i, idx := range m.filtered {
+		if m.steps[idx].Turn == turn {
+			last = i
+		} else if last >= 0 {
+			break // moved past this turn
+		}
+	}
+	if last >= 0 {
+		m.cursor = last
+		m.resetScrollAll()
+		return
+	}
+	// Fallback: first step with Turn >= turn.
 	for i, idx := range m.filtered {
 		if m.steps[idx].Turn >= turn {
 			m.cursor = i
-			m.logScroll = 0
+			m.resetScrollAll()
 			return
 		}
 	}
@@ -409,7 +625,7 @@ func (m *Model) View() string {
 		fileIdx := m.progress.fileIdx.Load()
 		var b strings.Builder
 		b.WriteString("\n")
-		b.WriteString(styleTitle.Render("  Loading...") + "\n\n")
+		b.WriteString(m.loadSpinner.View() + " " + styleTitle.Render("Loading...") + "\n\n")
 		b.WriteString(fmt.Sprintf("  File %d/%d", fileIdx+1, len(m.paths)))
 		if int(fileIdx) < len(m.paths) {
 			b.WriteString(styleDim.Render(fmt.Sprintf("  %s", filepath.Base(m.paths[fileIdx]))))
@@ -475,13 +691,10 @@ func (m *Model) viewPicker() string {
 			name = name[:19] + "…"
 		}
 
-		hero := g.HeroCardID
+		hero := gamestate.CardName(g.HeroCardID)
 		if hero == "" {
 			hero = "—"
 		}
-		// Strip common prefixes for readability.
-		hero = strings.TrimPrefix(hero, "TB_BaconShop_HERO_")
-		hero = strings.TrimPrefix(hero, "BG_")
 		if len(hero) > 30 {
 			hero = hero[:29] + "…"
 		}
@@ -524,34 +737,109 @@ func (m *Model) viewStep() string {
 	}
 
 	innerW := m.width - 4
+	// vpContentW: interior of each half-panel minus border(2)+padding(2)+scrollbar(1).
+	vpContentW := innerW/2 - 7
+	if vpContentW < 10 {
+		vpContentW = 10
+	}
 
 	// Header
 	header := m.renderHeader(step, innerW)
+	m.row2StartY = lipgloss.Height(header)
 
-	// Row 2: Player + Board (side by side)
+	// Height budget for variable-height panels.
+	// Reserve: header (measured), event (~3), raw log minimum (5), help (1), padding (2).
+	headerH := lipgloss.Height(header)
+	reserved := headerH + 3 + 5 + 1 + 2
+	available := m.height - reserved
+	if available < 8 {
+		available = 8
+	}
+	// row2 and row3 share available space equally; subtract 2 for border per panel.
+	maxContentH := available/2 - 2
+	if maxContentH < 3 {
+		maxContentH = 3
+	}
+
 	halfW := innerW/2 - 2
-	playerPanel := m.renderPlayerPanel(step, halfW)
-	boardPanel := m.renderBoardPanel(step, halfW)
-	row2 := lipgloss.JoinHorizontal(lipgloss.Top, playerPanel, boardPanel)
+	m.halfWBound = halfW + 2 // halfW + left border char
 
-	// Row 3: Buff sources + Changes (side by side)
-	buffPanel := styleBorder.Width(halfW).Render(renderBuffSources(step.State))
+	// Scrollbar column X positions (absolute terminal coordinates).
+	// Left-half panels (buff): border(1)+padding(1)+vpContentW = 2+vpContentW.
+	// Right-half panels (board/changes): left panel total(halfW+4) + border(1)+padding(1)+vpContentW.
+	m.buffScrollX = 2 + vpContentW
+	m.boardScrollX = halfW + 4 + 2 + vpContentW
+	m.changesScrollX = m.boardScrollX
+	m.rawScrollX = 2 + (innerW - 4 - 1) // border+padding + (contentW-1)
+
+	// ── Row 2: Player + Board ───────────────────────────────────────
+	playerPanel := m.renderPlayerPanel(step, halfW)
+
+	boardContent := renderBoard(step.State.Board)
+	m.boardVP.Width = vpContentW
+	m.boardVP.Height = maxContentH
+	m.boardVP.MouseWheelEnabled = true
+	m.boardVP.SetContent(boardContent)
+
+	var boardHeader strings.Builder
+	title := "BOARD"
+	if step.State.Phase == "GAME_OVER" {
+		title = "FINAL BOARD"
+	}
+	boardHeader.WriteString(styleTitle.Render(title))
+	boardHeader.WriteString(styleDim.Render(fmt.Sprintf(" (%d)", len(step.State.Board))))
+	// boardVPY: border(1) + header line(1) after row2 start.
+	m.boardVPY = m.row2StartY + 2
+	m.boardVPH = maxContentH
+	boardVPView := lipgloss.JoinHorizontal(lipgloss.Top, m.boardVP.View(), renderScrollbar(m.boardVP, maxContentH))
+	boardPanel := styleBorder.Width(halfW).Render(boardHeader.String() + "\n" + boardVPView)
+	row2 := lipgloss.JoinHorizontal(lipgloss.Top, playerPanel, boardPanel)
+	m.row3StartY = m.row2StartY + lipgloss.Height(row2)
+
+	// ── Row 3: Buff sources + Changes ──────────────────────────────
+	buffContent := renderBuffSources(step.State)
+	m.buffVP.Width = vpContentW
+	m.buffVP.Height = maxContentH
+	m.buffVP.MouseWheelEnabled = true
+	m.buffVP.SetContent(buffContent)
+	// buffVPY / changesVPY: border(1) + header line(1) after row3 start.
+	m.buffVPY = m.row3StartY + 2
+	m.buffVPH = maxContentH
+	m.changesVPY = m.row3StartY + 2
+	m.changesVPH = maxContentH
+	buffVPView := lipgloss.JoinHorizontal(lipgloss.Top, m.buffVP.View(), renderScrollbar(m.buffVP, maxContentH))
+	buffPanel := styleBorder.Width(halfW).Render(styleTitle.Render("BUFF SOURCES") + "\n" + buffVPView)
+
 	var prevState gamestate.BGGameState
 	if m.cursor > 0 {
 		prevIdx := m.filtered[m.cursor-1]
 		prevState = m.steps[prevIdx].State
 	}
 	changes := computeChanges(prevState, step.State)
-	changesPanel := styleBorder.Width(halfW).Render(renderChanges(changes))
+	changesContent := renderChanges(changes)
+	m.changesVP.Width = vpContentW
+	m.changesVP.Height = maxContentH
+	m.changesVP.MouseWheelEnabled = true
+	m.changesVP.SetContent(changesContent)
+	changesVPView := lipgloss.JoinHorizontal(lipgloss.Top, m.changesVP.View(), renderScrollbar(m.changesVP, maxContentH))
+	changesPanel := styleBorder.Width(halfW).Render(styleTitle.Render("CHANGES") + "\n" + changesVPView)
 	row3 := lipgloss.JoinHorizontal(lipgloss.Top, buffPanel, changesPanel)
 
-	// Event summary
+	// ── Event summary ───────────────────────────────────────────────
 	eventLine := styleBorder.Width(innerW).Render(renderEvent(step.Event))
 
-	// Raw log (scrollable, takes remaining height)
+	// ── Raw log (viewport — height-bounded, mouse-scrollable) ───────
 	usedHeight := lipgloss.Height(header) + lipgloss.Height(row2) +
 		lipgloss.Height(row3) + lipgloss.Height(eventLine) + 1
-	rawPanel := m.renderRawLog(step, innerW, m.height-usedHeight-2)
+	rawH := m.height - usedHeight - 3 // -3: help bar + border top/bottom
+	m.rawStartY = m.height - rawH - 3
+	if rawH < 3 {
+		rawH = 3
+	}
+	// rawVPY: border(1) + header line(1) after rawStartY.
+	m.rawVPY = m.rawStartY + 2
+	m.rawVPH = rawH
+	rawPanel := m.renderRawLog(step, innerW, rawH)
 
 	// Help bar
 	help := m.renderHelpBar()
@@ -588,9 +876,15 @@ func (m *Model) renderHeader(step *Step, w int) string {
 	b.WriteString(styleLabel.Render("Tavern "))
 	b.WriteString(renderTavernTier(step.State.TavernTier))
 
+	if len(step.State.AvailableTribes) > 0 {
+		b.WriteString("\n")
+		b.WriteString(styleLabel.Render("Tribes "))
+		b.WriteString(styleDim.Render(strings.Join(step.State.AvailableTribes, ", ")))
+	}
+
 	if m.inputMode {
 		b.WriteString("\n")
-		b.WriteString(styleInputBox.Render(fmt.Sprintf("Jump to turn: %s_", m.input)))
+		b.WriteString(styleInputBox.Render("Jump to turn: ") + m.jumpInput.View())
 	}
 
 	return styleBorder.Width(w).Render(b.String())
@@ -604,81 +898,63 @@ func (m *Model) renderPlayerPanel(step *Step, w int) string {
 		name = "Unknown"
 	}
 	b.WriteString(styleTitle.Render(name) + "\n")
-	b.WriteString(styleLabel.Render("Health ") + renderHealthBar(p.Health, 40, 12) + "\n")
+	maxHP := p.MaxHealth
+	if maxHP <= 0 {
+		maxHP = 30
+	}
+	effectiveHP := p.Health - p.Damage
+	b.WriteString(styleLabel.Render("Health ") + renderHealthBar(effectiveHP, maxHP, 12) + "\n")
 	if p.Armor > 0 {
 		b.WriteString(styleLabel.Render("Armor  ") + styleValue.Render(fmt.Sprintf("%d", p.Armor)) + "\n")
 	}
 	b.WriteString(styleLabel.Render("Triples ") + styleValue.Render(fmt.Sprintf("%d", p.TripleCount)) + "\n")
 	if p.HeroCardID != "" {
-		b.WriteString(styleLabel.Render("Hero   ") + styleDim.Render(p.HeroCardID) + "\n")
+		b.WriteString(styleLabel.Render("Hero   ") + styleDim.Render(gamestate.CardName(p.HeroCardID)) + "\n")
+	}
+	if p.WinStreak > 0 {
+		b.WriteString(styleLabel.Render("Last   ") + styleWin.Render(fmt.Sprintf("WIN (streak: %d)", p.WinStreak)) + "\n")
+	} else if p.LossStreak > 0 {
+		b.WriteString(styleLabel.Render("Last   ") + styleLoss.Render(fmt.Sprintf("LOSS (streak: %d)", p.LossStreak)) + "\n")
 	}
 
 	return styleBorder.Width(w).Render(b.String())
 }
 
-func (m *Model) renderBoardPanel(step *Step, w int) string {
-	var b strings.Builder
-	title := "BOARD"
-	if step.State.Phase == "GAME_OVER" {
-		title = "FINAL BOARD"
-	}
-	b.WriteString(styleTitle.Render(title))
-	b.WriteString(styleDim.Render(fmt.Sprintf(" (%d)", len(step.State.Board))))
-	b.WriteString("\n")
-	b.WriteString(renderBoard(step.State.Board))
-
-	return styleBorder.Width(w).Render(b.String())
-}
-
-func (m *Model) renderRawLog(step *Step, w, maxHeight int) string {
-	if maxHeight < 3 {
-		maxHeight = 3
-	}
-
-	// Wrap raw lines to fit panel width (accounting for border+padding).
-	contentW := w - 2
+func (m *Model) renderRawLog(step *Step, w, h int) string {
+	// Interior width: subtract border (2) + padding (2).
+	contentW := w - 4
 	if contentW < 20 {
 		contentW = 20
 	}
-	var wrapped []string
+
+	// Wrap raw lines to content width and join into a single string for the viewport.
+	var lines []string
 	for _, line := range step.RawLines {
-		wrapped = append(wrapped, wrapLine(line, contentW)...)
+		lines = append(lines, wrapLine(line, contentW)...)
 	}
+	content := strings.Join(lines, "\n")
 
-	total := len(wrapped)
+	// Configure and populate the viewport. SetContent preserves YOffset.
+	// Reserve 1 char for the scrollbar column.
+	m.rawVP.Width = contentW - 1
+	m.rawVP.Height = h
+	m.rawVP.MouseWheelEnabled = true
+	m.rawVP.MouseWheelDelta = 3
+	m.rawVP.SetContent(content)
 
-	if m.logScroll > total-maxHeight {
-		m.logScroll = total - maxHeight
-	}
-	if m.logScroll < 0 {
-		m.logScroll = 0
-	}
+	// Header line: title + line count.
+	hdr := styleTitle.Render("RAW LOG")
+	hdr += styleDim.Render(fmt.Sprintf("  %d lines", len(step.RawLines)))
 
-	end := m.logScroll + maxHeight
-	if end > total {
-		end = total
-	}
-
-	var b strings.Builder
-	b.WriteString(styleTitle.Render("RAW LOG"))
-	b.WriteString(styleDim.Render(fmt.Sprintf("  %d lines", len(step.RawLines))))
-	if total > maxHeight {
-		b.WriteString(styleDim.Render(fmt.Sprintf("  [%d-%d/%d]", m.logScroll+1, end, total)))
-	}
-	b.WriteString("\n")
-
-	for _, line := range wrapped[m.logScroll:end] {
-		b.WriteString(styleRawLine.Render(line) + "\n")
-	}
-
-	return styleBorder.Width(w).Render(b.String())
+	vpView := lipgloss.JoinHorizontal(lipgloss.Top, m.rawVP.View(), renderScrollbar(m.rawVP, h))
+	return styleBorder.Width(w).Render(hdr + "\n" + vpView)
 }
 
 func (m *Model) renderHelpBar() string {
 	if m.inputMode {
 		return styleHelp.Render("  Type turn number, Enter to jump, Esc to cancel")
 	}
-	help := "  h/l:step  [/]:turn  {/}:phase  g/G:start/end  t:jump  j/k:scroll  f:filter  q:quit"
+	help := "  h/l:step  [/]:turn  {/}:phase  g/G:start/end  t:jump  j/k:raw log  J/K:panels  mouse:raw log  f:filter  q:quit"
 	if len(m.replay.Games) > 1 {
 		help += "  s:games"
 	}

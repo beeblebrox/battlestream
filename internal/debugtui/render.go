@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
 
 	"battlestream.fixates.io/internal/gamestate"
@@ -50,6 +51,8 @@ var (
 	styleDim   = lipgloss.NewStyle().Foreground(colorDim)
 	styleHelp  = lipgloss.NewStyle().Foreground(colorHelp)
 	stylePhase = lipgloss.NewStyle().Foreground(colorOrange).Bold(true)
+	styleWin   = lipgloss.NewStyle().Foreground(colorGreen).Bold(true)
+	styleLoss  = lipgloss.NewStyle().Foreground(colorRed)
 
 	styleHealthBar = lipgloss.NewStyle().
 			Foreground(colorHealthFg).
@@ -65,7 +68,7 @@ var (
 func renderMinion(mn gamestate.MinionState) string {
 	name := mn.Name
 	if name == "" {
-		name = mn.CardID
+		name = gamestate.CardName(mn.CardID)
 	}
 	if len(name) > 22 {
 		name = name[:21] + "…"
@@ -211,7 +214,6 @@ func filterName(idx int) string {
 
 func renderBuffSources(state gamestate.BGGameState) string {
 	var b strings.Builder
-	b.WriteString(styleTitle.Render("BUFF SOURCES") + "\n")
 
 	if len(state.BuffSources) == 0 {
 		b.WriteString(styleDim.Render("(none)"))
@@ -257,26 +259,7 @@ func renderBuffSources(state gamestate.BGGameState) string {
 }
 
 func buffCategoryDisplayName(cat string) string {
-	names := map[string]string{
-		"BLOODGEM":         "Bloodgems",
-		"BLOODGEM_BARRAGE": "BG Barrage",
-		"NOMI":             "Nomi",
-		"ELEMENTAL":        "Elementals",
-		"TAVERN_SPELL":     "Tavern Spells",
-		"WHELP":            "Whelps",
-		"BEETLE":           "Beetles",
-		"RIGHTMOST":        "Rightmost",
-		"UNDEAD":           "Undead",
-		"VOLUMIZER":        "Volumizer",
-		"LIGHTFANG":        "Lightfang",
-		"NOMI_ALL":         "Nomi Dream",
-		"SPELLCRAFT":       "Spellcraft",
-		"FREE_REFRESH":     "Refreshes",
-		"GOLD_NEXT_TURN":   "Bonus Gold",
-		"CONSUMED":         "Consumed",
-		"GENERAL":          "General",
-	}
-	if n, ok := names[cat]; ok {
+	if n, ok := gamestate.CategoryDisplayName[cat]; ok {
 		return n
 	}
 	return cat
@@ -296,7 +279,7 @@ func buffCategoryColor(cat string) lipgloss.Color {
 		"VOLUMIZER":        colorVolumizer,
 		"LIGHTFANG":        colorLightfang,
 		"NOMI_ALL":         colorNomi,
-		"SPELLCRAFT":       colorTavern,
+		"NAGA_SPELLS":      colorTavern,
 		"FREE_REFRESH":     colorGold,
 		"GOLD_NEXT_TURN":   colorGold,
 		"CONSUMED":         colorDim,
@@ -313,6 +296,35 @@ func abs(x int) int {
 		return -x
 	}
 	return x
+}
+
+// renderScrollbar returns a 1-char-wide vertical scrollbar for a viewport.
+// Outputs exactly height lines joined by "\n".
+// Returns a blank column if all content fits without scrolling.
+func renderScrollbar(vp viewport.Model, height int) string {
+	if height <= 0 {
+		return ""
+	}
+	if vp.TotalLineCount() <= height {
+		// No scrollbar needed — blank column so JoinHorizontal stays aligned.
+		return strings.Repeat(" \n", height-1) + " "
+	}
+	pct := vp.ScrollPercent()
+	thumbPos := int(pct * float64(height-1))
+	lines := make([]string, height)
+	for i := 0; i < height; i++ {
+		ch := "│"
+		switch {
+		case i == 0 && !vp.AtTop():
+			ch = "▲"
+		case i == height-1 && !vp.AtBottom():
+			ch = "▼"
+		case i == thumbPos:
+			ch = "█"
+		}
+		lines[i] = styleDim.Render(ch)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // ── Step delta / changes ────────────────────────────────────────
@@ -350,6 +362,10 @@ func computeChanges(prev, curr gamestate.BGGameState) []Change {
 		changes = append(changes, Change{"player",
 			fmt.Sprintf("Health: %d -> %d", prev.Player.Health, curr.Player.Health)})
 	}
+	if prev.Player.Damage != curr.Player.Damage {
+		changes = append(changes, Change{"player",
+			fmt.Sprintf("Damage: %d -> %d (HP: %d)", prev.Player.Damage, curr.Player.Damage, curr.Player.EffectiveHealth())})
+	}
 	if prev.Player.Armor != curr.Player.Armor {
 		changes = append(changes, Change{"player",
 			fmt.Sprintf("Armor: %d -> %d", prev.Player.Armor, curr.Player.Armor)})
@@ -374,7 +390,7 @@ func computeChanges(prev, curr gamestate.BGGameState) []Change {
 		if _, ok := prevBoard[mn.EntityID]; !ok {
 			name := mn.Name
 			if name == "" {
-				name = mn.CardID
+				name = gamestate.CardName(mn.CardID)
 			}
 			changes = append(changes, Change{"add",
 				fmt.Sprintf("+ %s (%d/%d)", name, mn.Attack, mn.Health)})
@@ -386,7 +402,7 @@ func computeChanges(prev, curr gamestate.BGGameState) []Change {
 		if _, ok := currBoard[mn.EntityID]; !ok {
 			name := mn.Name
 			if name == "" {
-				name = mn.CardID
+				name = gamestate.CardName(mn.CardID)
 			}
 			changes = append(changes, Change{"remove",
 				fmt.Sprintf("- %s", name)})
@@ -406,7 +422,7 @@ func computeChanges(prev, curr gamestate.BGGameState) []Change {
 			if len(diffs) > 0 {
 				name := mn.Name
 				if name == "" {
-					name = mn.CardID
+					name = gamestate.CardName(mn.CardID)
 				}
 				changes = append(changes, Change{"change",
 					fmt.Sprintf("~ %s: %s", name, strings.Join(diffs, ", "))})
@@ -433,7 +449,6 @@ func computeChanges(prev, curr gamestate.BGGameState) []Change {
 
 func renderChanges(changes []Change) string {
 	var b strings.Builder
-	b.WriteString(styleTitle.Render("CHANGES") + "\n")
 
 	if len(changes) == 0 {
 		b.WriteString(styleDim.Render("(no state change)"))

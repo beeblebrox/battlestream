@@ -8,10 +8,12 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	bspb "battlestream.fixates.io/internal/api/grpc/gen/battlestream/v1"
+	"battlestream.fixates.io/internal/gamestate"
 )
 
 // ============================================================
@@ -123,6 +125,23 @@ type Model struct {
 
 	width  int
 	height int
+
+	// Scrollable panels for board and buff/mods content.
+	boardVP viewport.Model
+	modsVP  viewport.Model
+
+	// Panel positions (updated each View frame) for mouse routing.
+	row2StartY int
+
+	// Per-panel scrollbar column X and viewport Y/height.
+	boardScrollX, boardVPY, boardVPH int
+	modsScrollX, modsVPY, modsVPH   int
+
+	// Drag-scrubbing state.
+	scrubbing   bool
+	scrubPanel  int // 0=board, 1=mods
+	scrubTrackY int
+	scrubTrackH int
 }
 
 // New creates a Model that will connect to the daemon at grpcAddr.
@@ -142,7 +161,7 @@ func New(grpcAddr string) *Model {
 
 // Run starts the Bubbletea program.
 func (m *Model) Run() error {
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err := p.Run()
 	return err
 }
@@ -215,6 +234,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+
+	case tea.MouseMsg:
+		if m.connState == stateConnected {
+			return m.handleMouse(msg)
+		}
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -294,37 +318,66 @@ func (m *Model) View() string {
 		return ""
 	}
 
-	// Column widths: two equal halves minus borders/padding
+	// Column widths: two equal halves minus borders/padding.
+	// vpContentW is 1 char narrower to accommodate the scrollbar column.
 	colW := m.width/2 - 4
+	vpContentW := colW - 1
+	if vpContentW < 10 {
+		vpContentW = 10
+	}
 
 	// ── Row 1: game header | hero stats ──────────────────────
 	row1 := lipgloss.JoinHorizontal(lipgloss.Top,
 		m.renderGamePanel(colW),
 		m.renderHeroPanel(colW),
 	)
+	m.row2StartY = lipgloss.Height(row1)
 
-	// ── Row 2: board | modifications ─────────────────────────
-	// Build content first, pad to equal line count, then apply border so
-	// rounded corners stay intact on both panels.
-	boardContent := m.boardContent()
-	modsContent := m.modsContent()
-	boardLines := strings.Count(boardContent, "\n")
-	modsLines := strings.Count(modsContent, "\n")
-	if boardLines < modsLines {
-		boardContent += strings.Repeat("\n", modsLines-boardLines)
-	} else if modsLines < boardLines {
-		modsContent += strings.Repeat("\n", boardLines-modsLines)
+	// Height budget: terminal minus row1, session bar (3), help (1), row2 border (2).
+	sessionH := 3
+	available := m.height - m.row2StartY - sessionH - 1 - 2
+	if available < 4 {
+		available = 4
 	}
-	row2 := lipgloss.JoinHorizontal(lipgloss.Top,
-		styleBorder.Width(colW).Render(boardContent),
-		styleBorder.Width(colW).Render(modsContent),
-	)
+
+	// Scrollbar column X positions (absolute terminal coordinates).
+	m.boardScrollX = 2 + vpContentW                  // left panel: border+pad + vp
+	m.modsScrollX = (colW + 4) + 2 + vpContentW      // right panel: left total + border+pad + vp
+
+	// ── Row 2: board (viewport) | buff sources (viewport) ────
+	boardTitle := "YOUR BOARD"
+	if m.game != nil && m.game.Phase == "GAME_OVER" {
+		boardTitle = "FINAL BOARD"
+	}
+	m.boardVP.Width = vpContentW
+	m.boardVP.Height = available
+	m.boardVP.MouseWheelEnabled = true
+	m.boardVP.SetContent(m.boardItems())
+	m.boardVPY = m.row2StartY + 2 // border(1) + title line(1)
+	m.boardVPH = available
+	boardVPView := lipgloss.JoinHorizontal(lipgloss.Top,
+		m.boardVP.View(), tuiScrollbar(m.boardVP, available))
+	boardPanel := styleBorder.Width(colW).Render(
+		styleTitle.Render(boardTitle) + "\n" + boardVPView)
+
+	m.modsVP.Width = vpContentW
+	m.modsVP.Height = available
+	m.modsVP.MouseWheelEnabled = true
+	m.modsVP.SetContent(m.modsItems())
+	m.modsVPY = m.row2StartY + 2
+	m.modsVPH = available
+	modsVPView := lipgloss.JoinHorizontal(lipgloss.Top,
+		m.modsVP.View(), tuiScrollbar(m.modsVP, available))
+	modsPanel := styleBorder.Width(colW).Render(
+		styleTitle.Render("BUFF SOURCES") + "\n" + modsVPView)
+
+	row2 := lipgloss.JoinHorizontal(lipgloss.Top, boardPanel, modsPanel)
 
 	// ── Row 3: session stats ──────────────────────────────────
 	row3 := m.renderSessionBar(m.width - 4)
 
 	// ── Help bar ──────────────────────────────────────────────
-	help := styleHelp.Render("  [r] Refresh game  [R] Refresh stats  [q] Quit")
+	help := styleHelp.Render("  [r] Refresh game  [R] Refresh stats  [q] Quit  scroll: mouse wheel or drag scrollbar")
 
 	return lipgloss.JoinVertical(lipgloss.Left, row1, row2, row3, help)
 }
@@ -349,11 +402,10 @@ func (m *Model) renderGamePanel(w int) string {
 
 		if phase == "GAME_OVER" {
 			placement := int(m.game.Placement)
-			placeStr := fmt.Sprintf("#%d", placement)
 			if placement >= 1 && placement <= 4 {
-				b.WriteString(styleLabel.Render("Result ") + styleWin.Render("WIN "+placeStr) + "\n")
+				b.WriteString(styleLabel.Render("Result ") + styleWin.Render(fmt.Sprintf("WIN #%d", placement)) + "\n")
 			} else if placement > 0 {
-				b.WriteString(styleLabel.Render("Result ") + styleLoss.Render("LOSS "+placeStr) + "\n")
+				b.WriteString(styleLabel.Render("Result ") + styleLoss.Render(fmt.Sprintf("LOSS #%d", placement)) + "\n")
 			} else {
 				b.WriteString(styleLabel.Render("Phase  ") + styleGameOver.Render("GAME OVER") + "\n")
 			}
@@ -363,6 +415,9 @@ func (m *Model) renderGamePanel(w int) string {
 
 		b.WriteString(styleLabel.Render("Turn   ") + styleValue.Render(fmt.Sprintf("%d", m.game.Turn)) + "\n")
 		b.WriteString(styleLabel.Render("Tavern ") + renderTavernTier(int(m.game.TavernTier)) + "\n")
+		if len(m.game.AvailableTribes) > 0 {
+			b.WriteString(styleLabel.Render("Tribes ") + styleDim.Render(strings.Join(m.game.AvailableTribes, ", ")) + "\n")
+		}
 	}
 
 	return styleBorder.Width(w).Render(b.String())
@@ -383,27 +438,36 @@ func (m *Model) renderHeroPanel(w int) string {
 	}
 	b.WriteString(styleTitle.Render(name) + "\n")
 
-	maxHP := int32(40)
-	b.WriteString(styleLabel.Render("Health  ") + renderHealthBar(p.Health, maxHP, 16) + "\n")
+	maxHP := p.MaxHealth
+	if maxHP <= 0 {
+		maxHP = 30
+	}
+	effectiveHP := p.Health - p.Damage
+	b.WriteString(styleLabel.Render("Health  ") + renderHealthBar(effectiveHP, maxHP, 16) + "\n")
 	armor := "—"
 	if p.Armor > 0 {
 		armor = fmt.Sprintf("%d", p.Armor)
 	}
 	b.WriteString(styleLabel.Render("Armor   ") + styleValue.Render(armor) + "\n")
-	b.WriteString(styleLabel.Render("Spell+  ") + styleValue.Render(fmt.Sprintf("%d", p.SpellPower)) + "\n")
+	b.WriteString(styleLabel.Render("Spell   ") + styleValue.Render(fmt.Sprintf("+%d", p.SpellPower)) + "\n")
 	b.WriteString(styleLabel.Render("Triples ") + styleValue.Render(fmt.Sprintf("%d", p.TripleCount)) + "\n")
+	if p.HeroCardId != "" {
+		b.WriteString(styleLabel.Render("Hero    ") + styleValue.Render(gamestate.CardName(p.HeroCardId)) + "\n")
+	}
+
+	// Win/loss last round indicator.
+	if p.WinStreak > 0 {
+		b.WriteString(styleLabel.Render("Last    ") + styleWin.Render(fmt.Sprintf("WIN (streak: %d)", p.WinStreak)) + "\n")
+	} else if p.LossStreak > 0 {
+		b.WriteString(styleLabel.Render("Last    ") + styleLoss.Render(fmt.Sprintf("LOSS (streak: %d)", p.LossStreak)) + "\n")
+	}
 
 	return styleBorder.Width(w).Render(b.String())
 }
 
-func (m *Model) boardContent() string {
+// boardItems returns the scrollable board content (no title).
+func (m *Model) boardItems() string {
 	var b strings.Builder
-	title := "YOUR BOARD"
-	if m.game != nil && m.game.Phase == "GAME_OVER" {
-		title = "FINAL BOARD"
-	}
-	b.WriteString(styleTitle.Render(title) + "\n")
-
 	if m.game == nil || len(m.game.Board) == 0 {
 		b.WriteString(styleDim.Render("(empty)"))
 	} else {
@@ -411,22 +475,16 @@ func (m *Model) boardContent() string {
 			b.WriteString(renderMinion(mn) + "\n")
 		}
 	}
-
 	return b.String()
 }
 
-func (m *Model) modsContent() string {
+// modsItems returns the scrollable buff-sources content (no outer title).
+func (m *Model) modsItems() string {
 	var b strings.Builder
-	b.WriteString(styleTitle.Render("BUFF SOURCES") + "\n")
-
 	if m.game == nil || len(m.game.BuffSources) == 0 {
 		// Fall back to old modifications display if no buff sources tracked.
 		if m.game != nil && len(m.game.Modifications) > 0 {
-			mods := m.game.Modifications
-			if len(mods) > 8 {
-				mods = mods[len(mods)-8:]
-			}
-			for _, mod := range mods {
+			for _, mod := range m.game.Modifications {
 				sign := "+"
 				if mod.Delta < 0 {
 					sign = ""
@@ -481,26 +539,7 @@ func (m *Model) modsContent() string {
 }
 
 func buffCategoryDisplayName(cat string) string {
-	names := map[string]string{
-		"BLOODGEM":        "Bloodgems",
-		"BLOODGEM_BARRAGE": "BG Barrage",
-		"NOMI":            "Nomi",
-		"ELEMENTAL":       "Elementals",
-		"TAVERN_SPELL":    "Tavern Spells",
-		"WHELP":           "Whelps",
-		"BEETLE":          "Beetles",
-		"RIGHTMOST":       "Rightmost",
-		"UNDEAD":          "Undead",
-		"VOLUMIZER":       "Volumizer",
-		"LIGHTFANG":       "Lightfang",
-		"NOMI_ALL":        "Nomi Dream",
-		"SPELLCRAFT":      "Spellcraft",
-		"FREE_REFRESH":    "Refreshes",
-		"GOLD_NEXT_TURN":  "Bonus Gold",
-		"CONSUMED":        "Consumed",
-		"GENERAL":         "General",
-	}
-	if n, ok := names[cat]; ok {
+	if n, ok := gamestate.CategoryDisplayName[cat]; ok {
 		return n
 	}
 	return cat
@@ -520,10 +559,11 @@ func buffCategoryColor(cat string) lipgloss.Color {
 		"VOLUMIZER":       colorVolumizer,
 		"LIGHTFANG":       colorLightfang,
 		"NOMI_ALL":        colorNomi,
-		"SPELLCRAFT":      colorTavern,
+		"NAGA_SPELLS":     colorTavern,
 		"FREE_REFRESH":    colorGold,
 		"GOLD_NEXT_TURN":  colorGold,
 		"CONSUMED":        colorDim,
+		"SHOP_BUFF":       colorTavern,
 		"GENERAL":         colorGeneral,
 	}
 	if c, ok := colors[cat]; ok {
@@ -537,6 +577,108 @@ func abs32(x int32) int32 {
 		return -x
 	}
 	return x
+}
+
+// ── Mouse handling ───────────────────────────────────────────────
+
+func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	// Wheel: route to whichever panel the cursor is over.
+	if tea.MouseEvent(msg).IsWheel() {
+		var cmd tea.Cmd
+		if msg.X >= m.modsScrollX-1 {
+			m.modsVP, cmd = m.modsVP.Update(msg)
+		} else {
+			m.boardVP, cmd = m.boardVP.Update(msg)
+		}
+		return m, cmd
+	}
+
+	switch msg.Action {
+	case tea.MouseActionPress:
+		if msg.Button == tea.MouseButtonLeft {
+			panel, trackY, trackH := m.identifyScrollbar(msg.X, msg.Y)
+			if panel >= 0 {
+				m.scrubbing = true
+				m.scrubPanel = panel
+				m.scrubTrackY = trackY
+				m.scrubTrackH = trackH
+				m.scrubAt(msg.Y)
+			}
+		}
+	case tea.MouseActionMotion:
+		if m.scrubbing && msg.Button == tea.MouseButtonLeft {
+			m.scrubAt(msg.Y)
+		}
+	case tea.MouseActionRelease:
+		m.scrubbing = false
+	}
+	return m, nil
+}
+
+func (m *Model) identifyScrollbar(x, y int) (panel, trackY, trackH int) {
+	switch {
+	case x == m.boardScrollX && y >= m.boardVPY && y < m.boardVPY+m.boardVPH:
+		return 0, m.boardVPY, m.boardVPH
+	case x == m.modsScrollX && y >= m.modsVPY && y < m.modsVPY+m.modsVPH:
+		return 1, m.modsVPY, m.modsVPH
+	}
+	return -1, 0, 0
+}
+
+func (m *Model) scrubAt(y int) {
+	switch m.scrubPanel {
+	case 0:
+		tuiScrollbarJump(&m.boardVP, y, m.scrubTrackY, m.scrubTrackH)
+	case 1:
+		tuiScrollbarJump(&m.modsVP, y, m.scrubTrackY, m.scrubTrackH)
+	}
+}
+
+func tuiScrollbarJump(vp *viewport.Model, clickY, trackY, trackH int) {
+	relY := clickY - trackY
+	if relY < 0 || relY >= trackH || trackH <= 1 {
+		return
+	}
+	maxOffset := vp.TotalLineCount() - trackH
+	if maxOffset <= 0 {
+		return
+	}
+	pct := float64(relY) / float64(trackH-1)
+	target := int(pct * float64(maxOffset))
+	if target < 0 {
+		target = 0
+	}
+	if target > maxOffset {
+		target = maxOffset
+	}
+	vp.YOffset = target
+}
+
+// tuiScrollbar renders a 1-char-wide vertical scrollbar for a viewport.
+// Outputs exactly height lines joined by "\n". Blank column when no overflow.
+func tuiScrollbar(vp viewport.Model, height int) string {
+	if height <= 0 {
+		return ""
+	}
+	if vp.TotalLineCount() <= height {
+		return strings.Repeat(" \n", height-1) + " "
+	}
+	pct := vp.ScrollPercent()
+	thumbPos := int(pct * float64(height-1))
+	lines := make([]string, height)
+	for i := 0; i < height; i++ {
+		ch := "│"
+		switch {
+		case i == 0 && !vp.AtTop():
+			ch = "▲"
+		case i == height-1 && !vp.AtBottom():
+			ch = "▼"
+		case i == thumbPos:
+			ch = "█"
+		}
+		lines[i] = styleDim.Render(ch)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m *Model) renderSessionBar(w int) string {

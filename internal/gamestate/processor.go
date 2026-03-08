@@ -16,12 +16,18 @@ type entityInfo struct {
 	CardType    string
 	Attack      int
 	Health      int
+	Armor       int // cached for retroactive hero identification
 	Zone        string
 	CreatorID   int
 	AttachedTo  int
 	ScriptData1 int
 	ScriptData2 int
+	Subsets     int // count of BACON_SUBSET_* tags seen (for multi-tribe detection)
 }
+
+// maxPendingStatChanges caps the pending stat-change buffer to prevent unbounded
+// growth when a turn-boundary event is missed. Flush is triggered early with a warning.
+const maxPendingStatChanges = 200
 
 // pendingStatChange buffers a stat change for batch analysis.
 type pendingStatChange struct {
@@ -67,6 +73,19 @@ type Processor struct {
 	// Economy counters.
 	goldNextTurnSure   int // from BACON_PLAYER_EXTRA_GOLD_NEXT_TURN player tag
 	overconfidenceCount int // number of active Overconfidence Dnt enchantments in PLAY
+
+	// Win/loss streak tracking.
+	// lastCombatHeroAttackerID stores the entity ID of the last hero that
+	// attacked during combat. In BG, the winning side's hero attacks the losing
+	// hero at end of combat. If this matches localHeroID → win, another hero → loss,
+	// 0 → tie. Evaluated and reset at each player TURN boundary.
+	lastCombatHeroAttackerID int
+	bgTurnsStarted           int // counts how many BG turns have started (skip recording for turn 1)
+
+	// Available tribes detected from BACON_SUBSET_* tags.
+	seenTribes        map[string]bool
+	entityTribeReg    map[int]string  // entityID → tribe provisionally registered via TAG_CHANGE
+	tribeConfirmCount map[string]int  // tribe → count of single-tribe entities confirming it
 }
 
 // NewProcessor returns a Processor that updates the given Machine.
@@ -85,6 +104,7 @@ func NewProcessor(m *Machine) *Processor {
 func (p *Processor) Handle(e parser.GameEvent) {
 	switch e.Type {
 	case parser.EventGameStart:
+		p.flushPendingStatChanges()
 		p.gameSeq++
 		p.pendingPlacement = 0
 		p.localPlayerID = 0
@@ -99,6 +119,11 @@ func (p *Processor) Handle(e parser.GameEvent) {
 		p.nomiAllCounter = [2]int{}
 		p.goldNextTurnSure = 0
 		p.overconfidenceCount = 0
+		p.lastCombatHeroAttackerID = 0
+		p.bgTurnsStarted = 0
+		p.seenTribes = make(map[string]bool)
+		p.entityTribeReg = make(map[int]string)
+		p.tribeConfirmCount = make(map[string]int)
 		gameID := fmt.Sprintf("game-%d", p.gameSeq)
 		p.machine.GameStart(gameID, e.Timestamp)
 
@@ -142,6 +167,17 @@ func (p *Processor) handlePlayerDef(e parser.GameEvent) {
 		// This is the local player.
 		p.localPlayerID = e.PlayerID
 		slog.Info("identified local player", "playerID", p.localPlayerID, "entityID", e.EntityID)
+		// The Player block's HERO_ENTITY tag gives the initial hero entity ID.
+		// This may be a placeholder (TB_BaconShop_HERO_PH) during hero selection,
+		// or the real hero if we're loading a game already in progress. Either
+		// way, set it tentatively — the HERO_ENTITY TAG_CHANGE handler will
+		// upgrade from placeholder to real hero when the player picks their hero.
+		if heroStr := e.Tags["HERO_ENTITY"]; heroStr != "" {
+			if heroID, err := strconv.Atoi(heroStr); err == nil && heroID > 0 {
+				p.localHeroID = heroID
+				slog.Info("local hero entity set (tentative) from player def", "heroID", heroID)
+			}
+		}
 	}
 }
 
@@ -189,7 +225,30 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 				p.updateMinionStat(e, "ATK", value)
 			}
 
+		case "PROPOSED_ATTACKER":
+			// GameEntity's PROPOSED_ATTACKER tag fires for every attack during combat.
+			// We only care about hero attacks — the end-of-combat hero attack determines
+			// the combat winner (HDT's LastAttackingHero pattern).
+			if e.EntityName == "GameEntity" {
+				attackerID := parseInt(value)
+				if attackerID > 0 && p.heroEntities[attackerID] {
+					p.lastCombatHeroAttackerID = attackerID
+				}
+			}
+
+		case "DAMAGE":
+			if p.isLocalHero(e, controllerID) {
+				p.machine.UpdatePlayerTag(tag, value)
+			}
+
 		case "ARMOR":
+			// Cache armor for all known hero entities so we can retroactively
+			// apply it when the hero is later identified as the local hero.
+			if e.EntityID > 0 && p.heroEntities[e.EntityID] {
+				if info := p.entityProps[e.EntityID]; info != nil {
+					info.Armor = parseInt(value)
+				}
+			}
 			if p.isLocalHero(e, controllerID) {
 				p.machine.UpdatePlayerTag(tag, value)
 			}
@@ -200,8 +259,14 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 			}
 
 		case "PLAYER_TECH_LEVEL", "TAVERN_TIER":
-			// Only apply if this is the local player's entity.
-			if controllerID == p.localPlayerID || p.isLocalPlayerEntity(e) {
+			// Guard: only accept tier from a positively-identified local entity.
+			// Require controllerID to be known (non-zero) and match localPlayerID,
+			// OR fall back to isLocalPlayerEntity only when controllerID is unknown.
+			// This prevents controllerID==0==localPlayerID from matching when
+			// localPlayerID has not yet been set (i.e. before CREATE_GAME resolves).
+			isLocal := (controllerID != 0 && controllerID == p.localPlayerID) ||
+				(controllerID == 0 && p.isLocalPlayerEntity(e))
+			if isLocal {
 				tier, _ := strconv.Atoi(value)
 				if tier > 0 {
 					p.machine.SetTavernTier(tier)
@@ -252,6 +317,19 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 			if p.isLocalPlayerEntity(e) {
 				turn, _ := strconv.Atoi(value)
 				if turn > 0 {
+					// Record outcome of the combat that just resolved (turns 2+).
+					// lastCombatHeroAttackerID is set by PROPOSED_ATTACKER on a hero entity.
+					// The winning side's hero attacks the losing hero at end of combat.
+					if p.bgTurnsStarted > 0 {
+						if p.lastCombatHeroAttackerID == p.localHeroID && p.localHeroID > 0 {
+							p.machine.RecordRoundWin()
+						} else if p.lastCombatHeroAttackerID > 0 {
+							p.machine.RecordRoundLoss()
+						}
+						// If lastCombatHeroAttackerID == 0, it's a tie — no streak change.
+					}
+					p.lastCombatHeroAttackerID = 0
+					p.bgTurnsStarted++
 					p.flushPendingStatChanges()
 					p.machine.SetTurn(turn)
 				}
@@ -259,11 +337,44 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 
 		case "HERO_ENTITY":
 			// Track which hero entity belongs to the local player.
+			//
+			// Two scenarios:
+			//   (A) game-in-progress log: the Player block already has the real hero in
+			//       HERO_ENTITY (set tentatively by handlePlayerDef). Ghost-battle
+			//       TAG_CHANGEs must be ignored because the real hero is a non-placeholder.
+			//   (B) fresh game log: the Player block's HERO_ENTITY is the placeholder
+			//       (TB_BaconShop_HERO_PH). After hero selection, this TAG_CHANGE fires
+			//       with the real hero ID. Ghost-battle changes come much later.
+			//
+			// Strategy: allow updates while localHeroID is 0 or a placeholder.
+			// Once localHeroID is a real (non-PH) hero, lock it against ghost battles.
 			if p.isLocalPlayerEntity(e) {
 				heroID, _ := strconv.Atoi(value)
-				if heroID > 0 {
-					p.localHeroID = heroID
-					slog.Info("local hero entity updated", "heroID", heroID)
+				if heroID > 0 && heroID != p.localHeroID {
+					shouldUpdate := p.localHeroID == 0
+					if !shouldUpdate {
+						// Allow update only if the current hero entity is a placeholder.
+						if info := p.entityProps[p.localHeroID]; info != nil {
+							shouldUpdate = strings.HasPrefix(info.CardID, "TB_BaconShop_HERO_PH")
+						}
+					}
+					if shouldUpdate {
+						p.localHeroID = heroID
+						slog.Info("local hero entity updated", "heroID", heroID)
+						// Retroactively apply cached health/armor/cardID that was seen
+						// before this entity was identified as the local hero.
+						if info := p.entityProps[heroID]; info != nil {
+							if info.Health > 0 {
+								p.machine.UpdatePlayerTag("HEALTH", strconv.Itoa(info.Health))
+							}
+							if info.Armor > 0 {
+								p.machine.UpdatePlayerTag("ARMOR", strconv.Itoa(info.Armor))
+							}
+							if info.CardID != "" && !strings.HasPrefix(info.CardID, "TB_BaconShop_HERO_PH") {
+								p.machine.UpdateHeroCardID(info.CardID)
+							}
+						}
+					}
 				}
 			}
 
@@ -299,13 +410,20 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 			}
 
 		case "3809":
-			// Spellcraft (Naga spell) stacks counter on local player.
+			// SpellsPlayedForNagasCounter (HDT) — total spells played this game for
+			// Thaumaturgist/ArcaneCannoneer/ShowyCyclist/Groundbreaker synergy.
+			// Only show when one of those minions is on the board (mirrors HDT ShouldShow).
 			if p.isLocalPlayerEntity(e) || p.isLocalHero(e, controllerID) {
 				raw, _ := strconv.Atoi(value)
-				stacks := 1 + (raw / 4)
-				progress := raw % 4
-				display := fmt.Sprintf("%d (%d/4)", stacks, progress)
-				p.machine.SetAbilityCounter(CatSpellcraft, raw, display)
+				snap := p.machine.State()
+				if HasNagaSynergyMinion(snap.Board) {
+					stacks := 1 + (raw / 4)
+					progress := raw % 4
+					display := fmt.Sprintf("Tier %d · %d/4", stacks, progress)
+					p.machine.SetAbilityCounter(CatNagaSpells, raw, display)
+				} else {
+					p.machine.RemoveAbilityCounter(CatNagaSpells)
+				}
 			}
 
 		case "CONTROLLER":
@@ -313,6 +431,37 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 			if e.EntityID > 0 {
 				ctrl, _ := strconv.Atoi(value)
 				p.entityController[e.EntityID] = ctrl
+			}
+
+		default:
+			// Handle BACON_SUBSET_* TAG_CHANGE events for tribe discovery.
+			// TAG_CHANGEs arrive individually, so multi-tribe minions fire
+			// separate events. We track per-entity subset counts: provisionally
+			// register on the first subset, revoke if a second arrives.
+			if strings.HasPrefix(tag, baconSubsetPrefix) && value == "1" && e.EntityID > 0 {
+				suffix := tag[len(baconSubsetPrefix):]
+				if tribe, ok := baconSubsetToTribe[suffix]; ok {
+					info := p.entityProps[e.EntityID]
+					if info == nil {
+						info = &entityInfo{}
+						p.entityProps[e.EntityID] = info
+					}
+					info.Subsets++
+					if info.Subsets == 1 {
+						// First subset — provisionally register.
+						if p.entityTribeReg == nil {
+							p.entityTribeReg = make(map[int]string)
+						}
+						p.entityTribeReg[e.EntityID] = tribe
+						p.registerTribeConfirmation(tribe)
+					} else if info.Subsets == 2 {
+						// Second subset — entity is multi-tribe; revoke.
+						if prevTribe, ok := p.entityTribeReg[e.EntityID]; ok {
+							delete(p.entityTribeReg, e.EntityID)
+							p.revokeTribeConfirmation(prevTribe)
+						}
+					}
+				}
 			}
 		}
 	}
@@ -375,6 +524,12 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 		info.ScriptData2 = parseInt(sd2)
 	}
 
+	// Detect available tribes from BACON_SUBSET_* tags in FULL_ENTITY blocks.
+	// Only count entities with exactly ONE BACON_SUBSET tag (single-tribe minions).
+	// Multi-tribe minions (2+ subset tags) appear via any of their tribes, so
+	// they can bleed banned tribes into the detected set.
+	p.trackTribesFromEntity(e.EntityID, e.Tags)
+
 	// Register hero entity IDs.
 	if cardType == "HERO" && e.EntityID > 0 {
 		p.heroEntities[e.EntityID] = true
@@ -388,6 +543,12 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 
 	// If this is a HERO entity owned by the local player, track its stats.
 	if cardType == "HERO" && controllerID == p.localPlayerID {
+		// Once localHeroID is known, reject any other hero entity.
+		// Opponent hero combat-copies can appear with the local player's controller ID
+		// during ghost battles (they share the local player's controller).
+		if p.localHeroID > 0 && e.EntityID != p.localHeroID {
+			return
+		}
 		if hp, ok := e.Tags["HEALTH"]; ok {
 			p.machine.UpdatePlayerTag("HEALTH", hp)
 		}
@@ -446,10 +607,21 @@ func (p *Processor) resolveController(e parser.GameEvent) int {
 // isLocalPlayerEntity checks whether the event's entity is the local player
 // entity itself (not a hero/minion, but the Player entity).
 func (p *Processor) isLocalPlayerEntity(e parser.GameEvent) bool {
-	if p.localPlayerName != "" && e.EntityName == p.localPlayerName {
+	// Prefer PlayerID match — most reliable.
+	if p.localPlayerID > 0 && e.PlayerID == p.localPlayerID {
 		return true
 	}
-	if p.localPlayerID > 0 && e.PlayerID == p.localPlayerID {
+	// If we have a positive localPlayerID, trust it over the name.
+	// Only use name as a last resort when localPlayerID is not yet known.
+	if p.localPlayerID == 0 && p.localPlayerName != "" && e.EntityName == p.localPlayerName {
+		slog.Warn("isLocalPlayerEntity: using name fallback — localPlayerID not yet set",
+			"name", p.localPlayerName, "entityID", e.EntityID)
+		return true
+	}
+	// Name fallback for bare-name entity references (no player= field in the log line).
+	// TAG_CHANGE Entity=Alice has PlayerID=0; TAG_CHANGE Entity=[... player=15] has PlayerID=15.
+	// So if localPlayerID is known but e.PlayerID is 0, a name match is still safe.
+	if p.localPlayerID > 0 && e.PlayerID == 0 && p.localPlayerName != "" && e.EntityName == p.localPlayerName {
 		return true
 	}
 	return false
@@ -462,11 +634,13 @@ func (p *Processor) isLocalHero(e parser.GameEvent, controllerID int) bool {
 	if e.EntityID <= 0 || controllerID != p.localPlayerID {
 		return false
 	}
-	// Best check: is this the currently assigned hero entity?
-	if p.localHeroID > 0 && e.EntityID == p.localHeroID {
-		return true
+	// Once localHeroID is known, only ever match the exact entity.
+	// This prevents combat-copy heroes (opponent heroes with player=localPlayerID)
+	// from being treated as the local hero.
+	if p.localHeroID > 0 {
+		return e.EntityID == p.localHeroID
 	}
-	// Fallback: is this entity registered as a HERO type?
+	// Before the hero entity is identified, fall back to the HERO-type registry.
 	return p.heroEntities[e.EntityID]
 }
 
@@ -525,6 +699,11 @@ func (p *Processor) updateMinionStat(e parser.GameEvent, stat, value string) {
 			stat:     stat,
 			delta:    delta,
 		})
+		if len(p.pendingStatChanges) > maxPendingStatChanges {
+			slog.Warn("pendingStatChanges cap reached, flushing early",
+				"count", len(p.pendingStatChanges))
+			p.flushPendingStatChanges()
+		}
 	}
 }
 
@@ -583,9 +762,10 @@ func (p *Processor) tryAddMinionFromRegistry(entityID, controllerID int) {
 		Attack:   info.Attack,
 		Health:   info.Health,
 	})
-	// During combat, keep the snapshot in sync so GameEnd restores
-	// the combat board with correct buffed stats.
-	if p.machine.Phase() == PhaseCombat {
+	// Snapshot during recruit phase only. Combat copies may not yet have
+	// their full buffed stats when they transition to PLAY, so we do NOT
+	// snapshot during combat to avoid overwriting the buffed recruit board.
+	if p.machine.Phase() == PhaseRecruit {
 		p.machine.UpdateBoardSnapshot()
 	}
 }
@@ -700,6 +880,10 @@ func (p *Processor) handleDntTagChange(entityID int, tag string, value int) {
 	isSD1 := tag == "TAG_SCRIPT_DATA_NUM_1"
 
 	switch cardID {
+	case "BG_ShopBuff":
+		// Tavern spell shop buff (Staff of Enrichment, Shadowdancer, etc.): DIFFERENTIAL.
+		// Accumulates total +ATK/+HP applied to future tavern minions this game.
+		p.handleGenericShopBuffDnt(entityID, isSD1, value, CatShopBuff)
 	case "BG_ShopBuff_Elemental":
 		// Nomi: DIFFERENTIAL accumulation (HDT pattern).
 		p.handleShopBuffDnt(entityID, isSD1, value)
@@ -729,6 +913,10 @@ func (p *Processor) handleDntTagChange(entityID int, tag string, value int) {
 	case "BG34_689e2":
 		// BloodGem Barrage: ABSOLUTE.
 		p.handleAbsoluteDnt(CatBloodgemBarrage, isSD1, value, 0, 0)
+	// Note: CatLightfang and CatConsumed have no cases here — they are purely
+	// per-minion enchantments with no player-level Dnt counter in HDT.
+	// HDT has no LightfangCounter.cs or ConsumedCounter.cs.
+	// Their enchantments are tracked via handleEnchantmentEntity instead.
 	}
 }
 
@@ -739,6 +927,30 @@ func (p *Processor) handleAbsoluteDnt(category string, isSD1 bool, value, baseAt
 		state[0] = baseAtk + value
 	} else {
 		state[1] = baseHp + value
+	}
+	p.buffSourceState[category] = state
+	p.machine.SetBuffSource(category, state[0], state[1])
+}
+
+// handleGenericShopBuffDnt handles a generic shop-buff DNT enchantment with differential
+// accumulation, updating the given buff category.
+func (p *Processor) handleGenericShopBuffDnt(entityID int, isSD1 bool, value int, category string) {
+	prev := p.shopBuffPrev[entityID]
+	var delta int
+	if isSD1 {
+		delta = value - prev[0]
+		prev[0] = value
+	} else {
+		delta = value - prev[1]
+		prev[1] = value
+	}
+	p.shopBuffPrev[entityID] = prev
+
+	state := p.buffSourceState[category]
+	if isSD1 {
+		state[0] += delta
+	} else {
+		state[1] += delta
 	}
 	p.buffSourceState[category] = state
 	p.machine.SetBuffSource(category, state[0], state[1])
@@ -856,6 +1068,86 @@ func (p *Processor) updateEnchantmentScriptData(entityID int, tag, value string)
 	}
 }
 
+// baconSubsetPrefix is the tag prefix for tribe membership on pool minions.
+const baconSubsetPrefix = "BACON_SUBSET_"
+
+// baconSubsetToTribe maps the suffix of BACON_SUBSET_* tags to display tribe names.
+var baconSubsetToTribe = map[string]string{
+	"BEAST":      "Beast",
+	"DEMON":      "Demon",
+	"DRAGON":     "Dragon",
+	"ELEMENTALS": "Elemental",
+	"MECH":       "Mech",
+	"MURLOC":     "Murloc",
+	"NAGA":       "Naga",
+	"PIRATE":     "Pirate",
+	"QUILLBOAR":  "Quilboar",
+	"UNDEAD":     "Undead",
+}
+
+// trackTribesFromEntity examines all BACON_SUBSET_* tags on an entity and
+// registers the tribe as available ONLY if the entity has exactly one subset
+// tag (single-tribe minion). Multi-tribe minions (2+ subset tags) can appear
+// in the pool via any of their tribes, so they would incorrectly mark banned
+// tribes as available.
+func (p *Processor) trackTribesFromEntity(entityID int, tags map[string]string) {
+	var tribe string
+	count := 0
+	for tag, value := range tags {
+		if !strings.HasPrefix(tag, baconSubsetPrefix) || value != "1" {
+			continue
+		}
+		suffix := tag[len(baconSubsetPrefix):]
+		if t, ok := baconSubsetToTribe[suffix]; ok {
+			tribe = t
+			count++
+		}
+	}
+	if count == 0 {
+		return
+	}
+	// Update entity subset count for TAG_CHANGE multi-tribe detection.
+	if info := p.entityProps[entityID]; info != nil {
+		info.Subsets = count
+	}
+	if count != 1 {
+		return // multi-tribe entity — skip
+	}
+	p.registerTribeConfirmation(tribe)
+}
+
+// registerTribeConfirmation increments the confirmation count for a tribe
+// and adds it to available tribes if this is the first confirmation.
+func (p *Processor) registerTribeConfirmation(tribe string) {
+	if p.tribeConfirmCount == nil {
+		p.tribeConfirmCount = make(map[string]int)
+	}
+	p.tribeConfirmCount[tribe]++
+	if p.seenTribes == nil {
+		p.seenTribes = make(map[string]bool)
+	}
+	if !p.seenTribes[tribe] {
+		p.seenTribes[tribe] = true
+		p.machine.AddAvailableTribe(tribe)
+	}
+}
+
+// revokeTribeConfirmation decrements the confirmation count for a tribe
+// and removes it from available tribes if no single-tribe entities remain.
+func (p *Processor) revokeTribeConfirmation(tribe string) {
+	if p.tribeConfirmCount == nil {
+		return
+	}
+	p.tribeConfirmCount[tribe]--
+	if p.tribeConfirmCount[tribe] <= 0 {
+		delete(p.tribeConfirmCount, tribe)
+		if p.seenTribes[tribe] {
+			delete(p.seenTribes, tribe)
+			p.machine.RemoveAvailableTribe(tribe)
+		}
+	}
+}
+
 // overconfidenceCardID is the Dnt enchantment for Overconfidence (BG28_884e).
 const overconfidenceCardID = "BG28_884e"
 
@@ -886,7 +1178,7 @@ func (p *Processor) updateGoldNextTurnCounter() {
 	}
 	var display string
 	if bonus > 0 {
-		display = fmt.Sprintf("%d (%d)", sure, sure+bonus)
+		display = fmt.Sprintf("%d (+%d if win)", sure, bonus)
 	} else {
 		display = fmt.Sprintf("%d", sure)
 	}

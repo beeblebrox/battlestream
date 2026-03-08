@@ -50,6 +50,7 @@ persists aggregate stats, and exposes them via gRPC, REST, WebSocket, and file o
 		cmdDaemon(),
 		cmdTUI(),
 		cmdDebug(),
+		cmdReplay(),
 		cmdDiscover(),
 		cmdConfig(),
 		cmdReparse(),
@@ -315,6 +316,70 @@ as 'battlestream reparse'). All games found are listed for selection.`,
 			return debugtui.New(logFiles).Run()
 		},
 	}
+}
+
+// --- replay ---
+
+func cmdReplay() *cobra.Command {
+	var dumpFlag bool
+	var turnFlag int
+	var widthFlag int
+
+	cmd := &cobra.Command{
+		Use:   "replay [flags] [log-file...]",
+		Short: "Step through a past game log by turn (no daemon required)",
+		Long: `Opens a debug TUI to step through Power.log events one by one.
+
+If --dump is set, renders the TUI state at the given turn to stdout and exits.
+If no file arguments are given, discovers log files from config.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var logFiles []string
+
+			if len(args) > 0 {
+				logFiles = args
+			} else {
+				cfg, err := config.Load(cfgFile)
+				if err != nil {
+					return fmt.Errorf("loading config: %w", err)
+				}
+				profile, err := cfg.GetProfile(profileFlag)
+				if err != nil {
+					return err
+				}
+				logPath := profile.Hearthstone.LogPath
+				if logPath == "" {
+					info, dErr := discovery.Discover()
+					if dErr != nil {
+						return fmt.Errorf("auto-discovery failed: %w\nSpecify log files as arguments or run 'battlestream discover'", dErr)
+					}
+					logPath = info.LogPath
+				}
+				logFiles = findPowerLogs(logPath)
+				if len(logFiles) == 0 {
+					return fmt.Errorf("no Power.log files found in %s", logPath)
+				}
+			}
+
+			if dumpFlag {
+				if len(logFiles) != 1 {
+					return fmt.Errorf("specify a single log file for --dump mode")
+				}
+				out, err := debugtui.Dump(logFiles[0], turnFlag, widthFlag)
+				if err != nil {
+					return err
+				}
+				fmt.Println(out)
+				return nil
+			}
+
+			return debugtui.New(logFiles).Run()
+		},
+	}
+
+	cmd.Flags().BoolVar(&dumpFlag, "dump", false, "render to stdout and exit instead of launching interactive TUI")
+	cmd.Flags().IntVar(&turnFlag, "turn", 1, "which BG turn to render (only used with --dump)")
+	cmd.Flags().IntVar(&widthFlag, "width", 120, "terminal width for --dump rendering")
+	return cmd
 }
 
 // findPowerLogs returns all Power.log files in the given log directory.

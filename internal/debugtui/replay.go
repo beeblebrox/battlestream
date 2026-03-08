@@ -151,6 +151,43 @@ func LoadAllGamesWithProgress(paths []string, prog *loadProgress) (*Replay, erro
 	return &Replay{Steps: steps, Games: games}, nil
 }
 
+// Dump parses the log at path, renders the TUI state at the given BG turn to a plain
+// string, and returns it. turn=0 means the last step. width controls rendering width.
+func Dump(path string, turn int, width int) (string, error) {
+	replay, err := LoadReplay(path)
+	if err != nil {
+		return "", err
+	}
+	return DumpFromReplay(replay, turn, width)
+}
+
+// DumpFromReplay renders a specific turn from an already-loaded replay.
+// This avoids re-parsing the log file when rendering multiple turns.
+func DumpFromReplay(replay *Replay, turn int, width int) (string, error) {
+	if len(replay.Games) == 0 {
+		return "", fmt.Errorf("no games found in replay")
+	}
+
+	m := NewFromReplay(replay)
+	m.width = width
+	m.height = 40
+
+	// selectGame(0) is already called by NewFromReplay when there is exactly one game;
+	// call it explicitly to handle the multi-game case and ensure picking=false.
+	m.selectGame(0)
+
+	if turn == 0 {
+		// Jump to last step.
+		if len(m.filtered) > 0 {
+			m.cursor = len(m.filtered) - 1
+		}
+	} else {
+		m.jumpToTurn(turn)
+	}
+
+	return m.View(), nil
+}
+
 func buildSummary(idx int, steps []Step, start, end int, file string) GameSummary {
 	last := steps[end-1]
 	first := steps[start]

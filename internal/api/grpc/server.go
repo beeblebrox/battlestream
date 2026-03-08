@@ -294,6 +294,7 @@ func gameStateToProto(s gamestate.BGGameState) *bspb.GameState {
 	for _, ac := range s.AbilityCounters {
 		gs.AbilityCounters = append(gs.AbilityCounters, abilityCounterToProto(ac))
 	}
+	gs.AvailableTribes = s.AvailableTribes
 	return gs
 }
 
@@ -302,10 +303,13 @@ func playerStateToProto(p gamestate.PlayerState) *bspb.PlayerStats {
 		Name:        p.Name,
 		HeroCardId:  p.HeroCardID,
 		Health:      int32(p.Health),
+		MaxHealth:   int32(p.MaxHealth),
+		Damage:      int32(p.Damage),
 		Armor:       int32(p.Armor),
 		SpellPower:  int32(p.SpellPower),
 		TripleCount: int32(p.TripleCount),
 		WinStreak:   int32(p.WinStreak),
+		LossStreak:  int32(p.LossStreak),
 	}
 }
 
