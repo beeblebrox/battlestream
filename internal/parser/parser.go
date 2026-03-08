@@ -62,9 +62,6 @@ var (
 	// TAG_CHANGE Entity=GameEntity tag=TURN value=7
 	reTurnStart = regexp.MustCompile(`TAG_CHANGE\s+Entity=GameEntity\s+tag=TURN\s+value=(\d+)`)
 
-	// TAG_CHANGE Entity=<PlayerName> tag=TURN value=3  (player-specific turn)
-	rePlayerTurn = regexp.MustCompile(`TAG_CHANGE\s+Entity=(\S+?)\s+tag=TURN\s+value=(\d+)\s`)
-
 	// TAG_CHANGE Entity=GameEntity tag=STATE value=COMPLETE
 	reGameComplete = regexp.MustCompile(`TAG_CHANGE\s+Entity=GameEntity\s+tag=STATE\s+value=COMPLETE`)
 

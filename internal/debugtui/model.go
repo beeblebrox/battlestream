@@ -167,13 +167,6 @@ func (m *Model) resetScrollAll() {
 	m.changesVP.GotoTop()
 }
 
-// resetPanelScroll resets only the middle panel viewports.
-func (m *Model) resetPanelScroll() {
-	m.boardVP.GotoTop()
-	m.buffVP.GotoTop()
-	m.changesVP.GotoTop()
-}
-
 // syncPanelScroll copies boardVP's YOffset to buffVP and changesVP so all
 // three middle panels scroll in lockstep.
 func (m *Model) syncPanelScroll() {

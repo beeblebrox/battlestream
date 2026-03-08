@@ -61,7 +61,6 @@ var (
 				Background(colorBarBg)
 
 	styleEvent    = lipgloss.NewStyle().Foreground(lipgloss.Color("81"))
-	styleRawLine  = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
 	styleInputBox = lipgloss.NewStyle().Foreground(lipgloss.Color("33")).Bold(true)
 )
 
