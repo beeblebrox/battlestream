@@ -353,6 +353,30 @@ func TestFullEntityControllerFromBlockTags(t *testing.T) {
 	}
 }
 
+// TestParserStateResetOnGameStart verifies that stale block state from a
+// previous game is silently discarded (not flushed) when CREATE_GAME is seen.
+// A game that ended mid-block must not emit phantom EventEntityUpdate events
+// before the EventGameStart of the next game.
+func TestParserStateResetOnGameStart(t *testing.T) {
+	events := feed(
+		// Put the parser into inBlock=true with a partial pending entity.
+		"D 21:11:50.1234567 GameState.DebugPrintPower() - BLOCK_START BlockType=PLAY Entity=[entityName=SomeCard id=99 zone=PLAY cardId=BG_FAKE_001 player=1] EffectCardId=",
+		"D 21:11:50.1234567 GameState.DebugPrintPower() - FULL_ENTITY - Creating ID=99 CardID=BG_FAKE_001",
+		// No closing tag lines — simulate a game that ended mid-block.
+		// Now a new game starts.
+		"D 21:11:50.1234567 GameState.DebugPrintPower() - CREATE_GAME",
+	)
+
+	// The partial stale block must be silently discarded — no phantom
+	// EventEntityUpdate should appear before (or instead of) EventGameStart.
+	if len(events) != 1 {
+		t.Fatalf("expected exactly 1 event (EventGameStart), got %d: %+v", len(events), events)
+	}
+	if events[0].Type != EventGameStart {
+		t.Errorf("expected first event to be %s, got %s", EventGameStart, events[0].Type)
+	}
+}
+
 // TestFullEntityIDFormat verifies the "FULL_ENTITY - Creating ID=N CardID=X" format.
 func TestFullEntityIDFormat(t *testing.T) {
 	events := feed(

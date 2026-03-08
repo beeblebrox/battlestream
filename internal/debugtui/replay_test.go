@@ -1,16 +1,42 @@
 package debugtui
 
 import (
+	"flag"
+	"fmt"
+	"os"
+	"strings"
+	"sync"
 	"testing"
 
 	"battlestream.fixates.io/internal/parser"
 )
 
-func TestLoadReplay(t *testing.T) {
-	replay, err := LoadReplay("../gamestate/testdata/power_log_game.txt")
-	if err != nil {
-		t.Fatalf("LoadReplay: %v", err)
+var updateGolden = flag.Bool("update-golden", false, "overwrite golden files with current output")
+
+const testLog = "../gamestate/testdata/power_log_game.txt"
+const goldenDir = "testdata/golden"
+
+// sharedReplay caches the parsed replay so the log file is only read once per
+// test run instead of once per test function (~10s per parse with race detector).
+var (
+	sharedReplay     *Replay
+	sharedReplayOnce sync.Once
+	sharedReplayErr  error
+)
+
+func getSharedReplay(t *testing.T) *Replay {
+	t.Helper()
+	sharedReplayOnce.Do(func() {
+		sharedReplay, sharedReplayErr = LoadReplay(testLog)
+	})
+	if sharedReplayErr != nil {
+		t.Fatalf("LoadReplay: %v", sharedReplayErr)
 	}
+	return sharedReplay
+}
+
+func TestLoadReplay(t *testing.T) {
+	replay := getSharedReplay(t)
 	if len(replay.Steps) == 0 {
 		t.Fatal("expected steps > 0")
 	}
@@ -57,18 +83,125 @@ func TestLoadReplay(t *testing.T) {
 	}
 }
 
+func TestDump_DoesNotPanic(t *testing.T) {
+	replay := getSharedReplay(t)
+	out, err := DumpFromReplay(replay, 1, 120)
+	if err != nil {
+		t.Fatalf("DumpFromReplay: %v", err)
+	}
+	if out == "" {
+		t.Error("expected non-empty output")
+	}
+}
+
+func TestDump_LastTurn(t *testing.T) {
+	replay := getSharedReplay(t)
+	out, err := DumpFromReplay(replay, 999, 120)
+	if err != nil {
+		t.Fatalf("DumpFromReplay: %v", err)
+	}
+	if out == "" {
+		t.Error("expected non-empty output")
+	}
+}
+
+// TestDump_Golden captures TUI output for specific turns as golden screenshots.
+// Run with -update-golden to regenerate the golden files.
+//
+// Each golden file stores raw TUI output (including ANSI colour codes) for an
+// exact terminal width of 120 columns so diffs are stable across runs.
+func TestDump_Golden(t *testing.T) {
+	replay := getSharedReplay(t)
+	cases := []struct {
+		turn        int
+		description string
+	}{
+		{1, "first-turn"},
+		{5, "mid-game"},
+		{0, "last-turn"}, // turn=0 → jump to last step
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.description, func(t *testing.T) {
+			got, err := DumpFromReplay(replay, tc.turn, 120)
+			if err != nil {
+				t.Fatalf("DumpFromReplay(turn=%d): %v", tc.turn, err)
+			}
+			if got == "" {
+				t.Fatal("empty output")
+			}
+
+			goldenFile := fmt.Sprintf("%s/%s.txt", goldenDir, tc.description)
+
+			if *updateGolden {
+				if err := os.MkdirAll(goldenDir, 0o755); err != nil {
+					t.Fatalf("mkdir golden: %v", err)
+				}
+				if err := os.WriteFile(goldenFile, []byte(got), 0o644); err != nil {
+					t.Fatalf("write golden: %v", err)
+				}
+				t.Logf("updated %s", goldenFile)
+				return
+			}
+
+			want, err := os.ReadFile(goldenFile)
+			if err != nil {
+				t.Fatalf("golden file missing — run: go test ./internal/debugtui/ -update-golden\nerr: %v", err)
+			}
+
+			if got != string(want) {
+				// Show a line-by-line diff summary (ANSI stripped for readability).
+				gotLines := strings.Split(stripANSI(got), "\n")
+				wantLines := strings.Split(stripANSI(string(want)), "\n")
+				t.Errorf("golden mismatch for %s (turn=%d): got %d lines, want %d lines",
+					tc.description, tc.turn, len(gotLines), len(wantLines))
+				for i := 0; i < len(gotLines) || i < len(wantLines); i++ {
+					g, w := "", ""
+					if i < len(gotLines) {
+						g = gotLines[i]
+					}
+					if i < len(wantLines) {
+						w = wantLines[i]
+					}
+					if g != w {
+						t.Logf("  line %d\n    got:  %q\n    want: %q", i+1, g, w)
+					}
+				}
+			}
+		})
+	}
+}
+
+// stripANSI removes ANSI escape sequences for readable diff output.
+func stripANSI(s string) string {
+	var out strings.Builder
+	for i := 0; i < len(s); {
+		if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '[' {
+			i += 2
+			for i < len(s) && s[i] != 'm' {
+				i++
+			}
+			i++ // consume 'm'
+			continue
+		}
+		out.WriteByte(s[i])
+		i++
+	}
+	return out.String()
+}
+
 func TestLoadAllGamesMultiFile(t *testing.T) {
 	// Loading the same file twice should produce 2x the games.
-	path := "../gamestate/testdata/power_log_game.txt"
+	// This test must call LoadAllGames directly (not the shared replay)
+	// because it tests multi-file loading specifically.
+	path := testLog
 	replay, err := LoadAllGames([]string{path, path})
 	if err != nil {
 		t.Fatalf("LoadAllGames: %v", err)
 	}
 
-	single, err := LoadReplay(path)
-	if err != nil {
-		t.Fatalf("LoadReplay: %v", err)
-	}
+	single := getSharedReplay(t)
 
 	if len(replay.Games) != 2*len(single.Games) {
 		t.Errorf("expected %d games from double load, got %d",

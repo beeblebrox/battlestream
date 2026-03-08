@@ -30,8 +30,8 @@ func TestMachineGameStart(t *testing.T) {
 	if s.GameID != "game-1" {
 		t.Errorf("expected game-1, got %q", s.GameID)
 	}
-	if s.Player.Health != 40 {
-		t.Errorf("expected initial health 40, got %d", s.Player.Health)
+	if s.Player.Health != 0 {
+		t.Errorf("expected initial health 0 (set from hero HEALTH tag), got %d", s.Player.Health)
 	}
 }
 
@@ -220,6 +220,7 @@ func setupGame(p *Processor) {
 	// Hero entity assignment
 	p.Handle(parser.GameEvent{
 		Type:       parser.EventTagChange,
+		PlayerID:   7,
 		EntityName: "Moch#1358",
 		Tags:       map[string]string{"HERO_ENTITY": "75"},
 	})
@@ -253,6 +254,7 @@ func TestProcessorTurnFromPlayerEntity(t *testing.T) {
 	// Player TURN tag (what the user sees)
 	p.Handle(parser.GameEvent{
 		Type:       parser.EventTagChange,
+		PlayerID:   7,
 		EntityName: "Moch#1358",
 		Tags:       map[string]string{"TURN": "3"},
 	})
@@ -355,11 +357,70 @@ func TestProcessorTagChangeTavernTier(t *testing.T) {
 	// Tavern tier from local player entity
 	p.Handle(parser.GameEvent{
 		Type:       parser.EventTagChange,
+		PlayerID:   7,
 		EntityName: "Moch#1358",
 		Tags:       map[string]string{"PLAYER_TECH_LEVEL": "4"},
 	})
 	if m.State().TavernTier != 4 {
 		t.Errorf("expected tavern tier 4, got %d", m.State().TavernTier)
+	}
+}
+
+// TestTavernTierAttribution verifies the stricter guard on PLAYER_TECH_LEVEL /
+// TAVERN_TIER: when localPlayerID is 0 (not yet set), a TAG_CHANGE with
+// controllerID=0 must NOT set the tavern tier (the old code would false-positive
+// because 0==0). After local player identification, only the matching controller
+// may update the tier.
+func TestTavernTierAttribution(t *testing.T) {
+	m, p := newProc()
+	// Start a game but do NOT call setupGame — localPlayerID stays 0.
+	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+
+	// Sanity: localPlayerID must still be 0 at this point.
+	if p.localPlayerID != 0 {
+		t.Fatalf("expected localPlayerID=0 before player def, got %d", p.localPlayerID)
+	}
+
+	// A tag-change with controllerID=0 (unknown entity) and localPlayerID=0.
+	// This should NOT set the tavern tier — the old guard would have matched 0==0.
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventTagChange,
+		PlayerID: 0, // controllerID resolves to 0
+		EntityID: 99,
+		Tags:     map[string]string{"PLAYER_TECH_LEVEL": "3"},
+	})
+	if tier := m.State().TavernTier; tier != 0 {
+		t.Errorf("tier should not be set when localPlayerID=0 and controllerID=0, got %d", tier)
+	}
+
+	// Now identify the local player as PlayerID=7.
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventPlayerDef,
+		EntityID: 20,
+		PlayerID: 7,
+		Tags:     map[string]string{"hi": "144115193835963207", "lo": "30722021", "PLAYER_ID": "7"},
+	})
+
+	// Tag-change from the local player (controllerID=7) — must set tier.
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventTagChange,
+		PlayerID: 7,
+		EntityID: 20,
+		Tags:     map[string]string{"PLAYER_TECH_LEVEL": "3"},
+	})
+	if tier := m.State().TavernTier; tier != 3 {
+		t.Errorf("expected tier 3 after local player tag-change, got %d", tier)
+	}
+
+	// Tag-change from the opponent (controllerID=5) — must NOT change tier.
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventTagChange,
+		PlayerID: 5,
+		EntityID: 55,
+		Tags:     map[string]string{"PLAYER_TECH_LEVEL": "5"},
+	})
+	if tier := m.State().TavernTier; tier != 3 {
+		t.Errorf("opponent tier change should not affect local tier; expected 3, got %d", tier)
 	}
 }
 
@@ -425,6 +486,7 @@ func TestProcessorGameEndSetsPlacement(t *testing.T) {
 	p.Handle(parser.GameEvent{
 		Type:       parser.EventTagChange,
 		Timestamp:  time.Now(),
+		PlayerID:   7,
 		EntityName: "Moch#1358",
 		Tags:       map[string]string{"PLAYER_LEADERBOARD_PLACE": "3"},
 	})
@@ -451,6 +513,7 @@ func TestProcessorPlacementFromTagChange(t *testing.T) {
 	p.Handle(parser.GameEvent{
 		Type:       parser.EventTagChange,
 		Timestamp:  time.Now(),
+		PlayerID:   7,
 		EntityName: "Moch#1358",
 		Tags:       map[string]string{"PLAYER_LEADERBOARD_PLACE": "5"},
 	})
@@ -473,6 +536,7 @@ func TestProcessorPlacementResetOnNewGame(t *testing.T) {
 	setupGame(p)
 	p.Handle(parser.GameEvent{
 		Type:       parser.EventTagChange,
+		PlayerID:   7,
 		EntityName: "Moch#1358",
 		Tags:       map[string]string{"PLAYER_LEADERBOARD_PLACE": "7"},
 	})
@@ -782,11 +846,13 @@ func TestProcessorBuffSourceFromPlayerTag(t *testing.T) {
 	// Simulate TAVERN_SPELL_ATTACK_INCREASE on local player
 	p.Handle(parser.GameEvent{
 		Type:       parser.EventTagChange,
+		PlayerID:   7,
 		EntityName: "Moch#1358",
 		Tags:       map[string]string{"TAVERN_SPELL_ATTACK_INCREASE": "3"},
 	})
 	p.Handle(parser.GameEvent{
 		Type:       parser.EventTagChange,
+		PlayerID:   7,
 		EntityName: "Moch#1358",
 		Tags:       map[string]string{"TAVERN_SPELL_HEALTH_INCREASE": "2"},
 	})
@@ -813,11 +879,13 @@ func TestProcessorBloodgemValueComputation(t *testing.T) {
 	// Bloodgem ATK value 0 → effective +1, value 2 → effective +3
 	p.Handle(parser.GameEvent{
 		Type:       parser.EventTagChange,
+		PlayerID:   7,
 		EntityName: "Moch#1358",
 		Tags:       map[string]string{"BACON_BLOODGEMBUFFATKVALUE": "2"},
 	})
 	p.Handle(parser.GameEvent{
 		Type:       parser.EventTagChange,
+		PlayerID:   7,
 		EntityName: "Moch#1358",
 		Tags:       map[string]string{"BACON_BLOODGEMBUFFHEALTHVALUE": "1"},
 	})
@@ -1154,13 +1222,33 @@ func findBuffSource(m *Machine, category string) *BuffSource {
 	return nil
 }
 
+// setupNagaMinion adds a Thaumaturgist (BG31_924) to the local player's board,
+// satisfying HasNagaSynergyMinion so tag=3809 events emit the ability counter.
+func setupNagaMinion(p *Processor) {
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventEntityUpdate,
+		EntityID: 500,
+		CardID:   "BG31_924", // Thaumaturgist
+		Tags: map[string]string{
+			"CARDTYPE":   "MINION",
+			"ZONE":       "PLAY",
+			"ATK":        "3",
+			"HEALTH":     "2",
+			"CONTROLLER": "7",
+		},
+	})
+}
+
 func TestProcessorSpellcraftCounter(t *testing.T) {
 	m, p := newProc()
 	setupGame(p)
+	// Put a Naga synergy minion on the board so HasNagaSynergyMinion returns true.
+	setupNagaMinion(p)
 
-	// Tag 3809 value=9 → stacks=1+(9/4)=3, progress=9%4=1 → "3 (1/4)"
+	// Tag 3809 value=9 → stacks=1+(9/4)=3, progress=9%4=1 → "Tier 3 · 1/4"
 	p.Handle(parser.GameEvent{
 		Type:       parser.EventTagChange,
+		PlayerID:   7,
 		EntityName: "Moch#1358",
 		Tags:       map[string]string{"3809": "9"},
 	})
@@ -1170,30 +1258,58 @@ func TestProcessorSpellcraftCounter(t *testing.T) {
 		t.Fatalf("expected 1 ability counter, got %d", len(s.AbilityCounters))
 	}
 	ac := s.AbilityCounters[0]
-	if ac.Category != CatSpellcraft {
-		t.Errorf("expected SPELLCRAFT category, got %q", ac.Category)
+	if ac.Category != CatNagaSpells {
+		t.Errorf("expected NAGA_SPELLS category, got %q", ac.Category)
 	}
 	if ac.Value != 9 {
 		t.Errorf("expected raw value 9, got %d", ac.Value)
 	}
-	if ac.Display != "3 (1/4)" {
-		t.Errorf("expected display \"3 (1/4)\", got %q", ac.Display)
+	if ac.Display != "Tier 3 · 1/4" {
+		t.Errorf("expected display \"Tier 3 · 1/4\", got %q", ac.Display)
 	}
+}
+
+// TestProcessorSpellcraftCounterNoSynergyMinion verifies that tag=3809 events do NOT
+// emit a CatNagaSpells counter when no Naga synergy minion is on the board.
+func TestProcessorSpellcraftCounterNoSynergyMinion(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+
+	// No Naga synergy minion added — board is empty.
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventTagChange,
+		PlayerID:   7,
+		EntityName: "Moch#1358",
+		Tags:       map[string]string{"3809": "9"},
+	})
+
+	s := m.State()
+	for _, ac := range s.AbilityCounters {
+		if ac.Category == CatNagaSpells {
+			t.Errorf("expected no CatNagaSpells counter (no synergy minion on board), got value=%d display=%q",
+				ac.Value, ac.Display)
+		}
+	}
+	_ = m
 }
 
 func TestProcessorSpellcraftCounterUpdate(t *testing.T) {
 	m, p := newProc()
 	setupGame(p)
+	// Put a Naga synergy minion on the board so HasNagaSynergyMinion returns true.
+	setupNagaMinion(p)
 
 	// First update
 	p.Handle(parser.GameEvent{
 		Type:       parser.EventTagChange,
+		PlayerID:   7,
 		EntityName: "Moch#1358",
 		Tags:       map[string]string{"3809": "4"},
 	})
 	// Second update — should replace, not add
 	p.Handle(parser.GameEvent{
 		Type:       parser.EventTagChange,
+		PlayerID:   7,
 		EntityName: "Moch#1358",
 		Tags:       map[string]string{"3809": "29"},
 	})
@@ -1203,9 +1319,9 @@ func TestProcessorSpellcraftCounterUpdate(t *testing.T) {
 		t.Fatalf("expected 1 ability counter after updates, got %d", len(s.AbilityCounters))
 	}
 	ac := s.AbilityCounters[0]
-	// 29 → stacks=1+(29/4)=8, progress=29%4=1 → "8 (1/4)"
-	if ac.Display != "8 (1/4)" {
-		t.Errorf("expected display \"8 (1/4)\", got %q", ac.Display)
+	// 29 → stacks=1+(29/4)=8, progress=29%4=1 → "Tier 8 · 1/4"
+	if ac.Display != "Tier 8 · 1/4" {
+		t.Errorf("expected display \"Tier 8 · 1/4\", got %q", ac.Display)
 	}
 }
 
@@ -1216,6 +1332,7 @@ func TestCounterFreeRefresh(t *testing.T) {
 	// BACON_FREE_REFRESH_COUNT on local player entity.
 	p.Handle(parser.GameEvent{
 		Type:       parser.EventTagChange,
+		PlayerID:   7,
 		EntityName: "Moch#1358",
 		Tags:       map[string]string{"BACON_FREE_REFRESH_COUNT": "3"},
 	})
@@ -1238,11 +1355,13 @@ func TestCounterFreeRefreshUpdate(t *testing.T) {
 
 	p.Handle(parser.GameEvent{
 		Type:       parser.EventTagChange,
+		PlayerID:   7,
 		EntityName: "Moch#1358",
 		Tags:       map[string]string{"BACON_FREE_REFRESH_COUNT": "1"},
 	})
 	p.Handle(parser.GameEvent{
 		Type:       parser.EventTagChange,
+		PlayerID:   7,
 		EntityName: "Moch#1358",
 		Tags:       map[string]string{"BACON_FREE_REFRESH_COUNT": "5"},
 	})
@@ -1270,6 +1389,7 @@ func TestCounterGoldNextTurnBasic(t *testing.T) {
 	// BACON_PLAYER_EXTRA_GOLD_NEXT_TURN on local player entity.
 	p.Handle(parser.GameEvent{
 		Type:       parser.EventTagChange,
+		PlayerID:   7,
 		EntityName: "Moch#1358",
 		Tags:       map[string]string{"BACON_PLAYER_EXTRA_GOLD_NEXT_TURN": "4"},
 	})
@@ -1293,6 +1413,7 @@ func TestCounterGoldNextTurnWithOverconfidence(t *testing.T) {
 	// Set base gold.
 	p.Handle(parser.GameEvent{
 		Type:       parser.EventTagChange,
+		PlayerID:   7,
 		EntityName: "Moch#1358",
 		Tags:       map[string]string{"BACON_PLAYER_EXTRA_GOLD_NEXT_TURN": "2"},
 	})
@@ -1312,9 +1433,9 @@ func TestCounterGoldNextTurnWithOverconfidence(t *testing.T) {
 	if ac == nil {
 		t.Fatal("expected GOLD_NEXT_TURN counter after Overconfidence enters PLAY")
 	}
-	// Display should show "2 (5)" — 2 sure + 3 from overconfidence
-	if ac.Display != "2 (5)" {
-		t.Errorf("expected display \"2 (5)\", got %q", ac.Display)
+	// Display should show "2 (+3 if win)" — 2 sure + 3 conditional from overconfidence
+	if ac.Display != "2 (+3 if win)" {
+		t.Errorf("expected display \"2 (+3 if win)\", got %q", ac.Display)
 	}
 
 	// Remove Overconfidence from PLAY → overconfidence--
@@ -1336,6 +1457,7 @@ func TestCounterGoldNextTurnMultipleOverconfidence(t *testing.T) {
 
 	p.Handle(parser.GameEvent{
 		Type:       parser.EventTagChange,
+		PlayerID:   7,
 		EntityName: "Moch#1358",
 		Tags:       map[string]string{"BACON_PLAYER_EXTRA_GOLD_NEXT_TURN": "1"},
 	})
@@ -1352,9 +1474,62 @@ func TestCounterGoldNextTurnMultipleOverconfidence(t *testing.T) {
 	}
 
 	ac := findAbilityCounter(m, CatGoldNextTurn)
-	// 1 sure + 2*3=6 bonus = 7 total
-	if ac.Display != "1 (7)" {
-		t.Errorf("expected display \"1 (7)\", got %q", ac.Display)
+	// 1 sure + 2*3=6 conditional bonus from two Overconfidence Dnts
+	if ac.Display != "1 (+6 if win)" {
+		t.Errorf("expected display \"1 (+6 if win)\", got %q", ac.Display)
+	}
+}
+
+func TestParseInt(t *testing.T) {
+	cases := []struct {
+		input string
+		want  int
+	}{
+		{"42", 42},
+		{"0", 0},
+		{"-5", -5},
+		{" -3 ", -3},
+		{"bad", 0},
+		{"", 0},
+	}
+	for _, tc := range cases {
+		got := parseInt(tc.input)
+		if got != tc.want {
+			t.Errorf("parseInt(%q) = %d, want %d", tc.input, got, tc.want)
+		}
+	}
+}
+
+// TestIsLocalPlayerEntity verifies that PlayerID match takes priority over name
+// match, and that name fallback is only used when localPlayerID is 0.
+func TestIsLocalPlayerEntity(t *testing.T) {
+	_, p := newProc()
+	p.localPlayerID = 7
+	p.localPlayerName = "Alice"
+
+	// Name matches "Alice" but PlayerID is wrong → should be false (ID takes priority).
+	e := parser.GameEvent{EntityName: "Alice", PlayerID: 99}
+	if p.isLocalPlayerEntity(e) {
+		t.Error("name match should be blocked when localPlayerID is known and PlayerID doesn't match")
+	}
+
+	// PlayerID matches but name is different → should be true.
+	e = parser.GameEvent{EntityName: "Bob", PlayerID: 7}
+	if !p.isLocalPlayerEntity(e) {
+		t.Error("PlayerID match should return true regardless of name")
+	}
+
+	// localPlayerID not yet known (0): name match should work as fallback.
+	p.localPlayerID = 0
+	e = parser.GameEvent{EntityName: "Alice", PlayerID: 0}
+	if !p.isLocalPlayerEntity(e) {
+		t.Error("name fallback should return true when localPlayerID == 0 and name matches")
+	}
+
+	// localPlayerID not yet known (0): name doesn't match → false.
+	e = parser.GameEvent{EntityName: "Bob", PlayerID: 0}
+	if p.isLocalPlayerEntity(e) {
+		t.Error("name fallback should return false when name doesn't match")
 	}
 }
 
@@ -1365,4 +1540,139 @@ func findAbilityCounter(m *Machine, category string) *AbilityCounter {
 		}
 	}
 	return nil
+}
+
+// TestPendingStatChangesCapFlush verifies that the buffer is flushed early when
+// more than maxPendingStatChanges entries accumulate without a turn-boundary event.
+func TestPendingStatChangesCapFlush(t *testing.T) {
+	_, p := newProc()
+
+	// Start a game and advance to recruit phase.
+	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTurnStart,
+		Tags: map[string]string{"TURN": "1"},
+	})
+
+	// Manually set the local player ID (no CREATE_GAME block in this minimal setup).
+	p.localPlayerID = 7
+
+	// Populate entityProps and entityController for 5 fake minions owned by player 7.
+	for i := 100; i < 105; i++ {
+		p.entityController[i] = 7
+		p.entityProps[i] = &entityInfo{
+			Name:     fmt.Sprintf("Minion%d", i),
+			CardType: "MINION",
+			Zone:     "PLAY",
+			Attack:   2,
+			Health:   2,
+		}
+	}
+
+	// Feed exactly maxPendingStatChanges+1 stat changes without any turn-boundary event.
+	// The overflow guard must flush the buffer when the 201st entry is appended,
+	// leaving the slice empty (the flush resets it to len 0).
+	total := maxPendingStatChanges + 1
+	for i := 0; i < total; i++ {
+		entityID := 100 + (i % 5)
+		// Keep the entity's stored Attack one below the value we're about to send,
+		// so every call sees a real non-zero delta and actually appends to the buffer.
+		info := p.entityProps[entityID]
+		newAtk := info.Attack + 1
+		e := parser.GameEvent{
+			EntityID: entityID,
+			PlayerID: 7,
+			Tags:     map[string]string{"ATK": fmt.Sprintf("%d", newAtk)},
+		}
+		p.updateMinionStat(e, "ATK", fmt.Sprintf("%d", newAtk))
+		// Reset stored value so the next iteration for this entity sees a fresh delta.
+		if info2 := p.entityProps[entityID]; info2 != nil {
+			info2.Attack = newAtk - 1
+		}
+	}
+
+	// After exactly maxPendingStatChanges+1 appends the guard fires and flushes,
+	// so the buffer must be empty.
+	if len(p.pendingStatChanges) != 0 {
+		t.Errorf("expected pendingStatChanges to be flushed (len=0), got len=%d", len(p.pendingStatChanges))
+	}
+}
+
+// TestBoardSnapshotPhaseGate verifies that tryAddMinionFromRegistry only
+// updates the board snapshot during PhaseRecruit, not during PhaseCombat.
+// This prevents combat copies (which arrive in PLAY with base stats before
+// receiving their buffed TAG_CHANGEs) from overwriting the correct
+// recruit-phase snapshot that GameEnd restores.
+func TestBoardSnapshotPhaseGate(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+
+	// Manually wire internal state for direct tryAddMinionFromRegistry calls.
+	p.localPlayerID = 7
+
+	// ── Recruit phase ────────────────────────────────────────────────────────
+	// Enter recruit phase (GameEntity turn 1 = odd = recruit).
+	m.SetGameEntityTurn(1)
+	if m.Phase() != PhaseRecruit {
+		t.Fatalf("expected RECRUIT after SetGameEntityTurn(1), got %s", m.Phase())
+	}
+
+	// Register a minion with buffed recruit-phase stats in the entity registry.
+	p.entityProps[200] = &entityInfo{
+		Name:     "Buffed Recruit Minion",
+		CardID:   "TEST_001",
+		CardType: "MINION",
+		Attack:   5,
+		Health:   8,
+	}
+	p.entityController[200] = 7
+
+	// Call tryAddMinionFromRegistry in recruit phase — snapshot should update.
+	p.tryAddMinionFromRegistry(200, 7)
+
+	// The snapshot was taken during recruit phase; confirm minion is on board.
+	board := m.State().Board
+	if len(board) != 1 {
+		t.Fatalf("expected 1 minion on board after recruit-phase add, got %d", len(board))
+	}
+	if board[0].Attack != 5 || board[0].Health != 8 {
+		t.Errorf("recruit-phase minion stats wrong: got %d/%d, want 5/8", board[0].Attack, board[0].Health)
+	}
+
+	// ── Enter combat phase ───────────────────────────────────────────────────
+	// SetGameEntityTurn(2) snapshots the board and transitions to PhaseCombat.
+	m.SetGameEntityTurn(2)
+	if m.Phase() != PhaseCombat {
+		t.Fatalf("expected COMBAT after SetGameEntityTurn(2), got %s", m.Phase())
+	}
+
+	// The snapshot taken by SetGameEntityTurn(2) has the buffed recruit stats.
+	// Simulate a combat copy: it arrives in PLAY with lower base stats.
+	// Add it to the registry with base stats (as the log would show).
+	p.entityProps[201] = &entityInfo{
+		Name:     "Combat Copy",
+		CardID:   "TEST_001",
+		CardType: "MINION",
+		Attack:   2, // base stats, NOT the buffed 5/8
+		Health:   3,
+	}
+	p.entityController[201] = 7
+
+	// Call tryAddMinionFromRegistry in combat phase — snapshot must NOT update.
+	p.tryAddMinionFromRegistry(201, 7)
+
+	// Board now has two minions (recruit minion + combat copy), but the snapshot
+	// must still reflect only the pre-combat recruit board (one minion, 5/8).
+	// Simulate GameEnd restoring the snapshot.
+	m.GameEnd(1, time.Now())
+	restoredBoard := m.State().Board
+	if len(restoredBoard) != 1 {
+		t.Fatalf("after GameEnd, expected 1 minion (recruit snapshot), got %d", len(restoredBoard))
+	}
+	if restoredBoard[0].Attack != 5 || restoredBoard[0].Health != 8 {
+		t.Errorf("restored board has wrong stats: got %d/%d, want 5/8", restoredBoard[0].Attack, restoredBoard[0].Health)
+	}
+	if restoredBoard[0].EntityID != 200 {
+		t.Errorf("restored board has wrong entity: got %d, want 200", restoredBoard[0].EntityID)
+	}
 }
