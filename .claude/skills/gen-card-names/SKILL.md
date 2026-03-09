@@ -1,4 +1,10 @@
-# gen-card-names skill
+---
+name: gen-card-names
+description: gen-card-names skill
+disable-model-invocation: true
+---
+
+# gen-card-names
 
 Generate `internal/gamestate/cardnames.go` from the live HearthstoneJSON card database.
 

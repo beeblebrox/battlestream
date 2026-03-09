@@ -22,5 +22,5 @@ Build and optionally test the battlestream binary.
 
 ### test
 1. Run: `go build -o ./battlestream ./cmd/battlestream/`
-2. Run: `go test ./...`
+2. Run: `go test -race -count=1 ./...`
 3. Report results
