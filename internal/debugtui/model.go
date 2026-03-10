@@ -91,11 +91,9 @@ type Model struct {
 	scrubTrackH int
 
 	// Duos partner panel state.
-	showPartner bool
+	showPartner    bool
 	partnerBoardVP viewport.Model
 	partnerBuffVP  viewport.Model
-	partnerBoardScrollX, partnerBoardVPY, partnerBoardVPH int
-	partnerBuffScrollX, partnerBuffVPY, partnerBuffVPH     int
 }
 
 func newJumpInput() textinput.Model {
@@ -803,7 +801,6 @@ func (m *Model) viewStep() string {
 	// If partner panels would be too small, suppress them.
 	if showPartnerRow && maxContentH < 2 {
 		showPartnerRow = false
-		rowOverhead -= 3
 		contentBudget += 3
 		maxContentH = contentBudget / 2
 	}
