@@ -574,25 +574,30 @@ func (x *StatMod) GetCardId() string {
 }
 
 type GameState struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	GameId          string                 `protobuf:"bytes,1,opt,name=game_id,json=gameId,proto3" json:"game_id,omitempty"`
-	Phase           string                 `protobuf:"bytes,2,opt,name=phase,proto3" json:"phase,omitempty"`
-	Turn            int32                  `protobuf:"varint,3,opt,name=turn,proto3" json:"turn,omitempty"`
-	TavernTier      int32                  `protobuf:"varint,4,opt,name=tavern_tier,json=tavernTier,proto3" json:"tavern_tier,omitempty"`
-	Player          *PlayerStats           `protobuf:"bytes,5,opt,name=player,proto3" json:"player,omitempty"`
-	Opponent        *PlayerStats           `protobuf:"bytes,6,opt,name=opponent,proto3" json:"opponent,omitempty"`
-	Board           []*MinionState         `protobuf:"bytes,7,rep,name=board,proto3" json:"board,omitempty"`
-	OpponentBoard   []*MinionState         `protobuf:"bytes,8,rep,name=opponent_board,json=opponentBoard,proto3" json:"opponent_board,omitempty"`
-	Modifications   []*StatMod             `protobuf:"bytes,9,rep,name=modifications,proto3" json:"modifications,omitempty"`
-	StartTimeUnix   int64                  `protobuf:"varint,10,opt,name=start_time_unix,json=startTimeUnix,proto3" json:"start_time_unix,omitempty"`
-	EndTimeUnix     int64                  `protobuf:"varint,11,opt,name=end_time_unix,json=endTimeUnix,proto3" json:"end_time_unix,omitempty"`
-	Placement       int32                  `protobuf:"varint,12,opt,name=placement,proto3" json:"placement,omitempty"`
-	BuffSources     []*BuffSource          `protobuf:"bytes,13,rep,name=buff_sources,json=buffSources,proto3" json:"buff_sources,omitempty"`
-	Enchantments    []*Enchantment         `protobuf:"bytes,14,rep,name=enchantments,proto3" json:"enchantments,omitempty"`
-	AbilityCounters []*AbilityCounter      `protobuf:"bytes,15,rep,name=ability_counters,json=abilityCounters,proto3" json:"ability_counters,omitempty"`
-	AvailableTribes []string               `protobuf:"bytes,16,rep,name=available_tribes,json=availableTribes,proto3" json:"available_tribes,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state                  protoimpl.MessageState `protogen:"open.v1"`
+	GameId                 string                 `protobuf:"bytes,1,opt,name=game_id,json=gameId,proto3" json:"game_id,omitempty"`
+	Phase                  string                 `protobuf:"bytes,2,opt,name=phase,proto3" json:"phase,omitempty"`
+	Turn                   int32                  `protobuf:"varint,3,opt,name=turn,proto3" json:"turn,omitempty"`
+	TavernTier             int32                  `protobuf:"varint,4,opt,name=tavern_tier,json=tavernTier,proto3" json:"tavern_tier,omitempty"`
+	Player                 *PlayerStats           `protobuf:"bytes,5,opt,name=player,proto3" json:"player,omitempty"`
+	Opponent               *PlayerStats           `protobuf:"bytes,6,opt,name=opponent,proto3" json:"opponent,omitempty"`
+	Board                  []*MinionState         `protobuf:"bytes,7,rep,name=board,proto3" json:"board,omitempty"`
+	OpponentBoard          []*MinionState         `protobuf:"bytes,8,rep,name=opponent_board,json=opponentBoard,proto3" json:"opponent_board,omitempty"`
+	Modifications          []*StatMod             `protobuf:"bytes,9,rep,name=modifications,proto3" json:"modifications,omitempty"`
+	StartTimeUnix          int64                  `protobuf:"varint,10,opt,name=start_time_unix,json=startTimeUnix,proto3" json:"start_time_unix,omitempty"`
+	EndTimeUnix            int64                  `protobuf:"varint,11,opt,name=end_time_unix,json=endTimeUnix,proto3" json:"end_time_unix,omitempty"`
+	Placement              int32                  `protobuf:"varint,12,opt,name=placement,proto3" json:"placement,omitempty"`
+	BuffSources            []*BuffSource          `protobuf:"bytes,13,rep,name=buff_sources,json=buffSources,proto3" json:"buff_sources,omitempty"`
+	Enchantments           []*Enchantment         `protobuf:"bytes,14,rep,name=enchantments,proto3" json:"enchantments,omitempty"`
+	AbilityCounters        []*AbilityCounter      `protobuf:"bytes,15,rep,name=ability_counters,json=abilityCounters,proto3" json:"ability_counters,omitempty"`
+	AvailableTribes        []string               `protobuf:"bytes,16,rep,name=available_tribes,json=availableTribes,proto3" json:"available_tribes,omitempty"`
+	IsDuos                 bool                   `protobuf:"varint,17,opt,name=is_duos,json=isDuos,proto3" json:"is_duos,omitempty"`
+	Partner                *PlayerStats           `protobuf:"bytes,18,opt,name=partner,proto3" json:"partner,omitempty"`
+	PartnerBoard           []*MinionState         `protobuf:"bytes,19,rep,name=partner_board,json=partnerBoard,proto3" json:"partner_board,omitempty"`
+	PartnerBuffSources     []*BuffSource          `protobuf:"bytes,20,rep,name=partner_buff_sources,json=partnerBuffSources,proto3" json:"partner_buff_sources,omitempty"`
+	PartnerAbilityCounters []*AbilityCounter      `protobuf:"bytes,21,rep,name=partner_ability_counters,json=partnerAbilityCounters,proto3" json:"partner_ability_counters,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *GameState) Reset() {
@@ -733,6 +738,41 @@ func (x *GameState) GetAbilityCounters() []*AbilityCounter {
 func (x *GameState) GetAvailableTribes() []string {
 	if x != nil {
 		return x.AvailableTribes
+	}
+	return nil
+}
+
+func (x *GameState) GetIsDuos() bool {
+	if x != nil {
+		return x.IsDuos
+	}
+	return false
+}
+
+func (x *GameState) GetPartner() *PlayerStats {
+	if x != nil {
+		return x.Partner
+	}
+	return nil
+}
+
+func (x *GameState) GetPartnerBoard() []*MinionState {
+	if x != nil {
+		return x.PartnerBoard
+	}
+	return nil
+}
+
+func (x *GameState) GetPartnerBuffSources() []*BuffSource {
+	if x != nil {
+		return x.PartnerBuffSources
+	}
+	return nil
+}
+
+func (x *GameState) GetPartnerAbilityCounters() []*AbilityCounter {
+	if x != nil {
+		return x.PartnerAbilityCounters
 	}
 	return nil
 }
@@ -888,7 +928,7 @@ const file_battlestream_v1_game_proto_rawDesc = "" +
 	"\x05delta\x18\x04 \x01(\x05R\x05delta\x12\x16\n" +
 	"\x06source\x18\x05 \x01(\tR\x06source\x12\x1a\n" +
 	"\bcategory\x18\x06 \x01(\tR\bcategory\x12\x17\n" +
-	"\acard_id\x18\a \x01(\tR\x06cardId\"\xfb\x05\n" +
+	"\acard_id\x18\a \x01(\tR\x06cardId\"\xb9\b\n" +
 	"\tGameState\x12\x17\n" +
 	"\agame_id\x18\x01 \x01(\tR\x06gameId\x12\x14\n" +
 	"\x05phase\x18\x02 \x01(\tR\x05phase\x12\x12\n" +
@@ -907,7 +947,12 @@ const file_battlestream_v1_game_proto_rawDesc = "" +
 	"\fbuff_sources\x18\r \x03(\v2\x1b.battlestream.v1.BuffSourceR\vbuffSources\x12@\n" +
 	"\fenchantments\x18\x0e \x03(\v2\x1c.battlestream.v1.EnchantmentR\fenchantments\x12J\n" +
 	"\x10ability_counters\x18\x0f \x03(\v2\x1f.battlestream.v1.AbilityCounterR\x0fabilityCounters\x12)\n" +
-	"\x10available_tribes\x18\x10 \x03(\tR\x0favailableTribes\"\x90\x02\n" +
+	"\x10available_tribes\x18\x10 \x03(\tR\x0favailableTribes\x12\x17\n" +
+	"\ais_duos\x18\x11 \x01(\bR\x06isDuos\x126\n" +
+	"\apartner\x18\x12 \x01(\v2\x1c.battlestream.v1.PlayerStatsR\apartner\x12A\n" +
+	"\rpartner_board\x18\x13 \x03(\v2\x1c.battlestream.v1.MinionStateR\fpartnerBoard\x12M\n" +
+	"\x14partner_buff_sources\x18\x14 \x03(\v2\x1b.battlestream.v1.BuffSourceR\x12partnerBuffSources\x12Y\n" +
+	"\x18partner_ability_counters\x18\x15 \x03(\v2\x1f.battlestream.v1.AbilityCounterR\x16partnerAbilityCounters\"\x90\x02\n" +
 	"\tGameEvent\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12%\n" +
 	"\x0etimestamp_unix\x18\x02 \x01(\x03R\rtimestampUnix\x12\x1b\n" +
@@ -954,12 +999,16 @@ var file_battlestream_v1_game_proto_depIdxs = []int32{
 	4,  // 6: battlestream.v1.GameState.buff_sources:type_name -> battlestream.v1.BuffSource
 	2,  // 7: battlestream.v1.GameState.enchantments:type_name -> battlestream.v1.Enchantment
 	3,  // 8: battlestream.v1.GameState.ability_counters:type_name -> battlestream.v1.AbilityCounter
-	8,  // 9: battlestream.v1.GameEvent.tags:type_name -> battlestream.v1.GameEvent.TagsEntry
-	10, // [10:10] is the sub-list for method output_type
-	10, // [10:10] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	0,  // 9: battlestream.v1.GameState.partner:type_name -> battlestream.v1.PlayerStats
+	1,  // 10: battlestream.v1.GameState.partner_board:type_name -> battlestream.v1.MinionState
+	4,  // 11: battlestream.v1.GameState.partner_buff_sources:type_name -> battlestream.v1.BuffSource
+	3,  // 12: battlestream.v1.GameState.partner_ability_counters:type_name -> battlestream.v1.AbilityCounter
+	8,  // 13: battlestream.v1.GameEvent.tags:type_name -> battlestream.v1.GameEvent.TagsEntry
+	14, // [14:14] is the sub-list for method output_type
+	14, // [14:14] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_battlestream_v1_game_proto_init() }

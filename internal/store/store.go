@@ -32,6 +32,7 @@ type GameMeta struct {
 	StartTime int64  `json:"start_time_unix"`
 	EndTime   int64  `json:"end_time_unix,omitempty"`
 	Placement int    `json:"placement"`
+	IsDuos    bool   `json:"is_duos,omitempty"`
 }
 
 // Open opens (or creates) the BadgerDB at the given path.
@@ -181,6 +182,7 @@ func (s *Store) SaveFullGame(gs gamestate.BGGameState) error {
 		StartTime: gs.StartTime.Unix(),
 		EndTime:   endTime,
 		Placement: gs.Placement,
+		IsDuos:    gs.IsDuos,
 	}
 	if err := s.SaveGame(meta, gs.Placement); err != nil {
 		return err

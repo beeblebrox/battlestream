@@ -125,6 +125,36 @@ func (w *Writer) WriteCurrentState(s gamestate.BGGameState) error {
 		return err
 	}
 
+	// Write partner files for Duos games.
+	if s.IsDuos {
+		if s.Partner != nil {
+			if err := w.writeJSON(filepath.Join("current", "partner_stats.json"), PlayerStatsFile{
+				Name:        s.Partner.Name,
+				HeroCardID:  s.Partner.HeroCardID,
+				Health:      s.Partner.Health,
+				Armor:       s.Partner.Armor,
+				SpellPower:  s.Partner.SpellPower,
+				TripleCount: s.Partner.TripleCount,
+				WinStreak:   s.Partner.WinStreak,
+				UpdatedAt:   now,
+			}); err != nil {
+				return err
+			}
+		}
+		if err := w.writeJSON(filepath.Join("current", "partner_board.json"), BoardStateFile{
+			Board:     s.PartnerBoard,
+			UpdatedAt: now,
+		}); err != nil {
+			return err
+		}
+		if err := w.writeJSON(filepath.Join("current", "partner_buff_sources.json"), BuffSourcesFile{
+			BuffSources: s.PartnerBuffSources,
+			UpdatedAt:   now,
+		}); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 

@@ -149,6 +149,7 @@ func (s *Server) ListGames(_ context.Context, req *bspb.ListGamesRequest) (*bspb
 			StartTimeUnix: m.StartTime,
 			EndTimeUnix:   m.EndTime,
 			Placement:     int32(m.Placement),
+			IsDuos:        m.IsDuos,
 		})
 	}
 	return resp, nil
@@ -295,6 +296,19 @@ func gameStateToProto(s gamestate.BGGameState) *bspb.GameState {
 		gs.AbilityCounters = append(gs.AbilityCounters, abilityCounterToProto(ac))
 	}
 	gs.AvailableTribes = s.AvailableTribes
+	gs.IsDuos = s.IsDuos
+	if s.Partner != nil {
+		gs.Partner = playerStateToProto(*s.Partner)
+	}
+	for _, m := range s.PartnerBoard {
+		gs.PartnerBoard = append(gs.PartnerBoard, minionToProto(m))
+	}
+	for _, bs := range s.PartnerBuffSources {
+		gs.PartnerBuffSources = append(gs.PartnerBuffSources, buffSourceToProto(bs))
+	}
+	for _, ac := range s.PartnerAbilityCounters {
+		gs.PartnerAbilityCounters = append(gs.PartnerAbilityCounters, abilityCounterToProto(ac))
+	}
 	return gs
 }
 

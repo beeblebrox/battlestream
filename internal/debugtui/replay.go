@@ -33,6 +33,7 @@ type GameSummary struct {
 	SourceFile string    // which log file this game came from
 	StepStart  int       // first step index in the global steps slice
 	StepEnd    int       // one past last step index
+	IsDuos     bool      // whether this is a Duos game
 }
 
 // Replay holds the complete parsed result: all steps and game summaries.
@@ -211,5 +212,6 @@ func buildSummary(idx int, steps []Step, start, end int, file string) GameSummar
 		SourceFile: file,
 		StepStart:  start,
 		StepEnd:    end,
+		IsDuos:     last.State.IsDuos,
 	}
 }

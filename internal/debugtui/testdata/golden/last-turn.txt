@@ -1,40 +1,40 @@
-╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ DEBUG REPLAY  Game 1/1 (Moch#1358)                                                                                 │
-│ Step 42225/42225  Turn 12  Phase GAME_OVER  Tavern 5 ★★★★★☆                                                        │
-│ Tribes Demon, Elemental, Murloc, Pirate, Beast                                                                     │
-╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭────────────────────────────────────────────────────────╮╭────────────────────────────────────────────────────────╮  
-│ Moch#1358                                              ││ FINAL BOARD (6)                                        │  
-│ Health ████████████ 30/30                              ││   Wildfire Elemental     233/181                       │  
-│ Armor  8                                               ││   Unleashed Mana Surge   85/64                         │  
-│ Triples 2                                              ││   Flaming Enforcer       1022/817                      │  
-│ Hero   Festival Silas                                  ││   Timewarped Nomi        22/20                         │  
-│ Last   WIN (streak: 3)                                 ││   Brann Bronzebeard      4/7                           │  
-│                                                        ││   Acid Rainfall          884/724                       │  
-╰────────────────────────────────────────────────────────╯╰────────────────────────────────────────────────────────╯  
-╭────────────────────────────────────────────────────────╮╭────────────────────────────────────────────────────────╮  
-│ BUFF SOURCES                                           ││ CHANGES                                                │  
-│ Shop Buff      +116/+86                            █   ││ Phase: COMBAT -> GAME_OVER                         █   │  
-│ Rightmost      +28/+28                             │   ││ + Wildfire Elemental (233/181)                     │   │  
-│                                                    │   ││ + Unleashed Mana Surge (85/64)                     │   │  
-│ ABILITIES                                          │   ││ + Flaming Enforcer (1022/817)                      │   │  
-│ Bonus Gold     2                                   │   ││ + Timewarped Nomi (22/20)                          │   │  
-│ Refreshes      1                                   ▼   ││ + Brann Bronzebeard (4/7)                          ▼   │  
-╰────────────────────────────────────────────────────────╯╰────────────────────────────────────────────────────────╯  
-╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ GAME_END                                                                                                           │
-╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ RAW LOG  9 lines                                                                                                   │
-│ D 22:51:35.5977094 GameState.DebugPrintPower() - BLOCK_START BlockType=TRIGGER Entity=[entityName=BaconShop8Pla█   │
-│ erEnchant id=71 zone=PLAY zonePos=0 cardId=TB_BaconShop_8P_PlayerE player=8] EffectCardId=System.Collections.Ge│   │
-│ eric.List`1[System.String] EffectIndex=16 Target=0 SubOption=-1 TriggerKeyword=TAG_NOT_SET                     │   │
-│ D 22:51:35.5977094 GameState.DebugPrintPower() - BLOCK_END                                                     │   │
-│ D 22:51:35.5977094 GameState.DebugPrintPower() - BLOCK_START BlockType=TRIGGER Entity=[entityName=BaconShop8Pla│   │
-│ erEnchant id=71 zone=PLAY zonePos=0 cardId=TB_BaconShop_8P_PlayerE player=8] EffectCardId=System.Collections.Ge│   │
-│ eric.List`1[System.String] EffectIndex=23 Target=0 SubOption=-1 TriggerKeyword=TAG_NOT_SET                     │   │
-│ D 22:51:35.5977094 GameState.DebugPrintPower() - BLOCK_END                                                     │   │
-│ D 22:51:35.5977094 GameState.DebugPrintPower() - BLOCK_START BlockType=TRIGGER Entity=[entityName=BaconShop8Pla│   │
-│ erEnchant id=71 zone=PLAY zonePos=0 cardId=TB_BaconShop_8P_PlayerE player=8] EffectCardId=System.Collections.Ge▼   │
-╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-  h/l:step  [/]:turn  {/}:phase  g/G:start/end  t:jump  j/k:raw log  J/K:panels  mouse:raw log  f:filter  q:quit      
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮     
+│ DEBUG REPLAY [DUOS]  Game 1/1 (Moch#1358)                                                                          │     
+│ Step 42225/42225  Turn 12  Phase GAME_OVER  Tavern 5 ★★★★★☆                                                        │     
+│ Tribes Demon, Elemental, Murloc, Pirate, Beast                                                                     │     
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯     
+╭────────────────────────────────────────────────────────╮╭────────────────────────────────────────────────────────╮       
+│ Moch#1358                                              ││ FINAL BOARD (6)                                        │       
+│ Health ████████████ 30/30                              ││   Wildfire Elemental     233/181                       │       
+│ Armor  8                                               ││   Unleashed Mana Surge   85/64                         │       
+│ Triples 2                                              ││   Flaming Enforcer       1022/817                      │       
+│ Hero   Festival Silas                                  ││   Timewarped Nomi        22/20                         │       
+│ Last   WIN (streak: 3)                                 ││   Brann Bronzebeard      4/7                           │       
+│                                                        ││   Acid Rainfall          884/724                       │       
+╰────────────────────────────────────────────────────────╯╰────────────────────────────────────────────────────────╯       
+╭────────────────────────────────────────────────────────╮╭────────────────────────────────────────────────────────╮       
+│ BUFF SOURCES                                           ││ CHANGES                                                │       
+│ Shop Buff      +116/+86                            █   ││ Phase: COMBAT -> GAME_OVER                         █   │       
+│ Rightmost      +28/+28                             │   ││ + Wildfire Elemental (233/181)                     │   │       
+│                                                    ▼   ││ + Unleashed Mana Surge (85/64)                     ▼   │       
+╰────────────────────────────────────────────────────────╯╰────────────────────────────────────────────────────────╯       
+╭────────────────────────────────────────────────────────╮╭────────────────────────────────────────────────────────╮       
+│ PARTNER BOARD (0)                                      ││ PARTNER BUFFS                                          │       
+│   (empty)                                              ││ (none)                                                 │       
+│                                                        ││                                                        │       
+│                                                        ││                                                        │       
+╰────────────────────────────────────────────────────────╯╰────────────────────────────────────────────────────────╯       
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮     
+│ GAME_END                                                                                                           │     
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯     
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮     
+│ RAW LOG  9 lines                                                                                                   │     
+│ D 22:51:35.5977094 GameState.DebugPrintPower() - BLOCK_START BlockType=TRIGGER Entity=[entityName=BaconShop8Pla█   │     
+│ erEnchant id=71 zone=PLAY zonePos=0 cardId=TB_BaconShop_8P_PlayerE player=8] EffectCardId=System.Collections.Ge│   │     
+│ eric.List`1[System.String] EffectIndex=16 Target=0 SubOption=-1 TriggerKeyword=TAG_NOT_SET                     │   │     
+│ D 22:51:35.5977094 GameState.DebugPrintPower() - BLOCK_END                                                     │   │     
+│ D 22:51:35.5977094 GameState.DebugPrintPower() - BLOCK_START BlockType=TRIGGER Entity=[entityName=BaconShop8Pla│   │     
+│ erEnchant id=71 zone=PLAY zonePos=0 cardId=TB_BaconShop_8P_PlayerE player=8] EffectCardId=System.Collections.Ge│   │     
+│ eric.List`1[System.String] EffectIndex=23 Target=0 SubOption=-1 TriggerKeyword=TAG_NOT_SET                     ▼   │     
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯     
+  h/l:step  [/]:turn  {/}:phase  g/G:start/end  t:jump  j/k:raw log  J/K:panels  mouse:raw log  f:filter  q:quit  d:partner

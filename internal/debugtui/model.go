@@ -86,9 +86,16 @@ type Model struct {
 
 	// Drag-scrubbing state.
 	scrubbing  bool
-	scrubPanel int // 0=board 1=buff 2=changes 3=raw
+	scrubPanel int // 0=board 1=buff 2=changes 3=raw 4=partnerBoard 5=partnerBuff
 	scrubTrackY int
 	scrubTrackH int
+
+	// Duos partner panel state.
+	showPartner bool
+	partnerBoardVP viewport.Model
+	partnerBuffVP  viewport.Model
+	partnerBoardScrollX, partnerBoardVPY, partnerBoardVPH int
+	partnerBuffScrollX, partnerBuffVPY, partnerBuffVPH     int
 }
 
 func newJumpInput() textinput.Model {
@@ -157,6 +164,8 @@ func (m *Model) selectGame(idx int) {
 	m.picking = false
 	m.rebuildFiltered()
 	m.resetScrollAll()
+	// Auto-detect Duos for partner panel display.
+	m.showPartner = g.IsDuos
 }
 
 // resetScrollAll resets all viewport scroll positions to the top.
@@ -165,6 +174,8 @@ func (m *Model) resetScrollAll() {
 	m.boardVP.GotoTop()
 	m.buffVP.GotoTop()
 	m.changesVP.GotoTop()
+	m.partnerBoardVP.GotoTop()
+	m.partnerBuffVP.GotoTop()
 }
 
 // syncPanelScroll copies boardVP's YOffset to buffVP and changesVP so all
@@ -392,6 +403,10 @@ func (m *Model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "K":
 		m.boardVP.ScrollUp(1)
 		m.syncPanelScroll()
+	case "d":
+		if s := m.currentStep(); s != nil && s.State.IsDuos {
+			m.showPartner = !m.showPartner
+		}
 	case "f":
 		m.filter = (m.filter + 1) % len(eventTypeNames)
 		m.rebuildFiltered()
@@ -698,6 +713,9 @@ func (m *Model) viewPicker() string {
 		} else if g.Phase != "GAME_OVER" {
 			place = string(g.Phase)
 		}
+		if g.IsDuos {
+			place += " DUO"
+		}
 
 		source := filepath.Base(filepath.Dir(g.SourceFile))
 		if source == "." || source == "/" {
@@ -767,13 +785,28 @@ func (m *Model) viewStep() string {
 	if boardVPH < 1 {
 		boardVPH = 1
 	}
+	showPartnerRow := step.State.IsDuos && m.showPartner
 	fixedH := headerH + playerPanelH + 3 + 6 + 1 // header + row2 + event + rawPanelMin + help
 	rowOverhead := 3                               // row3: border(2) + title(1)
+	if showPartnerRow {
+		rowOverhead += 3 // row4: border(2) + title(1)
+	}
 	contentBudget := m.height - fixedH - rowOverhead
 	if contentBudget < 4 {
 		contentBudget = 4
 	}
-	maxContentH := contentBudget / 2
+	contentDivisor := 2
+	if showPartnerRow {
+		contentDivisor = 3
+	}
+	maxContentH := contentBudget / contentDivisor
+	// If partner panels would be too small, suppress them.
+	if showPartnerRow && maxContentH < 2 {
+		showPartnerRow = false
+		rowOverhead -= 3
+		contentBudget += 3
+		maxContentH = contentBudget / 2
+	}
 
 	boardContent := renderBoard(step.State.Board)
 	m.boardVP.Width = vpContentW
@@ -825,12 +858,61 @@ func (m *Model) viewStep() string {
 	changesPanel := styleBorder.Width(halfW).Render(styleTitle.Render("CHANGES") + "\n" + changesVPView)
 	row3 := lipgloss.JoinHorizontal(lipgloss.Top, buffPanel, changesPanel)
 
+	// ── Row 4 (Duos): Partner board + Partner buffs ──────────────────
+	var row4 string
+	if showPartnerRow {
+		pBoardContent := renderBoard(step.State.PartnerBoard)
+		m.partnerBoardVP.Width = vpContentW
+		m.partnerBoardVP.Height = maxContentH
+		m.partnerBoardVP.MouseWheelEnabled = true
+		m.partnerBoardVP.SetContent(pBoardContent)
+		pBoardVPView := lipgloss.JoinHorizontal(lipgloss.Top, m.partnerBoardVP.View(), renderScrollbar(m.partnerBoardVP, maxContentH))
+		pBoardPanel := styleBorder.Width(halfW).Render(styleTitle.Render("PARTNER BOARD") + styleDim.Render(fmt.Sprintf(" (%d)", len(step.State.PartnerBoard))) + "\n" + pBoardVPView)
+
+		pBuffContent := renderBuffSources(step.State) // We'll create a partner version
+		_ = pBuffContent
+		// Render partner buff sources specifically.
+		var pBuffStr strings.Builder
+		if len(step.State.PartnerBuffSources) == 0 {
+			pBuffStr.WriteString(styleDim.Render("(none)"))
+		} else {
+			for _, bs := range step.State.PartnerBuffSources {
+				if bs.Attack == 0 && bs.Health == 0 {
+					continue
+				}
+				name := buffCategoryDisplayName(bs.Category)
+				color := buffCategoryColor(bs.Category)
+				style := lipgloss.NewStyle().Foreground(color)
+				line := fmt.Sprintf("%-14s +%d/+%d", name, bs.Attack, bs.Health)
+				pBuffStr.WriteString(style.Render(line) + "\n")
+			}
+		}
+		if len(step.State.PartnerAbilityCounters) > 0 {
+			pBuffStr.WriteString("\n" + styleTitle.Render("ABILITIES") + "\n")
+			for _, ac := range step.State.PartnerAbilityCounters {
+				name := buffCategoryDisplayName(ac.Category)
+				color := buffCategoryColor(ac.Category)
+				style := lipgloss.NewStyle().Foreground(color)
+				line := fmt.Sprintf("%-14s %s", name, ac.Display)
+				pBuffStr.WriteString(style.Render(line) + "\n")
+			}
+		}
+		m.partnerBuffVP.Width = vpContentW
+		m.partnerBuffVP.Height = maxContentH
+		m.partnerBuffVP.MouseWheelEnabled = true
+		m.partnerBuffVP.SetContent(pBuffStr.String())
+		pBuffVPView := lipgloss.JoinHorizontal(lipgloss.Top, m.partnerBuffVP.View(), renderScrollbar(m.partnerBuffVP, maxContentH))
+		pBuffPanel := styleBorder.Width(halfW).Render(styleTitle.Render("PARTNER BUFFS") + "\n" + pBuffVPView)
+
+		row4 = lipgloss.JoinHorizontal(lipgloss.Top, pBoardPanel, pBuffPanel)
+	}
+
 	// ── Event summary ───────────────────────────────────────────────
 	eventLine := styleBorder.Width(innerW).Render(renderEvent(step.Event))
 
 	// ── Raw log (viewport — height-bounded, mouse-scrollable) ───────
 	usedHeight := lipgloss.Height(header) + lipgloss.Height(row2) +
-		lipgloss.Height(row3) + lipgloss.Height(eventLine)
+		lipgloss.Height(row3) + lipgloss.Height(row4) + lipgloss.Height(eventLine)
 	rawH := m.height - usedHeight - 4 // -4: raw panel border (2) + raw panel header (1) + help bar (1)
 	if rawH < 3 {
 		rawH = 3
@@ -844,12 +926,21 @@ func (m *Model) viewStep() string {
 	// Help bar
 	help := m.renderHelpBar()
 
-	return lipgloss.JoinVertical(lipgloss.Left, header, row2, row3, eventLine, rawPanel, help)
+	parts := []string{header, row2, row3}
+	if row4 != "" {
+		parts = append(parts, row4)
+	}
+	parts = append(parts, eventLine, rawPanel, help)
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
 func (m *Model) renderHeader(step *Step, w int) string {
 	var b strings.Builder
-	b.WriteString(styleTitle.Render("DEBUG REPLAY"))
+	title := "DEBUG REPLAY"
+	if step.State.IsDuos {
+		title = "DEBUG REPLAY [DUOS]"
+	}
+	b.WriteString(styleTitle.Render(title))
 
 	// Game info.
 	g := m.replay.Games[m.gameIdx]
@@ -955,6 +1046,9 @@ func (m *Model) renderHelpBar() string {
 		return styleHelp.Render("  Type turn number, Enter to jump, Esc to cancel")
 	}
 	help := "  h/l:step  [/]:turn  {/}:phase  g/G:start/end  t:jump  j/k:raw log  J/K:panels  mouse:raw log  f:filter  q:quit"
+	if s := m.currentStep(); s != nil && s.State.IsDuos {
+		help += "  d:partner"
+	}
 	if len(m.replay.Games) > 1 {
 		help += "  s:games"
 	}

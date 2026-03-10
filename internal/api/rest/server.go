@@ -296,22 +296,32 @@ type gameStateJSON struct {
 	Enchantments    []gamestate.Enchantment      `json:"enchantments,omitempty"`
 	StartTimeUnix   int64                        `json:"start_time_unix"`
 	Placement       int                          `json:"placement"`
+	IsDuos               bool                        `json:"is_duos,omitempty"`
+	Partner              *gamestate.PlayerState       `json:"partner,omitempty"`
+	PartnerBoard         []gamestate.MinionState      `json:"partner_board,omitempty"`
+	PartnerBuffSources   []gamestate.BuffSource       `json:"partner_buff_sources,omitempty"`
+	PartnerAbilityCounters []gamestate.AbilityCounter  `json:"partner_ability_counters,omitempty"`
 }
 
 func gameStateToJSON(s gamestate.BGGameState) gameStateJSON {
 	return gameStateJSON{
-		GameID:          s.GameID,
-		Phase:           string(s.Phase),
-		Turn:            s.Turn,
-		TavernTier:      s.TavernTier,
-		Player:          s.Player,
-		Board:           s.Board,
-		Modifications:   s.Modifications,
-		BuffSources:     s.BuffSources,
-		AbilityCounters: s.AbilityCounters,
-		Enchantments:    s.Enchantments,
-		StartTimeUnix:   s.StartTime.Unix(),
-		Placement:       s.Placement,
+		GameID:                 s.GameID,
+		Phase:                  string(s.Phase),
+		Turn:                   s.Turn,
+		TavernTier:             s.TavernTier,
+		Player:                 s.Player,
+		Board:                  s.Board,
+		Modifications:          s.Modifications,
+		BuffSources:            s.BuffSources,
+		AbilityCounters:        s.AbilityCounters,
+		Enchantments:           s.Enchantments,
+		StartTimeUnix:          s.StartTime.Unix(),
+		Placement:              s.Placement,
+		IsDuos:                 s.IsDuos,
+		Partner:                s.Partner,
+		PartnerBoard:           s.PartnerBoard,
+		PartnerBuffSources:     s.PartnerBuffSources,
+		PartnerAbilityCounters: s.PartnerAbilityCounters,
 	}
 }
 

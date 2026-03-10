@@ -789,6 +789,26 @@ func TestIntegrationPowerLog(t *testing.T) {
 	for _, bs := range s.BuffSources {
 		t.Logf("BuffSource: %s +%d/+%d", bs.Category, bs.Attack, bs.Health)
 	}
+
+	// Duos detection — the test fixture is a Duos game.
+	if !s.IsDuos {
+		t.Errorf("IsDuos: expected true (test fixture is a Duos game)")
+	}
+	if s.Partner == nil {
+		t.Fatal("Partner: expected non-nil in Duos game")
+	}
+	if s.Partner.Name == "" {
+		t.Log("Note: partner name not resolved (may arrive after CREATE_GAME)")
+	} else {
+		t.Logf("Partner: %s", s.Partner.Name)
+	}
+	t.Logf("PartnerBoard: %d minions", len(s.PartnerBoard))
+	for i, mn := range s.PartnerBoard {
+		t.Logf("  PartnerBoard[%d]: %q (id=%d) %d/%d", i, mn.Name, mn.EntityID, mn.Attack, mn.Health)
+	}
+	for _, bs := range s.PartnerBuffSources {
+		t.Logf("PartnerBuffSource: %s +%d/+%d", bs.Category, bs.Attack, bs.Health)
+	}
 }
 
 // ── Enchantment/BuffSource tests ─────────────────────────────────────────────
@@ -1540,8 +1560,8 @@ func TestCounterGoldNextTurnOverconfidenceResetOnTurnBoundary(t *testing.T) {
 	}
 
 	// Verify overconfidenceCount is actually zero.
-	if p.overconfidenceCount != 0 {
-		t.Errorf("overconfidenceCount should be 0 after turn boundary, got %d", p.overconfidenceCount)
+	if p.localBuffs.overconfidenceCount != 0 {
+		t.Errorf("overconfidenceCount should be 0 after turn boundary, got %d", p.localBuffs.overconfidenceCount)
 	}
 }
 
@@ -1649,7 +1669,7 @@ func TestPendingStatChangesCapFlush(t *testing.T) {
 			PlayerID: 7,
 			Tags:     map[string]string{"ATK": fmt.Sprintf("%d", newAtk)},
 		}
-		p.updateMinionStat(e, "ATK", fmt.Sprintf("%d", newAtk))
+		p.updateMinionStat(e, "ATK", fmt.Sprintf("%d", newAtk), false)
 		// Reset stored value so the next iteration for this entity sees a fresh delta.
 		if info2 := p.entityProps[entityID]; info2 != nil {
 			info2.Attack = newAtk - 1

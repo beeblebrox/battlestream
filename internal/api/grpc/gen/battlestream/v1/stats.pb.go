@@ -111,6 +111,7 @@ type GameMeta struct {
 	StartTimeUnix int64                  `protobuf:"varint,2,opt,name=start_time_unix,json=startTimeUnix,proto3" json:"start_time_unix,omitempty"`
 	EndTimeUnix   int64                  `protobuf:"varint,3,opt,name=end_time_unix,json=endTimeUnix,proto3" json:"end_time_unix,omitempty"`
 	Placement     int32                  `protobuf:"varint,4,opt,name=placement,proto3" json:"placement,omitempty"`
+	IsDuos        bool                   `protobuf:"varint,5,opt,name=is_duos,json=isDuos,proto3" json:"is_duos,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -171,6 +172,13 @@ func (x *GameMeta) GetPlacement() int32 {
 		return x.Placement
 	}
 	return 0
+}
+
+func (x *GameMeta) GetIsDuos() bool {
+	if x != nil {
+		return x.IsDuos
+	}
+	return false
 }
 
 type PlayerProfile struct {
@@ -276,12 +284,13 @@ const file_battlestream_v1_stats_proto_rawDesc = "" +
 	"\x06losses\x18\x03 \x01(\x05R\x06losses\x12#\n" +
 	"\ravg_placement\x18\x04 \x01(\x01R\favgPlacement\x12%\n" +
 	"\x0ebest_placement\x18\x05 \x01(\x05R\rbestPlacement\x12'\n" +
-	"\x0fworst_placement\x18\x06 \x01(\x05R\x0eworstPlacement\"\x8d\x01\n" +
+	"\x0fworst_placement\x18\x06 \x01(\x05R\x0eworstPlacement\"\xa6\x01\n" +
 	"\bGameMeta\x12\x17\n" +
 	"\agame_id\x18\x01 \x01(\tR\x06gameId\x12&\n" +
 	"\x0fstart_time_unix\x18\x02 \x01(\x03R\rstartTimeUnix\x12\"\n" +
 	"\rend_time_unix\x18\x03 \x01(\x03R\vendTimeUnix\x12\x1c\n" +
-	"\tplacement\x18\x04 \x01(\x05R\tplacement\"\xd9\x01\n" +
+	"\tplacement\x18\x04 \x01(\x05R\tplacement\x12\x17\n" +
+	"\ais_duos\x18\x05 \x01(\bR\x06isDuos\"\xd9\x01\n" +
 	"\rPlayerProfile\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12!\n" +
 	"\fgames_played\x18\x02 \x01(\x05R\vgamesPlayed\x12\x12\n" +

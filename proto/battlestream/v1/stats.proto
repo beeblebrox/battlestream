@@ -18,6 +18,7 @@ message GameMeta {
   int64 start_time_unix = 2;
   int64 end_time_unix = 3;
   int32 placement = 4;
+  bool is_duos = 5;
 }
 
 message PlayerProfile {
