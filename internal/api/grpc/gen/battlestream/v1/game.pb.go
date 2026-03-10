@@ -614,6 +614,7 @@ type GameState struct {
 	PartnerAbilityCounters []*AbilityCounter      `protobuf:"bytes,21,rep,name=partner_ability_counters,json=partnerAbilityCounters,proto3" json:"partner_ability_counters,omitempty"`
 	AnomalyCardId          string                 `protobuf:"bytes,22,opt,name=anomaly_card_id,json=anomalyCardId,proto3" json:"anomaly_card_id,omitempty"`
 	AnomalyName            string                 `protobuf:"bytes,23,opt,name=anomaly_name,json=anomalyName,proto3" json:"anomaly_name,omitempty"`
+	AnomalyDescription     string                 `protobuf:"bytes,24,opt,name=anomaly_description,json=anomalyDescription,proto3" json:"anomaly_description,omitempty"`
 	unknownFields          protoimpl.UnknownFields
 	sizeCache              protoimpl.SizeCache
 }
@@ -809,6 +810,13 @@ func (x *GameState) GetAnomalyName() string {
 	return ""
 }
 
+func (x *GameState) GetAnomalyDescription() string {
+	if x != nil {
+		return x.AnomalyDescription
+	}
+	return ""
+}
+
 type GameEvent struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Type          string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
@@ -962,7 +970,7 @@ const file_battlestream_v1_game_proto_rawDesc = "" +
 	"\x05delta\x18\x04 \x01(\x05R\x05delta\x12\x16\n" +
 	"\x06source\x18\x05 \x01(\tR\x06source\x12\x1a\n" +
 	"\bcategory\x18\x06 \x01(\tR\bcategory\x12\x17\n" +
-	"\acard_id\x18\a \x01(\tR\x06cardId\"\x84\t\n" +
+	"\acard_id\x18\a \x01(\tR\x06cardId\"\xb5\t\n" +
 	"\tGameState\x12\x17\n" +
 	"\agame_id\x18\x01 \x01(\tR\x06gameId\x12\x14\n" +
 	"\x05phase\x18\x02 \x01(\tR\x05phase\x12\x12\n" +
@@ -988,7 +996,8 @@ const file_battlestream_v1_game_proto_rawDesc = "" +
 	"\x14partner_buff_sources\x18\x14 \x03(\v2\x1b.battlestream.v1.BuffSourceR\x12partnerBuffSources\x12Y\n" +
 	"\x18partner_ability_counters\x18\x15 \x03(\v2\x1f.battlestream.v1.AbilityCounterR\x16partnerAbilityCounters\x12&\n" +
 	"\x0fanomaly_card_id\x18\x16 \x01(\tR\ranomalyCardId\x12!\n" +
-	"\fanomaly_name\x18\x17 \x01(\tR\vanomalyName\"\x90\x02\n" +
+	"\fanomaly_name\x18\x17 \x01(\tR\vanomalyName\x12/\n" +
+	"\x13anomaly_description\x18\x18 \x01(\tR\x12anomalyDescription\"\x90\x02\n" +
 	"\tGameEvent\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12%\n" +
 	"\x0etimestamp_unix\x18\x02 \x01(\x03R\rtimestampUnix\x12\x1b\n" +

@@ -35,8 +35,9 @@ type BGGameState struct {
 	AbilityCounters []AbilityCounter `json:"ability_counters,omitempty"`
 	Enchantments    []Enchantment    `json:"enchantments,omitempty"`
 	AvailableTribes []string         `json:"available_tribes,omitempty"`
-	AnomalyCardID   string           `json:"anomaly_card_id,omitempty"`
-	AnomalyName     string           `json:"anomaly_name,omitempty"`
+	AnomalyCardID      string           `json:"anomaly_card_id,omitempty"`
+	AnomalyName        string           `json:"anomaly_name,omitempty"`
+	AnomalyDescription string           `json:"anomaly_description,omitempty"`
 	StartTime     time.Time
 	EndTime       *time.Time
 	Placement     int
@@ -429,12 +430,13 @@ func (m *Machine) RemoveAvailableTribe(tribe string) {
 	}
 }
 
-// SetAnomaly stores the anomaly card ID and resolved name.
-func (m *Machine) SetAnomaly(cardID, name string) {
+// SetAnomaly stores the anomaly card ID, resolved name, and description.
+func (m *Machine) SetAnomaly(cardID, name, description string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.state.AnomalyCardID = cardID
 	m.state.AnomalyName = name
+	m.state.AnomalyDescription = description
 }
 
 // SetBuffSource upserts a buff source category with its current values.

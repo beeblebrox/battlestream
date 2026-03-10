@@ -143,8 +143,9 @@ type Model struct {
 	scrubTrackY int
 	scrubTrackH int
 
-	// Duos partner panel state.
-	showPartner bool // toggle partner panes on/off (default true for Duos)
+	// Toggle states.
+	showAnomalyDesc bool // toggle anomaly description display
+	showPartner     bool // toggle partner panes on/off (default true for Duos)
 	partnerBoardVP viewport.Model
 	partnerModsVP  viewport.Model
 	partnerBoardScrollX, partnerBoardVPY, partnerBoardVPH int
@@ -240,6 +241,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, fetchAggCmd(m.ctx, m.client)
 			}
 		case "d":
+			if m.game != nil && m.game.AnomalyDescription != "" {
+				m.showAnomalyDesc = !m.showAnomalyDesc
+			} else if m.game != nil && m.game.IsDuos {
+				m.showPartner = !m.showPartner
+			}
+		case "p":
 			if m.game != nil && m.game.IsDuos {
 				m.showPartner = !m.showPartner
 			}
@@ -431,9 +438,9 @@ func (m *Model) View() string {
 	rowSession := m.renderSessionBar(m.width - 4)
 
 	// ── Help bar ──────────────────────────────────────────────
-	helpText := "  [r] Refresh game  [R] Refresh stats  [q] Quit  scroll: mouse wheel or drag scrollbar"
+	helpText := "  [r] Refresh game  [R] Refresh stats  [d] Anomaly desc  [q] Quit  scroll: mouse wheel"
 	if m.game != nil && m.game.IsDuos {
-		helpText = "  [r] Refresh  [R] Stats  [d] Toggle partner  [q] Quit  scroll: mouse wheel"
+		helpText = "  [r] Refresh  [R] Stats  [d] Anomaly desc  [p] Partner  [q] Quit  scroll: mouse wheel"
 	}
 	help := styleHelp.Render(helpText)
 
@@ -484,7 +491,15 @@ func (m *Model) renderGamePanel(w int) string {
 			b.WriteString(styleLabel.Render("Tribes ") + styleDim.Render(strings.Join(m.game.AvailableTribes, ", ")) + "\n")
 		}
 		if m.game.AnomalyName != "" {
-			b.WriteString(styleLabel.Render("Anomly ") + styleValue.Render(m.game.AnomalyName) + "\n")
+			label := "Anomaly"
+			if m.game.AnomalyDescription != "" {
+				label += " [d]"
+			}
+			b.WriteString(styleLabel.Render(label+" ") + styleValue.Render(m.game.AnomalyName) + "\n")
+			if m.showAnomalyDesc && m.game.AnomalyDescription != "" {
+				wrapped := lipgloss.NewStyle().Width(w - 10).Render(m.game.AnomalyDescription)
+				b.WriteString("        " + styleDim.Render(wrapped) + "\n")
+			}
 		}
 	}
 

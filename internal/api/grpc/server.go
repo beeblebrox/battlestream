@@ -298,6 +298,7 @@ func gameStateToProto(s gamestate.BGGameState) *bspb.GameState {
 	gs.AvailableTribes = s.AvailableTribes
 	gs.AnomalyCardId = s.AnomalyCardID
 	gs.AnomalyName = s.AnomalyName
+	gs.AnomalyDescription = s.AnomalyDescription
 	gs.IsDuos = s.IsDuos
 	if s.Partner != nil {
 		gs.Partner = playerStateToProto(*s.Partner)

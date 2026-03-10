@@ -91,6 +91,7 @@ message GameState {
   repeated AbilityCounter partner_ability_counters = 21;
   string anomaly_card_id = 22;
   string anomaly_name = 23;
+  string anomaly_description = 24;
 }
 
 message GameEvent {

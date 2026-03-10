@@ -779,6 +779,9 @@ func TestIntegrationPowerLog(t *testing.T) {
 	if s.AnomalyName != "Major Goldthorn Potion" {
 		t.Errorf("AnomalyName: expected Major Goldthorn Potion, got %q", s.AnomalyName)
 	}
+	if s.AnomalyDescription == "" {
+		t.Error("AnomalyDescription should not be empty for BG34_Anomaly_800")
+	}
 
 	// Modifications should be board-wide only (Target starts with "Board")
 	for _, mod := range s.Modifications {

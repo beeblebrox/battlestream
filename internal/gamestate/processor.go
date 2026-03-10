@@ -692,7 +692,8 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 		if name == "" {
 			name = info.CardID
 		}
-		p.machine.SetAnomaly(info.CardID, name)
+		desc := CardDescription(info.CardID)
+		p.machine.SetAnomaly(info.CardID, name, desc)
 		return
 	}
 
