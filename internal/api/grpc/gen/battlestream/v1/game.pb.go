@@ -35,6 +35,8 @@ type PlayerStats struct {
 	LossStreak    int32                  `protobuf:"varint,10,opt,name=loss_streak,json=lossStreak,proto3" json:"loss_streak,omitempty"`
 	MaxHealth     int32                  `protobuf:"varint,11,opt,name=max_health,json=maxHealth,proto3" json:"max_health,omitempty"`
 	Damage        int32                  `protobuf:"varint,12,opt,name=damage,proto3" json:"damage,omitempty"`
+	CurrentGold   int32                  `protobuf:"varint,13,opt,name=current_gold,json=currentGold,proto3" json:"current_gold,omitempty"`
+	MaxGold       int32                  `protobuf:"varint,14,opt,name=max_gold,json=maxGold,proto3" json:"max_gold,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -149,6 +151,20 @@ func (x *PlayerStats) GetMaxHealth() int32 {
 func (x *PlayerStats) GetDamage() int32 {
 	if x != nil {
 		return x.Damage
+	}
+	return 0
+}
+
+func (x *PlayerStats) GetCurrentGold() int32 {
+	if x != nil {
+		return x.CurrentGold
+	}
+	return 0
+}
+
+func (x *PlayerStats) GetMaxGold() int32 {
+	if x != nil {
+		return x.MaxGold
 	}
 	return 0
 }
@@ -596,6 +612,8 @@ type GameState struct {
 	PartnerBoard           []*MinionState         `protobuf:"bytes,19,rep,name=partner_board,json=partnerBoard,proto3" json:"partner_board,omitempty"`
 	PartnerBuffSources     []*BuffSource          `protobuf:"bytes,20,rep,name=partner_buff_sources,json=partnerBuffSources,proto3" json:"partner_buff_sources,omitempty"`
 	PartnerAbilityCounters []*AbilityCounter      `protobuf:"bytes,21,rep,name=partner_ability_counters,json=partnerAbilityCounters,proto3" json:"partner_ability_counters,omitempty"`
+	AnomalyCardId          string                 `protobuf:"bytes,22,opt,name=anomaly_card_id,json=anomalyCardId,proto3" json:"anomaly_card_id,omitempty"`
+	AnomalyName            string                 `protobuf:"bytes,23,opt,name=anomaly_name,json=anomalyName,proto3" json:"anomaly_name,omitempty"`
 	unknownFields          protoimpl.UnknownFields
 	sizeCache              protoimpl.SizeCache
 }
@@ -777,6 +795,20 @@ func (x *GameState) GetPartnerAbilityCounters() []*AbilityCounter {
 	return nil
 }
 
+func (x *GameState) GetAnomalyCardId() string {
+	if x != nil {
+		return x.AnomalyCardId
+	}
+	return ""
+}
+
+func (x *GameState) GetAnomalyName() string {
+	if x != nil {
+		return x.AnomalyName
+	}
+	return ""
+}
+
 type GameEvent struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Type          string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
@@ -865,7 +897,7 @@ var File_battlestream_v1_game_proto protoreflect.FileDescriptor
 
 const file_battlestream_v1_game_proto_rawDesc = "" +
 	"\n" +
-	"\x1abattlestream/v1/game.proto\x12\x0fbattlestream.v1\"\xeb\x02\n" +
+	"\x1abattlestream/v1/game.proto\x12\x0fbattlestream.v1\"\xa9\x03\n" +
 	"\vPlayerStats\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\fhero_card_id\x18\x02 \x01(\tR\n" +
@@ -885,7 +917,9 @@ const file_battlestream_v1_game_proto_rawDesc = "" +
 	"lossStreak\x12\x1d\n" +
 	"\n" +
 	"max_health\x18\v \x01(\x05R\tmaxHealth\x12\x16\n" +
-	"\x06damage\x18\f \x01(\x05R\x06damage\"\xac\x02\n" +
+	"\x06damage\x18\f \x01(\x05R\x06damage\x12!\n" +
+	"\fcurrent_gold\x18\r \x01(\x05R\vcurrentGold\x12\x19\n" +
+	"\bmax_gold\x18\x0e \x01(\x05R\amaxGold\"\xac\x02\n" +
 	"\vMinionState\x12\x1b\n" +
 	"\tentity_id\x18\x01 \x01(\x05R\bentityId\x12\x17\n" +
 	"\acard_id\x18\x02 \x01(\tR\x06cardId\x12\x12\n" +
@@ -928,7 +962,7 @@ const file_battlestream_v1_game_proto_rawDesc = "" +
 	"\x05delta\x18\x04 \x01(\x05R\x05delta\x12\x16\n" +
 	"\x06source\x18\x05 \x01(\tR\x06source\x12\x1a\n" +
 	"\bcategory\x18\x06 \x01(\tR\bcategory\x12\x17\n" +
-	"\acard_id\x18\a \x01(\tR\x06cardId\"\xb9\b\n" +
+	"\acard_id\x18\a \x01(\tR\x06cardId\"\x84\t\n" +
 	"\tGameState\x12\x17\n" +
 	"\agame_id\x18\x01 \x01(\tR\x06gameId\x12\x14\n" +
 	"\x05phase\x18\x02 \x01(\tR\x05phase\x12\x12\n" +
@@ -952,7 +986,9 @@ const file_battlestream_v1_game_proto_rawDesc = "" +
 	"\apartner\x18\x12 \x01(\v2\x1c.battlestream.v1.PlayerStatsR\apartner\x12A\n" +
 	"\rpartner_board\x18\x13 \x03(\v2\x1c.battlestream.v1.MinionStateR\fpartnerBoard\x12M\n" +
 	"\x14partner_buff_sources\x18\x14 \x03(\v2\x1b.battlestream.v1.BuffSourceR\x12partnerBuffSources\x12Y\n" +
-	"\x18partner_ability_counters\x18\x15 \x03(\v2\x1f.battlestream.v1.AbilityCounterR\x16partnerAbilityCounters\"\x90\x02\n" +
+	"\x18partner_ability_counters\x18\x15 \x03(\v2\x1f.battlestream.v1.AbilityCounterR\x16partnerAbilityCounters\x12&\n" +
+	"\x0fanomaly_card_id\x18\x16 \x01(\tR\ranomalyCardId\x12!\n" +
+	"\fanomaly_name\x18\x17 \x01(\tR\vanomalyName\"\x90\x02\n" +
 	"\tGameEvent\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12%\n" +
 	"\x0etimestamp_unix\x18\x02 \x01(\x03R\rtimestampUnix\x12\x1b\n" +

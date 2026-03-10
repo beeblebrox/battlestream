@@ -483,6 +483,9 @@ func (m *Model) renderGamePanel(w int) string {
 		if len(m.game.AvailableTribes) > 0 {
 			b.WriteString(styleLabel.Render("Tribes ") + styleDim.Render(strings.Join(m.game.AvailableTribes, ", ")) + "\n")
 		}
+		if m.game.AnomalyName != "" {
+			b.WriteString(styleLabel.Render("Anomly ") + styleValue.Render(m.game.AnomalyName) + "\n")
+		}
 	}
 
 	return styleBorder.Width(w).Render(b.String())
@@ -514,8 +517,8 @@ func (m *Model) renderHeroPanel(w int) string {
 		armor = fmt.Sprintf("%d", p.Armor)
 	}
 	b.WriteString(styleLabel.Render("Armor   ") + styleValue.Render(armor) + "\n")
-	b.WriteString(styleLabel.Render("Spell   ") + styleValue.Render(fmt.Sprintf("+%d", p.SpellPower)) + "\n")
 	b.WriteString(styleLabel.Render("Triples ") + styleValue.Render(fmt.Sprintf("%d", p.TripleCount)) + "\n")
+	b.WriteString(styleLabel.Render("Gold    ") + styleValue.Render(fmt.Sprintf("%d/%d", p.CurrentGold, p.MaxGold)) + "\n")
 	if p.HeroCardId != "" {
 		b.WriteString(styleLabel.Render("Hero    ") + styleValue.Render(gamestate.CardName(p.HeroCardId)) + "\n")
 	}

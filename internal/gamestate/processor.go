@@ -397,18 +397,19 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 					p.handleOverconfidenceZone(info.CardID, value, prevZone, controllerID)
 				}
 			}
-			if value == "GRAVEYARD" || value == "REMOVEDFROMGAME" || value == "SETASIDE" {
-				if e.EntityID > 0 && p.machine.Phase() != PhaseGameOver {
-					p.machine.RemoveMinion(e.EntityID)
-					if p.isDuos {
-						p.machine.RemovePartnerMinion(e.EntityID)
-					}
-					p.machine.RemoveEnchantmentsForEntity(e.EntityID)
-				}
-			} else if value == "PLAY" && e.EntityID > 0 {
+			if value == "PLAY" && e.EntityID > 0 {
 				if p.machine.Phase() != PhaseGameOver {
 					p.tryAddMinionFromRegistry(e.EntityID, controllerID)
 				}
+			} else if e.EntityID > 0 && p.machine.Phase() != PhaseGameOver {
+				// Remove from board on any non-PLAY zone transition (GRAVEYARD,
+				// REMOVEDFROMGAME, SETASIDE, HAND, DECK, etc.). This catches
+				// sold minions (PLAY->HAND) that were previously missed.
+				p.machine.RemoveMinion(e.EntityID)
+				if p.isDuos {
+					p.machine.RemovePartnerMinion(e.EntityID)
+				}
+				p.machine.RemoveEnchantmentsForEntity(e.EntityID)
 			}
 
 		case "TURN":
@@ -685,6 +686,16 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 		p.heroEntities[e.EntityID] = true
 	}
 
+	// Detect anomaly from FULL_ENTITY with CARDTYPE=BATTLEGROUND_ANOMALY.
+	if cardType == "BATTLEGROUND_ANOMALY" && info.CardID != "" {
+		name := CardName(info.CardID)
+		if name == "" {
+			name = info.CardID
+		}
+		p.machine.SetAnomaly(info.CardID, name)
+		return
+	}
+
 	// Handle enchantment entities — track buff sources.
 	if cardType == "ENCHANTMENT" {
 		p.handleEnchantmentEntity(e, info)
@@ -749,6 +760,9 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 		Attack:   info.Attack,
 		Health:   info.Health,
 	}
+	if mn.Name == "" && mn.CardID != "" {
+		mn.Name = CardName(mn.CardID)
+	}
 	if controllerID == p.localPlayerID {
 		p.machine.UpsertMinion(mn)
 	} else if p.isDuos && controllerID == p.partnerPlayerID {
@@ -757,16 +771,19 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 }
 
 // resolveController returns the controller PlayerID for the entity in a
-// GameEvent. It checks (in order): the event's PlayerID field (from player=N),
-// the entity controller registry, and falls back to 0 (unknown).
+// GameEvent. It checks (in order): the entity controller registry (updated by
+// CONTROLLER TAG_CHANGE events), then the event's PlayerID field (from player=N
+// in the log's entity notation), and falls back to 0 (unknown).
+// The registry is checked first because CONTROLLER TAG_CHANGE events update
+// ownership, while the player= annotation in the log is stale after ownership changes.
 func (p *Processor) resolveController(e parser.GameEvent) int {
-	if e.PlayerID > 0 {
-		return e.PlayerID
-	}
 	if e.EntityID > 0 {
 		if ctrl, ok := p.entityController[e.EntityID]; ok {
 			return ctrl
 		}
+	}
+	if e.PlayerID > 0 {
+		return e.PlayerID
 	}
 	return 0
 }
@@ -960,6 +977,9 @@ func (p *Processor) tryAddMinionFromRegistry(entityID, controllerID int) {
 		Name:     info.Name,
 		Attack:   info.Attack,
 		Health:   info.Health,
+	}
+	if mn.Name == "" && mn.CardID != "" {
+		mn.Name = CardName(mn.CardID)
 	}
 	if isPartner {
 		p.machine.UpsertPartnerMinion(mn)

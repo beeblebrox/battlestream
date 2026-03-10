@@ -2,6 +2,7 @@
 package gamestate
 
 import (
+	"log/slog"
 	"strconv"
 	"strings"
 	"sync"
@@ -34,6 +35,8 @@ type BGGameState struct {
 	AbilityCounters []AbilityCounter `json:"ability_counters,omitempty"`
 	Enchantments    []Enchantment    `json:"enchantments,omitempty"`
 	AvailableTribes []string         `json:"available_tribes,omitempty"`
+	AnomalyCardID   string           `json:"anomaly_card_id,omitempty"`
+	AnomalyName     string           `json:"anomaly_name,omitempty"`
 	StartTime     time.Time
 	EndTime       *time.Time
 	Placement     int
@@ -55,6 +58,7 @@ type PlayerState struct {
 	Damage      int    `json:"damage"`
 	Armor       int    `json:"armor"`
 	CurrentGold int    `json:"current_gold"`
+	MaxGold     int    `json:"max_gold"`
 	SpellPower  int    `json:"spell_power"`
 	TripleCount int    `json:"triple_count"`
 	WinStreak   int    `json:"win_streak"`
@@ -204,6 +208,10 @@ func (m *Machine) GameEnd(placement int, t time.Time) {
 	// entities with simulation copies that have base stats, so the snapshot
 	// has the correct fully-buffed stats.
 	if len(m.boardSnapshot) > 0 {
+		if len(m.boardSnapshot) > 7 {
+			slog.Warn("board snapshot exceeds 7, trimming", "count", len(m.boardSnapshot))
+			m.boardSnapshot = m.boardSnapshot[:7]
+		}
 		m.state.Board = m.boardSnapshot
 	}
 	m.boardSnapshot = nil
@@ -367,6 +375,7 @@ func (m *Machine) UpdateGold(tag string, value int) {
 	switch tag {
 	case "RESOURCES":
 		m.goldTotal = value
+		m.state.Player.MaxGold = value
 	case "RESOURCES_USED":
 		m.goldUsed = value
 	}
@@ -418,6 +427,14 @@ func (m *Machine) RemoveAvailableTribe(tribe string) {
 			return
 		}
 	}
+}
+
+// SetAnomaly stores the anomaly card ID and resolved name.
+func (m *Machine) SetAnomaly(cardID, name string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.state.AnomalyCardID = cardID
+	m.state.AnomalyName = name
 }
 
 // SetBuffSource upserts a buff source category with its current values.
@@ -658,6 +675,7 @@ func (m *Machine) UpdatePartnerGold(tag string, value int) {
 	switch tag {
 	case "RESOURCES":
 		m.partnerGoldTotal = value
+		m.state.Partner.MaxGold = value
 	case "RESOURCES_USED":
 		m.partnerGoldUsed = value
 	}

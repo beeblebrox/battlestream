@@ -772,6 +772,14 @@ func TestIntegrationPowerLog(t *testing.T) {
 		}
 	}
 
+	// Anomaly detection — the test fixture has BG34_Anomaly_800 (Major Goldthorn Potion).
+	if s.AnomalyCardID != "BG34_Anomaly_800" {
+		t.Errorf("AnomalyCardID: expected BG34_Anomaly_800, got %q", s.AnomalyCardID)
+	}
+	if s.AnomalyName != "Major Goldthorn Potion" {
+		t.Errorf("AnomalyName: expected Major Goldthorn Potion, got %q", s.AnomalyName)
+	}
+
 	// Modifications should be board-wide only (Target starts with "Board")
 	for _, mod := range s.Modifications {
 		if !strings.HasPrefix(mod.Target, "Board") {

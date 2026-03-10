@@ -296,6 +296,8 @@ func gameStateToProto(s gamestate.BGGameState) *bspb.GameState {
 		gs.AbilityCounters = append(gs.AbilityCounters, abilityCounterToProto(ac))
 	}
 	gs.AvailableTribes = s.AvailableTribes
+	gs.AnomalyCardId = s.AnomalyCardID
+	gs.AnomalyName = s.AnomalyName
 	gs.IsDuos = s.IsDuos
 	if s.Partner != nil {
 		gs.Partner = playerStateToProto(*s.Partner)
@@ -324,6 +326,8 @@ func playerStateToProto(p gamestate.PlayerState) *bspb.PlayerStats {
 		TripleCount: int32(p.TripleCount),
 		WinStreak:   int32(p.WinStreak),
 		LossStreak:  int32(p.LossStreak),
+		CurrentGold: int32(p.CurrentGold),
+		MaxGold:     int32(p.MaxGold),
 	}
 }
 

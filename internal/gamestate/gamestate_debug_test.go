@@ -58,4 +58,9 @@ func TestDebugTurn8Board(t *testing.T) {
 		t.Logf("  [%d] %q (id=%d) %d/%d ATK/HP", i, mn.Name, mn.EntityID, mn.Attack, mn.Health)
 	}
 	t.Logf("Phase: %s", s.Phase)
+
+	// Regression: board must never exceed 7 minions (ghost minion fix).
+	if len(s.Board) > 7 {
+		t.Errorf("Board has %d minions (max 7) — ghost minion bug", len(s.Board))
+	}
 }

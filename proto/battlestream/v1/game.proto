@@ -17,6 +17,8 @@ message PlayerStats {
   int32 loss_streak = 10;
   int32 max_health = 11;
   int32 damage = 12;
+  int32 current_gold = 13;
+  int32 max_gold = 14;
 }
 
 message MinionState {
@@ -87,6 +89,8 @@ message GameState {
   repeated MinionState partner_board = 19;
   repeated BuffSource partner_buff_sources = 20;
   repeated AbilityCounter partner_ability_counters = 21;
+  string anomaly_card_id = 22;
+  string anomaly_name = 23;
 }
 
 message GameEvent {

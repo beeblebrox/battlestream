@@ -39,8 +39,8 @@
 ## Known Slow Packages Under Race
 | Package | Race time | Reason |
 |---------|-----------|--------|
-| internal/debugtui | ~38s | 3 golden tests × LoadReplay (multiple full replays) |
-| internal/gamestate | ~88s | all log-2026 tests share 1 parse; 592K line file |
+| internal/debugtui | ~39s | 3 golden tests × LoadReplay (multiple full replays) |
+| internal/gamestate | ~104s | all log-2026 tests share 1 parse; 592K line file; Duos tests added |
 
 See `patterns.md` for more architectural details.
 
