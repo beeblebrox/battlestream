@@ -283,6 +283,45 @@ is called. It:
 3. Reads buff values from `TAG_SCRIPT_DATA_NUM_1/2`.
 4. Calls `machine.AddEnchantment()` which attaches it to the target board minion.
 
+### 3.8 Duos partner tracking
+
+In Battlegrounds Duos, the local player's `BACON_DUO_TEAMMATE_PLAYER_ID` tag in the
+Player definition identifies the partner's PlayerID. The partner's hero entity is
+detected via its `PLAYER_ID` tag in the FULL_ENTITY block — **not** by CONTROLLER,
+which is set to a dummy bot ID (e.g. 9) shared with all non-local entities.
+
+**Available from Power.log (partner hero entity):**
+- Hero name + CardID (from FULL_ENTITY block)
+- ARMOR, DAMAGE (live TAG_CHANGE updates)
+- PLAYER_TECH_LEVEL (tavern tier, live updates)
+- PLAYER_TRIPLES (live updates)
+- PLAYER_LEADERBOARD_PLACE
+
+**Not available from Power.log (requires memory reading):**
+- Partner board minions — all non-local minions share `CONTROLLER=<botID>`,
+  making them indistinguishable from opponent or shop entities
+- Partner buff sources / ability counters — same CONTROLLER limitation
+- Partner gold (RESOURCES fires only on the local player entity)
+- Partner BattleTag (no PlayerName event for the partner's PlayerID)
+
+**Duos health model:** Health and armor are shared (team pool). The local hero
+entity's HEALTH/DAMAGE/ARMOR tags reflect the team total. The partner hero entity
+also carries DAMAGE/ARMOR but these are the same shared values.
+
+### 3.9 Reconnect handling
+
+When the Hearthstone client reconnects mid-game, it emits a new CREATE_GAME with
+all entity state re-declared in FULL_ENTITY blocks. The processor captures initial
+state from these blocks:
+
+- **Player entity tags** (EventPlayerDef): TURN, RESOURCES, RESOURCES_USED
+- **Hero entity tags** (EventEntityUpdate): HEALTH, DAMAGE, ARMOR,
+  PLAYER_TECH_LEVEL, PLAYER_TRIPLES
+- **Partner hero tags** (EventEntityUpdate): same set, via PLAYER_ID matching
+
+This ensures that reconnected games show correct turn number, gold, health, and
+stats rather than starting from zero.
+
 ---
 
 ## Key edge cases handled
@@ -297,3 +336,5 @@ is called. It:
 | Hero entities appearing as board entities | `heroEntities` registry; skipped from minion board |
 | Game end during combat (minions in SETASIDE) | Removal blocked in `PhaseGameOver`; snapshot restored |
 | Multiple Nomi enchantments (one per minion) | Each entity tracked independently in `shopBuffPrev` |
+| Duos partner hero has CONTROLLER=botID | Identified by PLAYER_ID tag, not CONTROLLER |
+| Reconnect mid-game (second CREATE_GAME) | Initial tags from Player def + hero FULL_ENTITY restore state |

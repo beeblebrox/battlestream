@@ -858,53 +858,19 @@ func (m *Model) viewStep() string {
 	changesPanel := styleBorder.Width(halfW).Render(styleTitle.Render("CHANGES") + "\n" + changesVPView)
 	row3 := lipgloss.JoinHorizontal(lipgloss.Top, buffPanel, changesPanel)
 
-	// ── Row 4 (Duos): Partner board + Partner buffs ──────────────────
+	// ── Row 4 (Duos): Partner info ──────────────────────────────────
 	var row4 string
 	if showPartnerRow {
-		pBoardContent := renderBoard(step.State.PartnerBoard)
-		m.partnerBoardVP.Width = vpContentW
-		m.partnerBoardVP.Height = maxContentH
-		m.partnerBoardVP.MouseWheelEnabled = true
-		m.partnerBoardVP.SetContent(pBoardContent)
-		pBoardVPView := lipgloss.JoinHorizontal(lipgloss.Top, m.partnerBoardVP.View(), renderScrollbar(m.partnerBoardVP, maxContentH))
-		pBoardPanel := styleBorder.Width(halfW).Render(styleTitle.Render("PARTNER BOARD") + styleDim.Render(fmt.Sprintf(" (%d)", len(step.State.PartnerBoard))) + "\n" + pBoardVPView)
-
-		pBuffContent := renderBuffSources(step.State) // We'll create a partner version
-		_ = pBuffContent
-		// Render partner buff sources specifically.
-		var pBuffStr strings.Builder
-		if len(step.State.PartnerBuffSources) == 0 {
-			pBuffStr.WriteString(styleDim.Render("(none)"))
+		var pInfoStr strings.Builder
+		partner := step.State.Partner
+		if partner != nil {
+			pInfoStr.WriteString(fmt.Sprintf("Name: %s\n", partner.Name))
+			pInfoStr.WriteString(fmt.Sprintf("Hero: %s\n", partner.HeroCardID))
+			pInfoStr.WriteString(fmt.Sprintf("Health: %d  Tier: %d  Triples: %d", partner.EffectiveHealth(), partner.TavernTier, partner.TripleCount))
 		} else {
-			for _, bs := range step.State.PartnerBuffSources {
-				if bs.Attack == 0 && bs.Health == 0 {
-					continue
-				}
-				name := buffCategoryDisplayName(bs.Category)
-				color := buffCategoryColor(bs.Category)
-				style := lipgloss.NewStyle().Foreground(color)
-				line := fmt.Sprintf("%-14s +%d/+%d", name, bs.Attack, bs.Health)
-				pBuffStr.WriteString(style.Render(line) + "\n")
-			}
+			pInfoStr.WriteString(styleDim.Render("(no partner data)"))
 		}
-		if len(step.State.PartnerAbilityCounters) > 0 {
-			pBuffStr.WriteString("\n" + styleTitle.Render("ABILITIES") + "\n")
-			for _, ac := range step.State.PartnerAbilityCounters {
-				name := buffCategoryDisplayName(ac.Category)
-				color := buffCategoryColor(ac.Category)
-				style := lipgloss.NewStyle().Foreground(color)
-				line := fmt.Sprintf("%-14s %s", name, ac.Display)
-				pBuffStr.WriteString(style.Render(line) + "\n")
-			}
-		}
-		m.partnerBuffVP.Width = vpContentW
-		m.partnerBuffVP.Height = maxContentH
-		m.partnerBuffVP.MouseWheelEnabled = true
-		m.partnerBuffVP.SetContent(pBuffStr.String())
-		pBuffVPView := lipgloss.JoinHorizontal(lipgloss.Top, m.partnerBuffVP.View(), renderScrollbar(m.partnerBuffVP, maxContentH))
-		pBuffPanel := styleBorder.Width(halfW).Render(styleTitle.Render("PARTNER BUFFS") + "\n" + pBuffVPView)
-
-		row4 = lipgloss.JoinHorizontal(lipgloss.Top, pBoardPanel, pBuffPanel)
+		row4 = styleBorder.Width(innerW).Render(styleTitle.Render("PARTNER") + "\n" + pInfoStr.String())
 	}
 
 	// ── Event summary ───────────────────────────────────────────────

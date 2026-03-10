@@ -139,17 +139,12 @@ type Model struct {
 
 	// Drag-scrubbing state.
 	scrubbing   bool
-	scrubPanel  int // 0=board, 1=mods, 2=partnerBoard, 3=partnerMods
+	scrubPanel  int // 0=board, 1=mods
 	scrubTrackY int
 	scrubTrackH int
 
 	// Toggle states.
 	showAnomalyDesc bool // toggle anomaly description display
-	showPartner     bool // toggle partner panes on/off (default true for Duos)
-	partnerBoardVP viewport.Model
-	partnerModsVP  viewport.Model
-	partnerBoardScrollX, partnerBoardVPY, partnerBoardVPH int
-	partnerModsScrollX, partnerModsVPY, partnerModsVPH   int
 }
 
 // New creates a Model that will connect to the daemon at grpcAddr.
@@ -200,9 +195,6 @@ func Dump(grpcAddr string, width int) (string, error) {
 		width:     width,
 		height:    40,
 	}
-	if game != nil && game.IsDuos {
-		m.showPartner = true
-	}
 	return m.View(), nil
 }
 
@@ -243,12 +235,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "d":
 			if m.game != nil && m.game.AnomalyDescription != "" {
 				m.showAnomalyDesc = !m.showAnomalyDesc
-			} else if m.game != nil && m.game.IsDuos {
-				m.showPartner = !m.showPartner
-			}
-		case "p":
-			if m.game != nil && m.game.IsDuos {
-				m.showPartner = !m.showPartner
 			}
 		}
 
@@ -272,9 +258,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.game = msg.game
 		m.agg = msg.agg
 		m.eventCh = msg.eventCh
-		if msg.game != nil && msg.game.IsDuos {
-			m.showPartner = true
-		}
 		return m, tea.Batch(
 			waitForEventCmd(m.eventCh),
 			aggTickCmd(),
@@ -298,9 +281,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case gameUpdateMsg:
 		m.game = msg.game
-		if msg.game != nil && msg.game.IsDuos && !m.showPartner {
-			m.showPartner = true
-		}
 
 	case aggUpdateMsg:
 		m.agg = msg.agg
@@ -402,51 +382,16 @@ func (m *Model) View() string {
 
 	row2 := lipgloss.JoinHorizontal(lipgloss.Top, boardPanel, modsPanel)
 
-	// ── Row 3 (Duos): partner board | partner buff sources ────
-	var row3Partner string
-	if m.game != nil && m.game.IsDuos && m.showPartner {
-		partnerBoardTitle := "PARTNER BOARD"
-		if m.game.Phase == "GAME_OVER" {
-			partnerBoardTitle = "PARTNER FINAL BOARD"
-		}
-		m.partnerBoardVP.Width = vpContentW
-		m.partnerBoardVP.Height = available
-		m.partnerBoardVP.MouseWheelEnabled = true
-		m.partnerBoardVP.SetContent(m.partnerBoardItems())
-		m.partnerBoardVPY = m.row2StartY + lipgloss.Height(row2) + 2
-		m.partnerBoardVPH = available
-		pBoardVPView := lipgloss.JoinHorizontal(lipgloss.Top,
-			m.partnerBoardVP.View(), tuiScrollbar(m.partnerBoardVP, available))
-		pBoardPanel := styleBorder.Width(colW).Render(
-			styleTitle.Render(partnerBoardTitle) + "\n" + pBoardVPView)
-
-		m.partnerModsVP.Width = vpContentW
-		m.partnerModsVP.Height = available
-		m.partnerModsVP.MouseWheelEnabled = true
-		m.partnerModsVP.SetContent(m.partnerModsItems())
-		m.partnerModsVPY = m.partnerBoardVPY
-		m.partnerModsVPH = available
-		pModsVPView := lipgloss.JoinHorizontal(lipgloss.Top,
-			m.partnerModsVP.View(), tuiScrollbar(m.partnerModsVP, available))
-		pModsPanel := styleBorder.Width(colW).Render(
-			styleTitle.Render("PARTNER BUFFS") + "\n" + pModsVPView)
-
-		row3Partner = lipgloss.JoinHorizontal(lipgloss.Top, pBoardPanel, pModsPanel)
-	}
-
 	// ── Session stats ─────────────────────────────────────────
 	rowSession := m.renderSessionBar(m.width - 4)
 
 	// ── Help bar ──────────────────────────────────────────────
 	helpText := "  [r] Refresh game  [R] Refresh stats  [d] Anomaly desc  [q] Quit  scroll: mouse wheel"
 	if m.game != nil && m.game.IsDuos {
-		helpText = "  [r] Refresh  [R] Stats  [d] Anomaly desc  [p] Partner  [q] Quit  scroll: mouse wheel"
+		helpText = "  [r] Refresh  [R] Stats  [d] Anomaly desc  [q] Quit  scroll: mouse wheel"
 	}
 	help := styleHelp.Render(helpText)
 
-	if row3Partner != "" {
-		return lipgloss.JoinVertical(lipgloss.Left, row1, row2, row3Partner, rowSession, help)
-	}
 	return lipgloss.JoinVertical(lipgloss.Left, row1, row2, rowSession, help)
 }
 
@@ -545,6 +490,20 @@ func (m *Model) renderHeroPanel(w int) string {
 		b.WriteString(styleLabel.Render("Last    ") + styleLoss.Render(fmt.Sprintf("LOSS (streak: %d)", p.LossStreak)) + "\n")
 	}
 
+	// Partner section in Duos.
+	if m.game.IsDuos && m.game.Partner != nil {
+		partner := m.game.Partner
+		b.WriteString(styleDim.Render("─ Partner ─") + "\n")
+		if partner.Name != "" {
+			b.WriteString(styleLabel.Render("Name    ") + styleValue.Render(partner.Name) + "\n")
+		}
+		if partner.HeroCardId != "" {
+			b.WriteString(styleLabel.Render("Hero    ") + styleValue.Render(gamestate.CardName(partner.HeroCardId)) + "\n")
+		}
+		b.WriteString(styleLabel.Render("Tavern  ") + renderTavernTier(int(partner.TavernTier)) + "\n")
+		b.WriteString(styleLabel.Render("Triples ") + styleValue.Render(fmt.Sprintf("%d", partner.TripleCount)) + "\n")
+	}
+
 	return styleBorder.Width(w).Render(b.String())
 }
 
@@ -610,64 +569,6 @@ func (m *Model) modsItems() string {
 	if m.game != nil && len(m.game.AbilityCounters) > 0 {
 		b.WriteString("\n" + styleTitle.Render("ABILITIES") + "\n")
 		for _, ac := range m.game.AbilityCounters {
-			name := buffCategoryDisplayName(ac.Category)
-			color := buffCategoryColor(ac.Category)
-			style := lipgloss.NewStyle().Foreground(color)
-			line := fmt.Sprintf("%-14s %s", name, ac.Display)
-			b.WriteString(style.Render(line) + "\n")
-		}
-	}
-
-	return b.String()
-}
-
-// partnerBoardItems returns the scrollable partner board content.
-func (m *Model) partnerBoardItems() string {
-	var b strings.Builder
-	if m.game == nil || len(m.game.PartnerBoard) == 0 {
-		b.WriteString(styleDim.Render("(empty)"))
-	} else {
-		for _, mn := range m.game.PartnerBoard {
-			b.WriteString(renderMinion(mn) + "\n")
-		}
-	}
-	return b.String()
-}
-
-// partnerModsItems returns the scrollable partner buff sources content.
-func (m *Model) partnerModsItems() string {
-	var b strings.Builder
-	if m.game == nil || len(m.game.PartnerBuffSources) == 0 {
-		b.WriteString(styleDim.Render("(none)"))
-		return b.String()
-	}
-
-	sources := make([]*bspb.BuffSource, len(m.game.PartnerBuffSources))
-	copy(sources, m.game.PartnerBuffSources)
-	for i := 0; i < len(sources); i++ {
-		for j := i + 1; j < len(sources); j++ {
-			totalI := abs32(sources[i].Attack) + abs32(sources[i].Health)
-			totalJ := abs32(sources[j].Attack) + abs32(sources[j].Health)
-			if totalJ > totalI {
-				sources[i], sources[j] = sources[j], sources[i]
-			}
-		}
-	}
-
-	for _, bs := range sources {
-		if bs.Attack == 0 && bs.Health == 0 {
-			continue
-		}
-		name := buffCategoryDisplayName(bs.Category)
-		color := buffCategoryColor(bs.Category)
-		style := lipgloss.NewStyle().Foreground(color)
-		line := fmt.Sprintf("%-14s +%d/+%d", name, bs.Attack, bs.Health)
-		b.WriteString(style.Render(line) + "\n")
-	}
-
-	if m.game != nil && len(m.game.PartnerAbilityCounters) > 0 {
-		b.WriteString("\n" + styleTitle.Render("ABILITIES") + "\n")
-		for _, ac := range m.game.PartnerAbilityCounters {
 			name := buffCategoryDisplayName(ac.Category)
 			color := buffCategoryColor(ac.Category)
 			style := lipgloss.NewStyle().Foreground(color)
@@ -762,10 +663,6 @@ func (m *Model) identifyScrollbar(x, y int) (panel, trackY, trackH int) {
 		return 0, m.boardVPY, m.boardVPH
 	case x == m.modsScrollX && y >= m.modsVPY && y < m.modsVPY+m.modsVPH:
 		return 1, m.modsVPY, m.modsVPH
-	case m.showPartner && x == m.partnerBoardScrollX && y >= m.partnerBoardVPY && y < m.partnerBoardVPY+m.partnerBoardVPH:
-		return 2, m.partnerBoardVPY, m.partnerBoardVPH
-	case m.showPartner && x == m.partnerModsScrollX && y >= m.partnerModsVPY && y < m.partnerModsVPY+m.partnerModsVPH:
-		return 3, m.partnerModsVPY, m.partnerModsVPH
 	}
 	return -1, 0, 0
 }
@@ -776,10 +673,6 @@ func (m *Model) scrubAt(y int) {
 		tuiScrollbarJump(&m.boardVP, y, m.scrubTrackY, m.scrubTrackH)
 	case 1:
 		tuiScrollbarJump(&m.modsVP, y, m.scrubTrackY, m.scrubTrackH)
-	case 2:
-		tuiScrollbarJump(&m.partnerBoardVP, y, m.scrubTrackY, m.scrubTrackH)
-	case 3:
-		tuiScrollbarJump(&m.partnerModsVP, y, m.scrubTrackY, m.scrubTrackH)
 	}
 }
 

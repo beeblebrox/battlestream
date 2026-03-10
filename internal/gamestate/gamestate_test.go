@@ -813,13 +813,6 @@ func TestIntegrationPowerLog(t *testing.T) {
 	} else {
 		t.Logf("Partner: %s", s.Partner.Name)
 	}
-	t.Logf("PartnerBoard: %d minions", len(s.PartnerBoard))
-	for i, mn := range s.PartnerBoard {
-		t.Logf("  PartnerBoard[%d]: %q (id=%d) %d/%d", i, mn.Name, mn.EntityID, mn.Attack, mn.Health)
-	}
-	for _, bs := range s.PartnerBuffSources {
-		t.Logf("PartnerBuffSource: %s +%d/+%d", bs.Category, bs.Attack, bs.Health)
-	}
 }
 
 // ── Enchantment/BuffSource tests ─────────────────────────────────────────────
@@ -1680,7 +1673,7 @@ func TestPendingStatChangesCapFlush(t *testing.T) {
 			PlayerID: 7,
 			Tags:     map[string]string{"ATK": fmt.Sprintf("%d", newAtk)},
 		}
-		p.updateMinionStat(e, "ATK", fmt.Sprintf("%d", newAtk), false)
+		p.updateMinionStat(e, "ATK", fmt.Sprintf("%d", newAtk))
 		// Reset stored value so the next iteration for this entity sees a fresh delta.
 		if info2 := p.entityProps[entityID]; info2 != nil {
 			info2.Attack = newAtk - 1
@@ -1897,73 +1890,3 @@ func TestDuosPartnerHealthTracking(t *testing.T) {
 	}
 }
 
-func TestDuosPartnerBoardTracking(t *testing.T) {
-	m, p := newProc()
-	setupDuosGame(p)
-
-	// Enter recruit phase.
-	p.Handle(parser.GameEvent{
-		Type: parser.EventTurnStart,
-		Tags: map[string]string{"TURN": "1"},
-	})
-
-	// Register a partner minion in the entity registry.
-	p.entityController[300] = 8
-	p.entityProps[300] = &entityInfo{
-		Name:     "PartnerMinion",
-		CardID:   "BG_TestMinion",
-		CardType: "MINION",
-		Zone:     "PLAY",
-		Attack:   3,
-		Health:   4,
-	}
-
-	// Trigger zone transition to PLAY for partner minion.
-	p.Handle(parser.GameEvent{
-		Type:     parser.EventTagChange,
-		EntityID: 300,
-		Tags:     map[string]string{"ZONE": "PLAY"},
-	})
-
-	s := m.State()
-	if len(s.PartnerBoard) != 1 {
-		t.Fatalf("expected 1 partner minion, got %d", len(s.PartnerBoard))
-	}
-	if s.PartnerBoard[0].Attack != 3 || s.PartnerBoard[0].Health != 4 {
-		t.Errorf("expected partner minion 3/4, got %d/%d", s.PartnerBoard[0].Attack, s.PartnerBoard[0].Health)
-	}
-}
-
-func TestDuosPartnerBuffSources(t *testing.T) {
-	m, p := newProc()
-	setupDuosGame(p)
-
-	// Set partner blood gem stats via player entity tags.
-	p.Handle(parser.GameEvent{
-		Type:       parser.EventTagChange,
-		PlayerID:   8,
-		EntityName: "PartnerPlayer#5678",
-		Tags:       map[string]string{"BACON_BLOODGEMBUFFATKVALUE": "3"},
-	})
-	p.Handle(parser.GameEvent{
-		Type:       parser.EventTagChange,
-		PlayerID:   8,
-		EntityName: "PartnerPlayer#5678",
-		Tags:       map[string]string{"BACON_BLOODGEMBUFFHEALTHVALUE": "2"},
-	})
-
-	s := m.State()
-	found := false
-	for _, bs := range s.PartnerBuffSources {
-		if bs.Category == CatBloodgem {
-			found = true
-			// ComputeBloodgemValue adds 1: raw 3 → 4, raw 2 → 3.
-			if bs.Attack != 4 || bs.Health != 3 {
-				t.Errorf("expected BloodGem +4/+3, got +%d/+%d", bs.Attack, bs.Health)
-			}
-		}
-	}
-	if !found {
-		t.Error("expected BloodGem partner buff source")
-	}
-}

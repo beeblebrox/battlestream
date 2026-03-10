@@ -60,7 +60,9 @@ HTTP server on `localhost:8080`. Provides:
 Live dashboard. Connects to the daemon via gRPC and renders board state, buff
 sources, and session stats in a scrollable two-column layout. Panels use
 `bubbles/viewport` with visual scrollbars; mouse-wheel and scrollbar
-click/drag scrolling are supported. Launched via `battlestream tui`.
+click/drag scrolling are supported. In Duos games, the hero panel includes a
+partner section showing hero name, tavern tier, and triple count. Launched
+via `battlestream tui`.
 
 ### `internal/debugtui`
 Step-through Power.log replay viewer. Parses a log file offline into a `Replay`

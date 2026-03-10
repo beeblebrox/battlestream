@@ -141,18 +141,6 @@ func (w *Writer) WriteCurrentState(s gamestate.BGGameState) error {
 				return err
 			}
 		}
-		if err := w.writeJSON(filepath.Join("current", "partner_board.json"), BoardStateFile{
-			Board:     s.PartnerBoard,
-			UpdatedAt: now,
-		}); err != nil {
-			return err
-		}
-		if err := w.writeJSON(filepath.Join("current", "partner_buff_sources.json"), BuffSourcesFile{
-			BuffSources: s.PartnerBuffSources,
-			UpdatedAt:   now,
-		}); err != nil {
-			return err
-		}
 	}
 
 	return nil

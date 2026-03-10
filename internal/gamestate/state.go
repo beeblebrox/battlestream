@@ -43,11 +43,8 @@ type BGGameState struct {
 	Placement     int
 
 	// Duos fields
-	IsDuos               bool             `json:"is_duos,omitempty"`
-	Partner              *PlayerState     `json:"partner,omitempty"`
-	PartnerBoard         []MinionState    `json:"partner_board,omitempty"`
-	PartnerBuffSources   []BuffSource     `json:"partner_buff_sources,omitempty"`
-	PartnerAbilityCounters []AbilityCounter `json:"partner_ability_counters,omitempty"`
+	IsDuos  bool         `json:"is_duos,omitempty"`
+	Partner *PlayerState `json:"partner,omitempty"`
 }
 
 // PlayerState holds per-player stats.
@@ -62,6 +59,7 @@ type PlayerState struct {
 	MaxGold     int    `json:"max_gold"`
 	SpellPower  int    `json:"spell_power"`
 	TripleCount int    `json:"triple_count"`
+	TavernTier  int    `json:"tavern_tier"`
 	WinStreak   int    `json:"win_streak"`
 	LossStreak  int    `json:"loss_streak"`
 }
@@ -131,9 +129,8 @@ type Machine struct {
 	goldUsed        int           // last RESOURCES_USED value
 
 	// Partner (Duos) state
-	partnerBoardSnapshot []MinionState
-	partnerGoldTotal     int
-	partnerGoldUsed      int
+	partnerGoldTotal int
+	partnerGoldUsed  int
 }
 
 // New creates a new Machine in IDLE phase.
@@ -167,18 +164,11 @@ func (m *Machine) State() BGGameState {
 	s.AbilityCounters = append([]AbilityCounter(nil), m.state.AbilityCounters...)
 	s.Enchantments = append([]Enchantment(nil), m.state.Enchantments...)
 	s.AvailableTribes = append([]string(nil), m.state.AvailableTribes...)
-	// Deep copy partner slices
+	// Deep copy partner
 	if m.state.Partner != nil {
 		p := *m.state.Partner
 		s.Partner = &p
 	}
-	s.PartnerBoard = make([]MinionState, len(m.state.PartnerBoard))
-	for i, mn := range m.state.PartnerBoard {
-		s.PartnerBoard[i] = mn
-		s.PartnerBoard[i].Enchantments = append([]Enchantment(nil), mn.Enchantments...)
-	}
-	s.PartnerBuffSources = append([]BuffSource(nil), m.state.PartnerBuffSources...)
-	s.PartnerAbilityCounters = append([]AbilityCounter(nil), m.state.PartnerAbilityCounters...)
 	return s
 }
 
@@ -193,7 +183,6 @@ func (m *Machine) GameStart(gameID string, t time.Time) {
 		Player:    PlayerState{},
 	}
 	m.gameEntityTurn = 0
-	m.partnerBoardSnapshot = nil
 	m.partnerGoldTotal = 0
 	m.partnerGoldUsed = 0
 }
@@ -216,10 +205,6 @@ func (m *Machine) GameEnd(placement int, t time.Time) {
 		m.state.Board = m.boardSnapshot
 	}
 	m.boardSnapshot = nil
-	if len(m.partnerBoardSnapshot) > 0 {
-		m.state.PartnerBoard = m.partnerBoardSnapshot
-	}
-	m.partnerBoardSnapshot = nil
 }
 
 // SetPhase updates the game phase.
@@ -253,7 +238,6 @@ func (m *Machine) SetGameEntityTurn(turn int) {
 		// are replaced by simulation copies with base stats. The recruit
 		// board has the fully-buffed stats we want to preserve.
 		m.boardSnapshot = append([]MinionState(nil), m.state.Board...)
-		m.partnerBoardSnapshot = append([]MinionState(nil), m.state.PartnerBoard...)
 		m.state.Phase = PhaseCombat
 	}
 }
@@ -399,7 +383,7 @@ func applyTagToPlayer(p *PlayerState, tag, value string) {
 	case "SPELL_POWER":
 		p.SpellPower = parseInt(value)
 	case "TAVERN_TIER", "PLAYER_TECH_LEVEL":
-		// handled separately
+		p.TavernTier = parseInt(value)
 	case "PLAYER_TRIPLES":
 		p.TripleCount = parseInt(value)
 	}
@@ -575,97 +559,6 @@ func (m *Machine) UpdatePartnerHeroCardID(cardID string) {
 	m.state.Partner.HeroCardID = cardID
 }
 
-// UpsertPartnerMinion inserts or updates a minion on the partner board.
-func (m *Machine) UpsertPartnerMinion(minion MinionState) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for i, mn := range m.state.PartnerBoard {
-		if mn.EntityID == minion.EntityID {
-			m.state.PartnerBoard[i] = minion
-			return
-		}
-	}
-	m.state.PartnerBoard = append(m.state.PartnerBoard, minion)
-}
-
-// UpdatePartnerMinionStat updates a specific stat on a partner board minion.
-func (m *Machine) UpdatePartnerMinionStat(entityID int, stat string, value int) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for i, mn := range m.state.PartnerBoard {
-		if mn.EntityID == entityID {
-			switch stat {
-			case "ATK":
-				m.state.PartnerBoard[i].Attack = value
-			case "HEALTH":
-				m.state.PartnerBoard[i].Health = value
-			}
-			return true
-		}
-	}
-	return false
-}
-
-// RemovePartnerMinion removes a minion from the partner board by entity ID.
-func (m *Machine) RemovePartnerMinion(entityID int) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	board := m.state.PartnerBoard[:0]
-	for _, mn := range m.state.PartnerBoard {
-		if mn.EntityID != entityID {
-			board = append(board, mn)
-		}
-	}
-	m.state.PartnerBoard = board
-}
-
-// SetPartnerBuffSource upserts a partner buff source category.
-func (m *Machine) SetPartnerBuffSource(category string, atk, hp int) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for i, bs := range m.state.PartnerBuffSources {
-		if bs.Category == category {
-			m.state.PartnerBuffSources[i].Attack = atk
-			m.state.PartnerBuffSources[i].Health = hp
-			return
-		}
-	}
-	m.state.PartnerBuffSources = append(m.state.PartnerBuffSources, BuffSource{
-		Category: category,
-		Attack:   atk,
-		Health:   hp,
-	})
-}
-
-// SetPartnerAbilityCounter upserts a partner ability counter.
-func (m *Machine) SetPartnerAbilityCounter(category string, value int, display string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for i, ac := range m.state.PartnerAbilityCounters {
-		if ac.Category == category {
-			m.state.PartnerAbilityCounters[i].Value = value
-			m.state.PartnerAbilityCounters[i].Display = display
-			return
-		}
-	}
-	m.state.PartnerAbilityCounters = append(m.state.PartnerAbilityCounters, AbilityCounter{
-		Category: category,
-		Value:    value,
-		Display:  display,
-	})
-}
-
-// RemovePartnerAbilityCounter removes a partner ability counter.
-func (m *Machine) RemovePartnerAbilityCounter(category string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for i, ac := range m.state.PartnerAbilityCounters {
-		if ac.Category == category {
-			m.state.PartnerAbilityCounters = append(m.state.PartnerAbilityCounters[:i], m.state.PartnerAbilityCounters[i+1:]...)
-			return
-		}
-	}
-}
 
 // UpdatePartnerGold tracks partner gold from RESOURCES/RESOURCES_USED.
 func (m *Machine) UpdatePartnerGold(tag string, value int) {
@@ -682,13 +575,6 @@ func (m *Machine) UpdatePartnerGold(tag string, value int) {
 		m.partnerGoldUsed = value
 	}
 	m.state.Partner.CurrentGold = m.partnerGoldTotal - m.partnerGoldUsed
-}
-
-// UpdatePartnerBoardSnapshot overwrites the partner board snapshot.
-func (m *Machine) UpdatePartnerBoardSnapshot() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.partnerBoardSnapshot = append([]MinionState(nil), m.state.PartnerBoard...)
 }
 
 func parseInt(s string) int {

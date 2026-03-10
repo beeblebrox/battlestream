@@ -303,15 +303,6 @@ func gameStateToProto(s gamestate.BGGameState) *bspb.GameState {
 	if s.Partner != nil {
 		gs.Partner = playerStateToProto(*s.Partner)
 	}
-	for _, m := range s.PartnerBoard {
-		gs.PartnerBoard = append(gs.PartnerBoard, minionToProto(m))
-	}
-	for _, bs := range s.PartnerBuffSources {
-		gs.PartnerBuffSources = append(gs.PartnerBuffSources, buffSourceToProto(bs))
-	}
-	for _, ac := range s.PartnerAbilityCounters {
-		gs.PartnerAbilityCounters = append(gs.PartnerAbilityCounters, abilityCounterToProto(ac))
-	}
 	return gs
 }
 
@@ -325,6 +316,7 @@ func playerStateToProto(p gamestate.PlayerState) *bspb.PlayerStats {
 		Armor:       int32(p.Armor),
 		SpellPower:  int32(p.SpellPower),
 		TripleCount: int32(p.TripleCount),
+		TavernTier:  int32(p.TavernTier),
 		WinStreak:   int32(p.WinStreak),
 		LossStreak:  int32(p.LossStreak),
 		CurrentGold: int32(p.CurrentGold),

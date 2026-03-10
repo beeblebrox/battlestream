@@ -63,6 +63,16 @@ Covers all 13 HDT BgCounters. Four tracking mechanisms:
 
 Mappings live in `internal/gamestate/categories.go`. Reference implementations in `reference/Hearthstone-Deck-Tracker/` and `reference/HearthDb/`.
 
+## Duos Support
+
+Duos mode detected via `BACON_DUO_TEAMMATE_PLAYER_ID` in CREATE_GAME Player block. Partner hero identified by `PLAYER_ID` tag in FULL_ENTITY (not CONTROLLER, which is a shared bot ID). Health/armor are shared (team pool).
+
+**Available from Power.log:** Partner hero name/CardID, tavern tier, triples, armor, damage. Shown in TUI hero panel.
+
+**Not available (requires memory reading):** Partner board minions, buff sources, ability counters, gold. All non-local entities share `CONTROLLER=<botID>`, making partner entities indistinguishable from opponents.
+
+**Reconnect handling:** Mid-game reconnects emit a new CREATE_GAME. Player entity tags (TURN, RESOURCES) and hero FULL_ENTITY tags (DAMAGE, ARMOR, PLAYER_TECH_LEVEL, PLAYER_TRIPLES) are captured to restore state.
+
 ## Proto / Code Generation
 
 Proto definitions: `proto/battlestream/v1/*.proto`. Generated Go code: `internal/api/grpc/gen/`. CI verifies generated files are up to date. Run `scripts/gen-proto.sh` after any proto changes.

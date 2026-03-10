@@ -86,9 +86,7 @@ message GameState {
   repeated string available_tribes = 16;
   bool is_duos = 17;
   PlayerStats partner = 18;
-  repeated MinionState partner_board = 19;
-  repeated BuffSource partner_buff_sources = 20;
-  repeated AbilityCounter partner_ability_counters = 21;
+  reserved 19, 20, 21;
   string anomaly_card_id = 22;
   string anomaly_name = 23;
   string anomaly_description = 24;

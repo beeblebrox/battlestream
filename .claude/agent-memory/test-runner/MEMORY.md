@@ -7,6 +7,9 @@
 - Regenerate whenever `debugtui` rendering logic or `jumpToTurn` behavior changes
 - Also regenerate when `AvailableTribes` ordering changes (order is log-event order from `AddAvailableTribe`)
 - The `-update-golden` flag is defined via `flag.Bool` in replay_test.go
+- CRITICAL: Also regenerate when `Step.Turn` assignment in `replay.go` changes — it affects `jumpToTurn` landing position
+- Golden test cases use turn=8, turn=10, turn=0 (log fixture starts at turn 8 — mid-game reconnect log)
+- If PLAYER_DEF now sets Turn early (from TURN tag in reconnect), jumpToTurn(1) or jumpToTurn(5) lands at step 2 (Turn 8), NOT step 3889 (Turn 9)
 
 ## Large Log Fixtures
 - `internal/gamestate/testdata/power_log_2026_03_07.txt` is 593K lines
@@ -39,7 +42,7 @@
 ## Known Slow Packages Under Race
 | Package | Race time | Reason |
 |---------|-----------|--------|
-| internal/debugtui | ~39s | 3 golden tests × LoadReplay (multiple full replays) |
+| internal/debugtui | ~36s | 3 golden tests × LoadReplay (multiple full replays) |
 | internal/gamestate | ~104s | all log-2026 tests share 1 parse; 592K line file; Duos tests added |
 
 See `patterns.md` for more architectural details.

@@ -228,6 +228,10 @@ entry is copied into `e.BlockSource` / `e.BlockCardID`.
 | Buff source values are upserted (not appended) per category | One entry per category |
 | Ability counters are upserted per category | One entry per category |
 | Enchantments are upserted per entity ID | Script data updates replace previous |
+| Duos partner hero identified by PLAYER_ID tag, not CONTROLLER | CONTROLLER is dummy bot ID shared with all non-local entities |
+| Partner board/buff sources are not tracked | Power.log does not distinguish partner entities from opponents (requires memory reading) |
+| Reconnect restores TURN/RESOURCES from Player def tags | Prevents Turn=0 / Gold=0 after mid-game reconnect |
+| Reconnect restores DAMAGE/ARMOR from hero FULL_ENTITY tags | Prevents Health showing full after reconnect |
 
 ---
 
@@ -256,7 +260,10 @@ entry is copied into `e.BlockSource` / `e.BlockCardID`.
 | `ATK` on minion | local player minion | `updateMinionStat` |
 | `ARMOR` on hero | local hero | `UpdatePlayerTag` |
 | `PLAYER_TECH_LEVEL` / `TAVERN_TIER` | local player | `SetTavernTier` |
+| `PLAYER_TECH_LEVEL` / `TAVERN_TIER` | partner hero/player | `UpdatePartnerTag` (Duos only) |
 | `PLAYER_TRIPLES` | local hero or player | `UpdatePlayerTag` |
+| `PLAYER_TRIPLES` | partner hero or player | `UpdatePartnerTag` (Duos only) |
+| `HEALTH` / `DAMAGE` / `ARMOR` | partner hero | `UpdatePartnerTag` (Duos only) |
 | `PLAYER_LEADERBOARD_PLACE` | local player | buffered in `pendingPlacement`, applied at GameEnd |
 | `ZONE=PLAY` | any entity | `tryAddMinionFromRegistry` |
 | `ZONE=GRAVEYARD/REMOVEDFROMGAME/SETASIDE` | any entity | `RemoveMinion` + `RemoveEnchantmentsForEntity` |

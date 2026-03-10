@@ -38,7 +38,7 @@ type pendingStatChange struct {
 	delta    int
 }
 
-// buffTracker holds buff source tracking state for a single player (local or partner).
+// buffTracker holds buff source tracking state for the local player.
 // Encapsulates buff source state, Dnt counters, and economy counters.
 type buffTracker struct {
 	buffSourceState map[string][2]int
@@ -83,9 +83,8 @@ type Processor struct {
 	// Buffered stat changes for board-wide buff detection.
 	pendingStatChanges []pendingStatChange
 
-	// Buff tracking for local player and partner.
-	localBuffs   buffTracker
-	partnerBuffs buffTracker
+	// Buff tracking for local player.
+	localBuffs buffTracker
 
 	// Win/loss streak tracking.
 	// lastCombatHeroAttackerID stores the entity ID of the last hero that
@@ -114,7 +113,6 @@ func NewProcessor(m *Machine) *Processor {
 		heroEntities:     make(map[int]bool),
 		entityProps:      make(map[int]*entityInfo),
 		localBuffs:       newBuffTracker(),
-		partnerBuffs:     newBuffTracker(),
 		playerEntityIDs:  make(map[int]int),
 		realPlayerIDs:    make(map[int]int),
 	}
@@ -138,7 +136,6 @@ func (p *Processor) Handle(e parser.GameEvent) {
 		p.heroEntities = make(map[int]bool)
 		p.entityProps = make(map[int]*entityInfo)
 		p.localBuffs = newBuffTracker()
-		p.partnerBuffs = newBuffTracker()
 		p.lastCombatHeroAttackerID = 0
 		p.bgTurnsStarted = 0
 		p.seenTribes = make(map[string]bool)
@@ -223,6 +220,19 @@ func (p *Processor) handlePlayerDef(e parser.GameEvent) {
 				slog.Info("Duos detected from player def", "partnerPlayerID", partnerID)
 			}
 		}
+		// Capture initial state from Player entity tags (critical for reconnects
+		// where the entity carries mid-game TURN, RESOURCES, etc.).
+		if turn := e.Tags["TURN"]; turn != "" {
+			if t, _ := strconv.Atoi(turn); t > 0 {
+				p.machine.SetTurn(t)
+			}
+		}
+		if res := e.Tags["RESOURCES"]; res != "" {
+			p.machine.UpdateGold("RESOURCES", parseInt(res))
+		}
+		if used := e.Tags["RESOURCES_USED"]; used != "" {
+			p.machine.UpdateGold("RESOURCES_USED", parseInt(used))
+		}
 	} else if isReal && p.localPlayerID != 0 && e.PlayerID != p.localPlayerID {
 		// Second real player in Duos — check if this is the partner.
 		if p.isDuos && e.PlayerID == p.partnerPlayerID {
@@ -298,16 +308,12 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 			} else if p.isPartnerHero(e, controllerID) {
 				p.machine.UpdatePartnerTag(tag, value)
 			} else if e.EntityID > 0 && controllerID == p.localPlayerID {
-				p.updateMinionStat(e, "HEALTH", value, false)
-			} else if e.EntityID > 0 && p.isDuos && controllerID == p.partnerPlayerID {
-				p.updateMinionStat(e, "HEALTH", value, true)
+				p.updateMinionStat(e, "HEALTH", value)
 			}
 
 		case "ATK":
 			if e.EntityID > 0 && controllerID == p.localPlayerID {
-				p.updateMinionStat(e, "ATK", value, false)
-			} else if e.EntityID > 0 && p.isDuos && controllerID == p.partnerPlayerID {
-				p.updateMinionStat(e, "ATK", value, true)
+				p.updateMinionStat(e, "ATK", value)
 			}
 
 		case "PROPOSED_ATTACKER":
@@ -360,6 +366,11 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 				if tier > 0 {
 					p.machine.SetTavernTier(tier)
 				}
+			} else if p.isPartnerHero(e, controllerID) || p.isPartnerPlayerEntity(e) {
+				tier, _ := strconv.Atoi(value)
+				if tier > 0 {
+					p.machine.UpdatePartnerTag(tag, value)
+				}
 			}
 
 		case "PLAYER_TRIPLES":
@@ -375,8 +386,6 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 			// These fire on the player entity (not hero), so use isLocalPlayerEntity.
 			if p.isLocalPlayerEntity(e) {
 				p.machine.UpdateGold(tag, parseInt(value))
-			} else if p.isPartnerPlayerEntity(e) {
-				p.machine.UpdatePartnerGold(tag, parseInt(value))
 			}
 
 		case "PLAYER_LEADERBOARD_PLACE":
@@ -406,9 +415,6 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 				// REMOVEDFROMGAME, SETASIDE, HAND, DECK, etc.). This catches
 				// sold minions (PLAY->HAND) that were previously missed.
 				p.machine.RemoveMinion(e.EntityID)
-				if p.isDuos {
-					p.machine.RemovePartnerMinion(e.EntityID)
-				}
 				p.machine.RemoveEnchantmentsForEntity(e.EntityID)
 			}
 
@@ -436,11 +442,7 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 					// Reset Overconfidence count at turn boundary.
 					if p.localBuffs.overconfidenceCount > 0 {
 						p.localBuffs.overconfidenceCount = 0
-						p.updateGoldNextTurnCounter(false)
-					}
-					if p.isDuos && p.partnerBuffs.overconfidenceCount > 0 {
-						p.partnerBuffs.overconfidenceCount = 0
-						p.updateGoldNextTurnCounter(true)
+						p.updateGoldNextTurnCounter()
 					}
 
 					p.machine.SetTurn(turn)
@@ -505,9 +507,7 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 			"BACON_ELEMENTAL_BUFFATKVALUE", "BACON_ELEMENTAL_BUFFHEALTHVALUE",
 			"TAVERN_SPELL_ATTACK_INCREASE", "TAVERN_SPELL_HEALTH_INCREASE":
 			if p.isLocalPlayerEntity(e) || p.isLocalHero(e, controllerID) {
-				p.updateBuffSourceFromPlayerTag(tag, value, false)
-			} else if p.isPartnerPlayerEntity(e) || p.isPartnerHero(e, controllerID) {
-				p.updateBuffSourceFromPlayerTag(tag, value, true)
+				p.updateBuffSourceFromPlayerTag(tag, value)
 			}
 
 		case "BACON_FREE_REFRESH_COUNT":
@@ -515,11 +515,6 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 				raw, _ := strconv.Atoi(value)
 				if raw > 0 {
 					p.machine.SetAbilityCounter(CatFreeRefresh, raw, fmt.Sprintf("%d", raw))
-				}
-			} else if p.isPartnerPlayerEntity(e) || p.isPartnerHero(e, controllerID) {
-				raw, _ := strconv.Atoi(value)
-				if raw > 0 {
-					p.machine.SetPartnerAbilityCounter(CatFreeRefresh, raw, fmt.Sprintf("%d", raw))
 				}
 			}
 
@@ -530,23 +525,17 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 					raw = 0
 				}
 				p.localBuffs.goldNextTurnSure = raw
-				p.updateGoldNextTurnCounter(false)
-			} else if p.isPartnerPlayerEntity(e) || p.isPartnerHero(e, controllerID) {
-				raw, _ := strconv.Atoi(value)
-				if raw < 0 {
-					raw = 0
-				}
-				p.partnerBuffs.goldNextTurnSure = raw
-				p.updateGoldNextTurnCounter(true)
+				p.updateGoldNextTurnCounter()
 			}
 
 		case "TAG_SCRIPT_DATA_NUM_1", "TAG_SCRIPT_DATA_NUM_2":
 			if e.EntityID > 0 {
 				p.updateEnchantmentScriptData(e.EntityID, tag, value)
-				// Determine which player's buffs to update based on controller.
+				// Only process enchantments controlled by local player.
 				ctrl := p.entityController[e.EntityID]
-				isPartner := p.isDuos && ctrl == p.partnerPlayerID
-				p.handleDntTagChange(e.EntityID, tag, parseInt(value), isPartner)
+				if ctrl == p.localPlayerID {
+					p.handleDntTagChange(e.EntityID, tag, parseInt(value))
+				}
 			}
 
 		case "3809":
@@ -563,17 +552,6 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 					p.machine.SetAbilityCounter(CatNagaSpells, raw, display)
 				} else {
 					p.machine.RemoveAbilityCounter(CatNagaSpells)
-				}
-			} else if p.isPartnerPlayerEntity(e) || p.isPartnerHero(e, controllerID) {
-				raw, _ := strconv.Atoi(value)
-				snap := p.machine.State()
-				if HasNagaSynergyMinion(snap.PartnerBoard) {
-					stacks := 1 + (raw / 4)
-					progress := raw % 4
-					display := fmt.Sprintf("Tier %d · %d/4", stacks, progress)
-					p.machine.SetPartnerAbilityCounter(CatNagaSpells, raw, display)
-				} else {
-					p.machine.RemovePartnerAbilityCounter(CatNagaSpells)
 				}
 			}
 
@@ -711,15 +689,64 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 		if hp, ok := e.Tags["HEALTH"]; ok {
 			p.machine.UpdatePlayerTag("HEALTH", hp)
 		}
+		if dmg, ok := e.Tags["DAMAGE"]; ok {
+			p.machine.UpdatePlayerTag("DAMAGE", dmg)
+		}
 		if armor, ok := e.Tags["ARMOR"]; ok {
 			p.machine.UpdatePlayerTag("ARMOR", armor)
+		}
+		if tier, ok := e.Tags["PLAYER_TECH_LEVEL"]; ok {
+			if t, _ := strconv.Atoi(tier); t > 0 {
+				p.machine.SetTavernTier(t)
+			}
+		}
+		if triples, ok := e.Tags["PLAYER_TRIPLES"]; ok {
+			p.machine.UpdatePlayerTag("PLAYER_TRIPLES", triples)
 		}
 		if e.CardID != "" && !strings.HasPrefix(e.CardID, "TB_BaconShop_HERO_PH") {
 			p.machine.UpdateHeroCardID(e.CardID)
 		}
 		return
 	}
-	// Partner hero entity.
+	// Partner hero entity — identified by PLAYER_ID tag matching partner.
+	// In BG Duos, the partner hero has CONTROLLER=<botID> but PLAYER_ID=<partnerPlayerID>.
+	if cardType == "HERO" && p.isDuos && p.partnerPlayerID > 0 {
+		if pidStr, ok := e.Tags["PLAYER_ID"]; ok {
+			pid, _ := strconv.Atoi(pidStr)
+			if pid == p.partnerPlayerID {
+				if p.partnerHeroID == 0 || e.EntityID == p.partnerHeroID {
+					p.partnerHeroID = e.EntityID
+					p.heroEntities[e.EntityID] = true
+					slog.Info("partner hero identified via PLAYER_ID tag",
+						"entityID", e.EntityID, "cardID", e.CardID, "playerID", pid)
+					if hp, ok := e.Tags["HEALTH"]; ok {
+						p.machine.UpdatePartnerTag("HEALTH", hp)
+					}
+					if dmg, ok := e.Tags["DAMAGE"]; ok {
+						p.machine.UpdatePartnerTag("DAMAGE", dmg)
+					}
+					if armor, ok := e.Tags["ARMOR"]; ok {
+						p.machine.UpdatePartnerTag("ARMOR", armor)
+					}
+					if tier, ok := e.Tags["PLAYER_TECH_LEVEL"]; ok {
+						p.machine.UpdatePartnerTag("PLAYER_TECH_LEVEL", tier)
+					}
+					if triples, ok := e.Tags["PLAYER_TRIPLES"]; ok {
+						p.machine.UpdatePartnerTag("PLAYER_TRIPLES", triples)
+					}
+					if e.CardID != "" && !strings.HasPrefix(e.CardID, "TB_BaconShop_HERO_PH") {
+						p.machine.UpdatePartnerHeroCardID(e.CardID)
+					}
+					if e.EntityName != "" && p.partnerPlayerName == "" {
+						p.partnerPlayerName = cleanEntityName(e.EntityName)
+						p.machine.UpdatePartnerName(p.partnerPlayerName)
+					}
+					return
+				}
+			}
+		}
+	}
+	// Partner hero entity — fallback via controller match.
 	if cardType == "HERO" && p.isDuos && controllerID == p.partnerPlayerID {
 		if p.partnerHeroID > 0 && e.EntityID != p.partnerHeroID {
 			return
@@ -727,8 +754,17 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 		if hp, ok := e.Tags["HEALTH"]; ok {
 			p.machine.UpdatePartnerTag("HEALTH", hp)
 		}
+		if dmg, ok := e.Tags["DAMAGE"]; ok {
+			p.machine.UpdatePartnerTag("DAMAGE", dmg)
+		}
 		if armor, ok := e.Tags["ARMOR"]; ok {
 			p.machine.UpdatePartnerTag("ARMOR", armor)
+		}
+		if tier, ok := e.Tags["PLAYER_TECH_LEVEL"]; ok {
+			p.machine.UpdatePartnerTag("PLAYER_TECH_LEVEL", tier)
+		}
+		if triples, ok := e.Tags["PLAYER_TRIPLES"]; ok {
+			p.machine.UpdatePartnerTag("PLAYER_TRIPLES", triples)
 		}
 		if e.CardID != "" && !strings.HasPrefix(e.CardID, "TB_BaconShop_HERO_PH") {
 			p.machine.UpdatePartnerHeroCardID(e.CardID)
@@ -766,8 +802,6 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 	}
 	if controllerID == p.localPlayerID {
 		p.machine.UpsertMinion(mn)
-	} else if p.isDuos && controllerID == p.partnerPlayerID {
-		p.machine.UpsertPartnerMinion(mn)
 	}
 }
 
@@ -828,11 +862,16 @@ func (p *Processor) isPartnerPlayerEntity(e parser.GameEvent) bool {
 
 // isPartnerHero checks whether the entity is the partner's hero card.
 func (p *Processor) isPartnerHero(e parser.GameEvent, controllerID int) bool {
-	if !p.isDuos || e.EntityID <= 0 || controllerID != p.partnerPlayerID {
+	if !p.isDuos || e.EntityID <= 0 {
 		return false
 	}
-	if p.partnerHeroID > 0 {
-		return e.EntityID == p.partnerHeroID
+	// Direct entity ID match — set during handleEntityUpdate via PLAYER_ID tag.
+	if p.partnerHeroID > 0 && e.EntityID == p.partnerHeroID {
+		return true
+	}
+	// Fallback: controller-based match.
+	if controllerID != p.partnerPlayerID {
+		return false
 	}
 	return p.heroEntities[e.EntityID]
 }
@@ -856,7 +895,7 @@ func (p *Processor) isLocalHero(e parser.GameEvent, controllerID int) bool {
 
 // updateMinionStat updates a minion's stat on the board and in the entity
 // registry. During recruit phase, buffers the delta for board-wide detection.
-func (p *Processor) updateMinionStat(e parser.GameEvent, stat, value string, isPartner bool) {
+func (p *Processor) updateMinionStat(e parser.GameEvent, stat, value string) {
 	newVal := parseInt(value)
 	if e.EntityID <= 0 {
 		return
@@ -891,12 +930,7 @@ func (p *Processor) updateMinionStat(e parser.GameEvent, stat, value string, isP
 	}
 
 	// Update board minion stats if it's on the board.
-	var onBoard bool
-	if isPartner {
-		onBoard = p.machine.UpdatePartnerMinionStat(e.EntityID, stat, newVal)
-	} else {
-		onBoard = p.machine.UpdateMinionStat(e.EntityID, stat, newVal)
-	}
+	onBoard := p.machine.UpdateMinionStat(e.EntityID, stat, newVal)
 
 	// Buffer stat changes during recruit phase for board-wide buff detection.
 	// Skip during combat (simulation noise).
@@ -955,11 +989,9 @@ func (p *Processor) flushPendingStatChanges() {
 }
 
 // tryAddMinionFromRegistry adds a minion to the board from the entity registry
-// if it's a local or partner player's minion with valid stats.
+// if it's a local player's minion with valid stats.
 func (p *Processor) tryAddMinionFromRegistry(entityID, controllerID int) {
-	isLocal := controllerID == p.localPlayerID
-	isPartner := p.isDuos && controllerID == p.partnerPlayerID
-	if !isLocal && !isPartner {
+	if controllerID != p.localPlayerID {
 		return
 	}
 	info := p.entityProps[entityID]
@@ -982,16 +1014,9 @@ func (p *Processor) tryAddMinionFromRegistry(entityID, controllerID int) {
 	if mn.Name == "" && mn.CardID != "" {
 		mn.Name = CardName(mn.CardID)
 	}
-	if isPartner {
-		p.machine.UpsertPartnerMinion(mn)
-		if p.machine.Phase() == PhaseRecruit {
-			p.machine.UpdatePartnerBoardSnapshot()
-		}
-	} else {
-		p.machine.UpsertMinion(mn)
-		if p.machine.Phase() == PhaseRecruit {
-			p.machine.UpdateBoardSnapshot()
-		}
+	p.machine.UpsertMinion(mn)
+	if p.machine.Phase() == PhaseRecruit {
+		p.machine.UpdateBoardSnapshot()
 	}
 }
 
@@ -1051,16 +1076,14 @@ func (p *Processor) handleEnchantmentEntity(e parser.GameEvent, info *entityInfo
 		hpBuff = info.ScriptData1 // Nomi Sticker uses NUM_1 for both
 	}
 
-	// Check if the target is a local or partner board minion.
+	// Check if the target is a local player's board minion.
 	targetCtrl := p.entityController[info.AttachedTo]
 	enchCtrl := p.entityController[e.EntityID]
 	isLocalMinion := targetCtrl == p.localPlayerID
-	isPartnerMinion := p.isDuos && targetCtrl == p.partnerPlayerID
 
-	if !isLocalMinion && !isPartnerMinion {
+	if !isLocalMinion {
 		isLocalEnch := enchCtrl == p.localPlayerID
-		isPartnerEnch := p.isDuos && enchCtrl == p.partnerPlayerID
-		if !isLocalEnch && !isPartnerEnch {
+		if !isLocalEnch {
 			return
 		}
 		if category == CatGeneral {
@@ -1081,27 +1104,28 @@ func (p *Processor) handleEnchantmentEntity(e parser.GameEvent, info *entityInfo
 	p.machine.AddEnchantment(ench)
 
 	// Process initial SD values from FULL_ENTITY/SHOW_ENTITY as counter updates.
-	isPartner := isPartnerMinion || (p.isDuos && enchCtrl == p.partnerPlayerID)
 	if info.ScriptData1 != 0 || info.ScriptData2 != 0 {
-		if info.ScriptData1 != 0 {
-			p.handleDntTagChange(e.EntityID, "TAG_SCRIPT_DATA_NUM_1", info.ScriptData1, isPartner)
-		}
-		if info.ScriptData2 != 0 {
-			p.handleDntTagChange(e.EntityID, "TAG_SCRIPT_DATA_NUM_2", info.ScriptData2, isPartner)
+		if enchCtrl == p.localPlayerID {
+			if info.ScriptData1 != 0 {
+				p.handleDntTagChange(e.EntityID, "TAG_SCRIPT_DATA_NUM_1", info.ScriptData1)
+			}
+			if info.ScriptData2 != 0 {
+				p.handleDntTagChange(e.EntityID, "TAG_SCRIPT_DATA_NUM_2", info.ScriptData2)
+			}
 		}
 	}
 }
 
 // handleDntTagChange dispatches TAG_SCRIPT_DATA changes on Dnt enchantment
 // entities to the appropriate HDT-style counter handler.
-func (p *Processor) handleDntTagChange(entityID int, tag string, value int, isPartner bool) {
+func (p *Processor) handleDntTagChange(entityID int, tag string, value int) {
 	info := p.entityProps[entityID]
 	if info == nil {
 		return
 	}
-	// Only process enchantments controlled by local player or partner.
+	// Only process enchantments controlled by local player.
 	ctrl := p.entityController[entityID]
-	if ctrl != p.localPlayerID && !(p.isDuos && ctrl == p.partnerPlayerID) {
+	if ctrl != p.localPlayerID {
 		return
 	}
 
@@ -1110,31 +1134,27 @@ func (p *Processor) handleDntTagChange(entityID int, tag string, value int, isPa
 
 	switch cardID {
 	case "BG_ShopBuff":
-		p.handleGenericShopBuffDnt(entityID, isSD1, value, CatShopBuff, isPartner)
+		p.handleGenericShopBuffDnt(entityID, isSD1, value, CatShopBuff)
 	case "BG_ShopBuff_Elemental":
-		p.handleShopBuffDnt(entityID, isSD1, value, isPartner)
+		p.handleShopBuffDnt(entityID, isSD1, value)
 	case "BG30_MagicItem_544pe":
-		p.handleNomiStickerDnt(entityID, isSD1, value, isPartner)
+		p.handleNomiStickerDnt(entityID, isSD1, value)
 	case "BG34_855pe":
-		p.handleNomiAllDnt(entityID, isSD1, value, isPartner)
+		p.handleNomiAllDnt(entityID, isSD1, value)
 	case "BG31_808pe":
-		p.handleAbsoluteDnt(CatBeetle, isSD1, value, 1, 1, isPartner)
+		p.handleAbsoluteDnt(CatBeetle, isSD1, value, 1, 1)
 	case "BG34_854pe":
-		p.handleAbsoluteDnt(CatRightmost, isSD1, value, 0, 0, isPartner)
+		p.handleAbsoluteDnt(CatRightmost, isSD1, value, 0, 0)
 	case "BG34_402pe":
-		p.handleAbsoluteDnt(CatWhelp, isSD1, value, 0, 0, isPartner)
+		p.handleAbsoluteDnt(CatWhelp, isSD1, value, 0, 0)
 	case "BG25_011pe":
 		if isSD1 {
-			if isPartner {
-				p.machine.SetPartnerBuffSource(CatUndead, value, 0)
-			} else {
-				p.machine.SetBuffSource(CatUndead, value, 0)
-			}
+			p.machine.SetBuffSource(CatUndead, value, 0)
 		}
 	case "BG34_170e":
-		p.handleAbsoluteDnt(CatVolumizer, isSD1, value, 0, 0, isPartner)
+		p.handleAbsoluteDnt(CatVolumizer, isSD1, value, 0, 0)
 	case "BG34_689e2":
-		p.handleAbsoluteDnt(CatBloodgemBarrage, isSD1, value, 0, 0, isPartner)
+		p.handleAbsoluteDnt(CatBloodgemBarrage, isSD1, value, 0, 0)
 	default:
 		if cardID != "" && value != 0 {
 			slog.Debug("untracked Dnt enchantment", "cardID", cardID, "tag", tag, "value", value, "entityID", entityID)
@@ -1143,11 +1163,8 @@ func (p *Processor) handleDntTagChange(entityID int, tag string, value int, isPa
 }
 
 // handleAbsoluteDnt sets a buff source from an absolute Dnt value plus base offset.
-func (p *Processor) handleAbsoluteDnt(category string, isSD1 bool, value, baseAtk, baseHp int, isPartner bool) {
+func (p *Processor) handleAbsoluteDnt(category string, isSD1 bool, value, baseAtk, baseHp int) {
 	bt := &p.localBuffs
-	if isPartner {
-		bt = &p.partnerBuffs
-	}
 	state := bt.buffSourceState[category]
 	if isSD1 {
 		state[0] = baseAtk + value
@@ -1155,20 +1172,13 @@ func (p *Processor) handleAbsoluteDnt(category string, isSD1 bool, value, baseAt
 		state[1] = baseHp + value
 	}
 	bt.buffSourceState[category] = state
-	if isPartner {
-		p.machine.SetPartnerBuffSource(category, state[0], state[1])
-	} else {
-		p.machine.SetBuffSource(category, state[0], state[1])
-	}
+	p.machine.SetBuffSource(category, state[0], state[1])
 }
 
 // handleGenericShopBuffDnt handles a generic shop-buff DNT enchantment with differential
 // accumulation, updating the given buff category.
-func (p *Processor) handleGenericShopBuffDnt(entityID int, isSD1 bool, value int, category string, isPartner bool) {
+func (p *Processor) handleGenericShopBuffDnt(entityID int, isSD1 bool, value int, category string) {
 	bt := &p.localBuffs
-	if isPartner {
-		bt = &p.partnerBuffs
-	}
 	prev := bt.shopBuffPrev[entityID]
 	var delta int
 	if isSD1 {
@@ -1187,19 +1197,12 @@ func (p *Processor) handleGenericShopBuffDnt(entityID int, isSD1 bool, value int
 		state[1] += delta
 	}
 	bt.buffSourceState[category] = state
-	if isPartner {
-		p.machine.SetPartnerBuffSource(category, state[0], state[1])
-	} else {
-		p.machine.SetBuffSource(category, state[0], state[1])
-	}
+	p.machine.SetBuffSource(category, state[0], state[1])
 }
 
 // handleShopBuffDnt handles BG_ShopBuff_Elemental with differential accumulation.
-func (p *Processor) handleShopBuffDnt(entityID int, isSD1 bool, value int, isPartner bool) {
+func (p *Processor) handleShopBuffDnt(entityID int, isSD1 bool, value int) {
 	bt := &p.localBuffs
-	if isPartner {
-		bt = &p.partnerBuffs
-	}
 	prev := bt.shopBuffPrev[entityID]
 	var delta int
 	if isSD1 {
@@ -1216,20 +1219,13 @@ func (p *Processor) handleShopBuffDnt(entityID int, isSD1 bool, value int, isPar
 	} else {
 		bt.nomiCounter[1] += delta
 	}
-	if isPartner {
-		p.machine.SetPartnerBuffSource(CatNomi, bt.nomiCounter[0], bt.nomiCounter[1])
-	} else {
-		p.machine.SetBuffSource(CatNomi, bt.nomiCounter[0], bt.nomiCounter[1])
-	}
+	p.machine.SetBuffSource(CatNomi, bt.nomiCounter[0], bt.nomiCounter[1])
 }
 
 // handleNomiAllDnt handles BG34_855pe (Timewarped Nomi / Kitchen Dream) with differential
 // accumulation. Same pattern as regular Nomi but tracked under CatNomiAll.
-func (p *Processor) handleNomiAllDnt(entityID int, isSD1 bool, value int, isPartner bool) {
+func (p *Processor) handleNomiAllDnt(entityID int, isSD1 bool, value int) {
 	bt := &p.localBuffs
-	if isPartner {
-		bt = &p.partnerBuffs
-	}
 	prev := bt.shopBuffPrev[entityID]
 	var delta int
 	if isSD1 {
@@ -1246,19 +1242,12 @@ func (p *Processor) handleNomiAllDnt(entityID int, isSD1 bool, value int, isPart
 	} else {
 		bt.nomiAllCounter[1] += delta
 	}
-	if isPartner {
-		p.machine.SetPartnerBuffSource(CatNomiAll, bt.nomiAllCounter[0], bt.nomiAllCounter[1])
-	} else {
-		p.machine.SetBuffSource(CatNomiAll, bt.nomiAllCounter[0], bt.nomiAllCounter[1])
-	}
+	p.machine.SetBuffSource(CatNomiAll, bt.nomiAllCounter[0], bt.nomiAllCounter[1])
 }
 
 // handleNomiStickerDnt handles BG30_MagicItem_544pe where SD1 applies to BOTH atk and hp.
-func (p *Processor) handleNomiStickerDnt(entityID int, isSD1 bool, value int, isPartner bool) {
+func (p *Processor) handleNomiStickerDnt(entityID int, isSD1 bool, value int) {
 	bt := &p.localBuffs
-	if isPartner {
-		bt = &p.partnerBuffs
-	}
 	prev := bt.shopBuffPrev[entityID]
 	if isSD1 {
 		delta := value - prev[0]
@@ -1270,16 +1259,12 @@ func (p *Processor) handleNomiStickerDnt(entityID int, isSD1 bool, value int, is
 		prev[1] = value
 		bt.shopBuffPrev[entityID] = prev
 	}
-	if isPartner {
-		p.machine.SetPartnerBuffSource(CatNomi, bt.nomiCounter[0], bt.nomiCounter[1])
-	} else {
-		p.machine.SetBuffSource(CatNomi, bt.nomiCounter[0], bt.nomiCounter[1])
-	}
+	p.machine.SetBuffSource(CatNomi, bt.nomiCounter[0], bt.nomiCounter[1])
 }
 
 // updateBuffSourceFromPlayerTag handles player-level buff tags like
 // BACON_BLOODGEMBUFFATKVALUE, TAVERN_SPELL_ATTACK_INCREASE, etc.
-func (p *Processor) updateBuffSourceFromPlayerTag(tag, value string, isPartner bool) {
+func (p *Processor) updateBuffSourceFromPlayerTag(tag, value string) {
 	category, isATK, ok := ClassifyPlayerTag(tag)
 	if !ok {
 		return
@@ -1299,9 +1284,6 @@ func (p *Processor) updateBuffSourceFromPlayerTag(tag, value string, isPartner b
 	}
 
 	bt := &p.localBuffs
-	if isPartner {
-		bt = &p.partnerBuffs
-	}
 	state := bt.buffSourceState[category]
 	if isATK {
 		state[0] = computedVal
@@ -1309,12 +1291,7 @@ func (p *Processor) updateBuffSourceFromPlayerTag(tag, value string, isPartner b
 		state[1] = computedVal
 	}
 	bt.buffSourceState[category] = state
-
-	if isPartner {
-		p.machine.SetPartnerBuffSource(category, state[0], state[1])
-	} else {
-		p.machine.SetBuffSource(category, state[0], state[1])
-	}
+	p.machine.SetBuffSource(category, state[0], state[1])
 }
 
 // updateEnchantmentScriptData handles TAG_CHANGE for TAG_SCRIPT_DATA_NUM_1/2
@@ -1424,29 +1401,26 @@ func (p *Processor) handleOverconfidenceZone(cardID, newZone, prevZone string, c
 	if cardID != overconfidenceCardID {
 		return
 	}
-	isPartner := p.isDuos && controllerID == p.partnerPlayerID
-	bt := &p.localBuffs
-	if isPartner {
-		bt = &p.partnerBuffs
+	// Only track overconfidence for the local player.
+	if controllerID != p.localPlayerID {
+		return
 	}
+	bt := &p.localBuffs
 	if newZone == "PLAY" && prevZone != "PLAY" {
 		bt.overconfidenceCount++
-		p.updateGoldNextTurnCounter(isPartner)
+		p.updateGoldNextTurnCounter()
 	} else if newZone != "PLAY" && prevZone == "PLAY" {
 		bt.overconfidenceCount--
 		if bt.overconfidenceCount < 0 {
 			bt.overconfidenceCount = 0
 		}
-		p.updateGoldNextTurnCounter(isPartner)
+		p.updateGoldNextTurnCounter()
 	}
 }
 
 // updateGoldNextTurnCounter updates the GoldNextTurn ability counter display.
-func (p *Processor) updateGoldNextTurnCounter(isPartner bool) {
+func (p *Processor) updateGoldNextTurnCounter() {
 	bt := &p.localBuffs
-	if isPartner {
-		bt = &p.partnerBuffs
-	}
 	sure := bt.goldNextTurnSure
 	bonus := bt.overconfidenceCount * 3
 	if sure == 0 && bt.overconfidenceCount == 0 {
@@ -1458,11 +1432,7 @@ func (p *Processor) updateGoldNextTurnCounter(isPartner bool) {
 	} else {
 		display = fmt.Sprintf("%d", sure)
 	}
-	if isPartner {
-		p.machine.SetPartnerAbilityCounter(CatGoldNextTurn, sure, display)
-	} else {
-		p.machine.SetAbilityCounter(CatGoldNextTurn, sure, display)
-	}
+	p.machine.SetAbilityCounter(CatGoldNextTurn, sure, display)
 }
 
 // extractCardID extracts the cardId from bracketed entity notation.

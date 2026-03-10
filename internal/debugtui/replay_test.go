@@ -116,9 +116,9 @@ func TestDump_Golden(t *testing.T) {
 		turn        int
 		description string
 	}{
-		{1, "first-turn"},
-		{5, "mid-game"},
-		{0, "last-turn"}, // turn=0 → jump to last step
+		{8, "first-turn"},  // earliest available turn in this log (reconnect mid-game at turn 8)
+		{10, "mid-game"},   // middle of the available turns (8–12)
+		{0, "last-turn"},   // turn=0 → jump to last step
 	}
 
 	for _, tc := range cases {
