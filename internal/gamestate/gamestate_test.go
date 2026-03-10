@@ -1761,3 +1761,198 @@ func TestBoardSnapshotPhaseGate(t *testing.T) {
 		t.Errorf("restored board has wrong entity: got %d, want 200", restoredBoard[0].EntityID)
 	}
 }
+
+// ── Duos detection and partner tracking tests ────────────────────────────────
+
+// setupDuosGame sends a game start sequence with Duos tags to identify both
+// local and partner players.
+func setupDuosGame(p *Processor) {
+	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+	// Local player: hi≠0, with BACON_DUO_TEAMMATE_PLAYER_ID
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventPlayerDef,
+		EntityID: 20,
+		PlayerID: 7,
+		Tags: map[string]string{
+			"hi":                              "144115193835963207",
+			"lo":                              "30722021",
+			"PLAYER_ID":                       "7",
+			"BACON_DUO_TEAMMATE_PLAYER_ID":    "8",
+		},
+	})
+	// Partner player: hi≠0, PlayerID matches BACON_DUO_TEAMMATE_PLAYER_ID
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventPlayerDef,
+		EntityID: 21,
+		PlayerID: 8,
+		Tags: map[string]string{
+			"hi":        "144115193835963208",
+			"lo":        "30722022",
+			"PLAYER_ID": "8",
+		},
+	})
+	// Dummy players: hi=0
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventPlayerDef,
+		EntityID: 22,
+		PlayerID: 15,
+		Tags:     map[string]string{"hi": "0", "lo": "0", "PLAYER_ID": "15"},
+	})
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventPlayerDef,
+		EntityID: 23,
+		PlayerID: 16,
+		Tags:     map[string]string{"hi": "0", "lo": "0", "PLAYER_ID": "16"},
+	})
+	// Player names
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventPlayerName,
+		PlayerID:   7,
+		EntityName: "LocalPlayer#1234",
+	})
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventPlayerName,
+		PlayerID:   8,
+		EntityName: "PartnerPlayer#5678",
+	})
+}
+
+func TestDuosDetection(t *testing.T) {
+	m, p := newProc()
+	setupDuosGame(p)
+
+	s := m.State()
+	if !s.IsDuos {
+		t.Error("expected IsDuos=true")
+	}
+	if s.Partner == nil {
+		t.Fatal("expected Partner != nil")
+	}
+	if s.Partner.Name != "PartnerPlayer#5678" {
+		t.Errorf("expected partner name PartnerPlayer#5678, got %q", s.Partner.Name)
+	}
+	if p.partnerPlayerID != 8 {
+		t.Errorf("expected partnerPlayerID=8, got %d", p.partnerPlayerID)
+	}
+}
+
+func TestSoloGameNoDuos(t *testing.T) {
+	m, p := newProc()
+	setupGame(p) // standard solo setup
+
+	s := m.State()
+	if s.IsDuos {
+		t.Error("expected IsDuos=false for solo game")
+	}
+	if s.Partner != nil {
+		t.Error("expected Partner=nil for solo game")
+	}
+}
+
+func TestDuosPartnerHealthTracking(t *testing.T) {
+	m, p := newProc()
+	setupDuosGame(p)
+
+	// Assign partner hero entity (same as real Power.log).
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventTagChange,
+		PlayerID:   8,
+		EntityName: "PartnerPlayer#5678",
+		Tags:       map[string]string{"HERO_ENTITY": "100"},
+	})
+
+	// Register entity 100 as a hero entity owned by partner.
+	p.entityController[100] = 8
+	p.heroEntities[100] = true
+
+	// HEALTH and DAMAGE arrive on the hero entity.
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventTagChange,
+		EntityID: 100,
+		Tags:     map[string]string{"HEALTH": "30"},
+	})
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventTagChange,
+		EntityID: 100,
+		Tags:     map[string]string{"DAMAGE": "5"},
+	})
+
+	s := m.State()
+	if s.Partner.Health != 30 {
+		t.Errorf("expected partner health 30, got %d", s.Partner.Health)
+	}
+	if s.Partner.Damage != 5 {
+		t.Errorf("expected partner damage 5, got %d", s.Partner.Damage)
+	}
+}
+
+func TestDuosPartnerBoardTracking(t *testing.T) {
+	m, p := newProc()
+	setupDuosGame(p)
+
+	// Enter recruit phase.
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTurnStart,
+		Tags: map[string]string{"TURN": "1"},
+	})
+
+	// Register a partner minion in the entity registry.
+	p.entityController[300] = 8
+	p.entityProps[300] = &entityInfo{
+		Name:     "PartnerMinion",
+		CardID:   "BG_TestMinion",
+		CardType: "MINION",
+		Zone:     "PLAY",
+		Attack:   3,
+		Health:   4,
+	}
+
+	// Trigger zone transition to PLAY for partner minion.
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventTagChange,
+		EntityID: 300,
+		Tags:     map[string]string{"ZONE": "PLAY"},
+	})
+
+	s := m.State()
+	if len(s.PartnerBoard) != 1 {
+		t.Fatalf("expected 1 partner minion, got %d", len(s.PartnerBoard))
+	}
+	if s.PartnerBoard[0].Attack != 3 || s.PartnerBoard[0].Health != 4 {
+		t.Errorf("expected partner minion 3/4, got %d/%d", s.PartnerBoard[0].Attack, s.PartnerBoard[0].Health)
+	}
+}
+
+func TestDuosPartnerBuffSources(t *testing.T) {
+	m, p := newProc()
+	setupDuosGame(p)
+
+	// Set partner blood gem stats via player entity tags.
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventTagChange,
+		PlayerID:   8,
+		EntityName: "PartnerPlayer#5678",
+		Tags:       map[string]string{"BACON_BLOODGEMBUFFATKVALUE": "3"},
+	})
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventTagChange,
+		PlayerID:   8,
+		EntityName: "PartnerPlayer#5678",
+		Tags:       map[string]string{"BACON_BLOODGEMBUFFHEALTHVALUE": "2"},
+	})
+
+	s := m.State()
+	found := false
+	for _, bs := range s.PartnerBuffSources {
+		if bs.Category == CatBloodgem {
+			found = true
+			// ComputeBloodgemValue adds 1: raw 3 → 4, raw 2 → 3.
+			if bs.Attack != 4 || bs.Health != 3 {
+				t.Errorf("expected BloodGem +4/+3, got +%d/+%d", bs.Attack, bs.Health)
+			}
+		}
+	}
+	if !found {
+		t.Error("expected BloodGem partner buff source")
+	}
+}

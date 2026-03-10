@@ -91,3 +91,35 @@ func TestComputeAllLosses(t *testing.T) {
 		t.Errorf("expected 4 losses, got %d", s.Losses)
 	}
 }
+
+func TestComputeDuosWinLoss(t *testing.T) {
+	// In Duos, placements are 1-4. Top 2 = win, bottom 2 = loss.
+	results := []GameResult{
+		{Placement: 1, IsDuos: true},
+		{Placement: 2, IsDuos: true},
+		{Placement: 3, IsDuos: true},
+		{Placement: 4, IsDuos: true},
+	}
+	s := Compute(results)
+	if s.Wins != 2 {
+		t.Errorf("Duos wins: expected 2, got %d", s.Wins)
+	}
+	if s.Losses != 2 {
+		t.Errorf("Duos losses: expected 2, got %d", s.Losses)
+	}
+}
+
+func TestComputeMixedSoloDuos(t *testing.T) {
+	results := []GameResult{
+		{Placement: 4, IsDuos: false}, // solo: top 4 = win
+		{Placement: 4, IsDuos: true},  // duos: placement 4 = loss (threshold is 2)
+		{Placement: 2, IsDuos: true},  // duos: placement 2 = win
+	}
+	s := Compute(results)
+	if s.Wins != 2 {
+		t.Errorf("expected 2 wins, got %d", s.Wins)
+	}
+	if s.Losses != 1 {
+		t.Errorf("expected 1 loss, got %d", s.Losses)
+	}
+}

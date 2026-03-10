@@ -96,6 +96,7 @@ func (s *Store) GetAggregate() (stats.AggregateStats, error) {
 		results[i] = stats.GameResult{
 			Placement: m.Placement,
 			EndTime:   time.Unix(m.EndTime, 0),
+			IsDuos:    m.IsDuos,
 		}
 	}
 	return stats.Compute(results), nil

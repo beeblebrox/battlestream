@@ -19,6 +19,7 @@ type AggregateStats struct {
 type GameResult struct {
 	Placement int
 	EndTime   time.Time
+	IsDuos    bool
 }
 
 // Compute calculates AggregateStats from a slice of game results.
@@ -36,7 +37,13 @@ func Compute(results []GameResult) AggregateStats {
 	totalPlacement := 0
 	for _, r := range results {
 		totalPlacement += r.Placement
-		if r.Placement <= 4 {
+		// Duos: 1-4 placements, top 2 is a win.
+		// Solo: 1-8 placements, top 4 is a win.
+		winThreshold := 4
+		if r.IsDuos {
+			winThreshold = 2
+		}
+		if r.Placement <= winThreshold {
 			stats.Wins++
 		} else {
 			stats.Losses++
