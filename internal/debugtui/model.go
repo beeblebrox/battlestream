@@ -740,20 +740,6 @@ func (m *Model) viewStep() string {
 	header := m.renderHeader(step, innerW)
 	m.row2StartY = lipgloss.Height(header)
 
-	// Height budget for variable-height panels.
-	// Reserve: header (measured), event (~3), raw log minimum (5), help (1), padding (2).
-	headerH := lipgloss.Height(header)
-	reserved := headerH + 3 + 5 + 1 + 2
-	available := m.height - reserved
-	if available < 8 {
-		available = 8
-	}
-	// row2 and row3 share available space equally; subtract 2 for border per panel.
-	maxContentH := available/2 - 2
-	if maxContentH < 3 {
-		maxContentH = 3
-	}
-
 	halfW := innerW/2 - 2
 	m.halfWBound = halfW + 2 // halfW + left border char
 
@@ -766,11 +752,32 @@ func (m *Model) viewStep() string {
 	m.rawScrollX = 2 + (innerW - 4 - 1) // border+padding + (contentW-1)
 
 	// ── Row 2: Player + Board ───────────────────────────────────────
+	// Render the player panel first to measure its actual height, since it
+	// is not viewport-bounded and may vary with game state content.
 	playerPanel := m.renderPlayerPanel(step, halfW)
+	playerPanelH := lipgloss.Height(playerPanel)
+
+	// Height budget for variable-height panels.
+	// Row 2 is anchored to playerPanelH (the taller of the two halves).
+	// Board viewport = playerPanelH - 3 (border 2 + title 1).
+	// Row 3 and raw panel share the remaining budget.
+	// Fixed: header + row2(playerPanelH) + event(3) + rawMin(6) + help(1).
+	headerH := lipgloss.Height(header)
+	boardVPH := playerPanelH - 3 // border(2) + title(1)
+	if boardVPH < 1 {
+		boardVPH = 1
+	}
+	fixedH := headerH + playerPanelH + 3 + 6 + 1 // header + row2 + event + rawPanelMin + help
+	rowOverhead := 3                               // row3: border(2) + title(1)
+	contentBudget := m.height - fixedH - rowOverhead
+	if contentBudget < 4 {
+		contentBudget = 4
+	}
+	maxContentH := contentBudget / 2
 
 	boardContent := renderBoard(step.State.Board)
 	m.boardVP.Width = vpContentW
-	m.boardVP.Height = maxContentH
+	m.boardVP.Height = boardVPH
 	m.boardVP.MouseWheelEnabled = true
 	m.boardVP.SetContent(boardContent)
 
@@ -783,8 +790,8 @@ func (m *Model) viewStep() string {
 	boardHeader.WriteString(styleDim.Render(fmt.Sprintf(" (%d)", len(step.State.Board))))
 	// boardVPY: border(1) + header line(1) after row2 start.
 	m.boardVPY = m.row2StartY + 2
-	m.boardVPH = maxContentH
-	boardVPView := lipgloss.JoinHorizontal(lipgloss.Top, m.boardVP.View(), renderScrollbar(m.boardVP, maxContentH))
+	m.boardVPH = boardVPH
+	boardVPView := lipgloss.JoinHorizontal(lipgloss.Top, m.boardVP.View(), renderScrollbar(m.boardVP, boardVPH))
 	boardPanel := styleBorder.Width(halfW).Render(boardHeader.String() + "\n" + boardVPView)
 	row2 := lipgloss.JoinHorizontal(lipgloss.Top, playerPanel, boardPanel)
 	m.row3StartY = m.row2StartY + lipgloss.Height(row2)
@@ -823,12 +830,12 @@ func (m *Model) viewStep() string {
 
 	// ── Raw log (viewport — height-bounded, mouse-scrollable) ───────
 	usedHeight := lipgloss.Height(header) + lipgloss.Height(row2) +
-		lipgloss.Height(row3) + lipgloss.Height(eventLine) + 1
-	rawH := m.height - usedHeight - 3 // -3: help bar + border top/bottom
-	m.rawStartY = m.height - rawH - 3
+		lipgloss.Height(row3) + lipgloss.Height(eventLine)
+	rawH := m.height - usedHeight - 4 // -4: raw panel border (2) + raw panel header (1) + help bar (1)
 	if rawH < 3 {
 		rawH = 3
 	}
+	m.rawStartY = m.height - rawH - 3 // border(2) + header(1)
 	// rawVPY: border(1) + header line(1) after rawStartY.
 	m.rawVPY = m.rawStartY + 2
 	m.rawVPH = rawH

@@ -319,9 +319,11 @@ func (m *Model) View() string {
 	}
 
 	// Column widths: two equal halves minus borders/padding.
-	// vpContentW is 1 char narrower to accommodate the scrollbar column.
+	// styleBorder has Padding(0,1) so inner content area = colW - 4 (2 border + 2 padding).
+	// vpContentW is the viewport width; the scrollbar takes 1 char, so vpContentW + 1 must
+	// fit inside the inner area: vpContentW = colW - 5.
 	colW := m.width/2 - 4
-	vpContentW := colW - 1
+	vpContentW := colW - 5
 	if vpContentW < 10 {
 		vpContentW = 10
 	}
@@ -333,9 +335,9 @@ func (m *Model) View() string {
 	)
 	m.row2StartY = lipgloss.Height(row1)
 
-	// Height budget: terminal minus row1, session bar (3), help (1), row2 border (2).
+	// Height budget: terminal minus row1, session bar (3), help (1), row2 border (2), row2 title (1).
 	sessionH := 3
-	available := m.height - m.row2StartY - sessionH - 1 - 2
+	available := m.height - m.row2StartY - sessionH - 1 - 3
 	if available < 4 {
 		available = 4
 	}

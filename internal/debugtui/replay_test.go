@@ -191,6 +191,133 @@ func stripANSI(s string) string {
 	return out.String()
 }
 
+// TestDump_FitsWithinHeight verifies the rendered output never exceeds the
+// declared terminal height, which would cause the top line to be clipped.
+func TestDump_FitsWithinHeight(t *testing.T) {
+	replay := getSharedReplay(t)
+
+	cases := []struct {
+		turn   int
+		width  int
+		height int
+	}{
+		{1, 120, 30},
+		{1, 120, 40},
+		{1, 120, 50},
+		{5, 120, 30},
+		{5, 120, 40},
+		{5, 120, 50},
+		{0, 120, 30}, // last turn
+		{0, 120, 40},
+		{0, 120, 50},
+		{5, 80, 40},  // narrow
+		{5, 160, 40}, // wide
+		{5, 200, 40}, // very wide
+	}
+
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("turn=%d/w=%d/h=%d", tc.turn, tc.width, tc.height), func(t *testing.T) {
+			m := NewFromReplay(replay)
+			m.width = tc.width
+			m.height = tc.height
+			m.selectGame(0)
+			if tc.turn == 0 {
+				if len(m.filtered) > 0 {
+					m.cursor = len(m.filtered) - 1
+				}
+			} else {
+				m.jumpToTurn(tc.turn)
+			}
+			out := m.View()
+			lines := strings.Count(out, "\n") + 1
+			// Trailing newline should not count as an extra line.
+			if strings.HasSuffix(out, "\n") {
+				lines--
+			}
+			if lines > tc.height {
+				t.Errorf("output %d lines exceeds terminal height %d (overflow by %d)",
+					lines, tc.height, lines-tc.height)
+			}
+		})
+	}
+}
+
+// TestDump_TopLineNotClipped verifies the first visible line is the header
+// border, not a clipped partial line.
+func TestDump_TopLineNotClipped(t *testing.T) {
+	replay := getSharedReplay(t)
+
+	turns := []int{1, 5, 0}
+	for _, turn := range turns {
+		t.Run(fmt.Sprintf("turn=%d", turn), func(t *testing.T) {
+			out, err := DumpFromReplay(replay, turn, 120)
+			if err != nil {
+				t.Fatalf("DumpFromReplay: %v", err)
+			}
+			lines := strings.Split(out, "\n")
+			if len(lines) == 0 {
+				t.Fatal("empty output")
+			}
+
+			// First line should be a border top.
+			first := stripANSI(lines[0])
+			if !strings.HasPrefix(first, "╭") {
+				t.Errorf("first line should start with '╭', got: %q", first)
+			}
+
+			// Second line should contain "DEBUG REPLAY".
+			if len(lines) < 2 {
+				t.Fatal("output too short")
+			}
+			second := stripANSI(lines[1])
+			if !strings.Contains(second, "DEBUG REPLAY") {
+				t.Errorf("second line should contain 'DEBUG REPLAY', got: %q", second)
+			}
+		})
+	}
+}
+
+// TestDump_AllPanelsPresent verifies all TUI panels render with content.
+func TestDump_AllPanelsPresent(t *testing.T) {
+	replay := getSharedReplay(t)
+
+	// Use last turn to get a fully populated game state.
+	out, err := DumpFromReplay(replay, 0, 120)
+	if err != nil {
+		t.Fatalf("DumpFromReplay: %v", err)
+	}
+	stripped := stripANSI(out)
+
+	panels := []string{
+		"DEBUG REPLAY",
+		"Moch#1358",  // player name
+		"BOARD",       // board panel title
+		"BUFF SOURCES",
+		"CHANGES",
+		"RAW LOG",
+	}
+	for _, panel := range panels {
+		if !strings.Contains(stripped, panel) {
+			t.Errorf("expected panel %q not found in output", panel)
+		}
+	}
+
+	// Check that board minions appear (last turn has 6 minions).
+	minionCount := 0
+	for _, line := range strings.Split(stripped, "\n") {
+		// Minion lines have the format "  <name>  <atk>/<hp>"
+		if strings.Contains(line, "/") && (strings.Contains(line, "Elemental") ||
+			strings.Contains(line, "Cyclone") || strings.Contains(line, "Enforcer") ||
+			strings.Contains(line, "Saloonkeeper") || strings.Contains(line, "Performer") ||
+			strings.Contains(line, "Bronzebeard")) {
+			minionCount++
+		}
+	}
+	if minionCount == 0 {
+		t.Error("expected at least one minion in the board panel")
+	}
+}
+
 func TestLoadAllGamesMultiFile(t *testing.T) {
 	// Loading the same file twice should produce 2x the games.
 	// This test must call LoadAllGames directly (not the shared replay)

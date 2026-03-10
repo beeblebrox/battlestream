@@ -2,7 +2,8 @@
 
 ## Golden Files
 - `internal/debugtui/testdata/golden/` holds TUI screenshot golden files
-- Regenerate with: `go test ./internal/debugtui/ -run TestDump_Golden -update-golden -count=1 -timeout 60s`
+- Regenerate with: `go test battlestream.fixates.io/internal/debugtui -run TestDump_Golden -update-golden -count=1 -timeout 60s`
+- NOTE: `./internal/debugtui/` relative path may fail if shell cwd is reset; prefer the import path form
 - Regenerate whenever `debugtui` rendering logic or `jumpToTurn` behavior changes
 - Also regenerate when `AvailableTribes` ordering changes (order is log-event order from `AddAvailableTribe`)
 - The `-update-golden` flag is defined via `flag.Bool` in replay_test.go
@@ -42,6 +43,25 @@
 | internal/gamestate | ~88s | all log-2026 tests share 1 parse; 592K line file |
 
 See `patterns.md` for more architectural details.
+
+## TUI Layout Bug Patterns
+
+### internal/tui — vpContentW calculation
+- `styleBorder` has `Padding(0, 1)` → inner content width = `colW - 4` (2 border + 2 padding)
+- Viewport + scrollbar must fit within inner area: `vpContentW + 1 = colW - 4` → `vpContentW = colW - 5`
+- Previous code had `vpContentW = colW - 1` which caused 4-char overflow at narrow widths (80, 100)
+- Overflow causes lipgloss to wrap content lines, inflating panel height above budget
+- Fixed in `internal/tui/tui.go` View() function
+- Symptom: `TestView_MultipleWidths` fails at narrow widths with output height > terminal height
+
+### internal/debugtui — player panel height vs viewport budget
+- `renderPlayerPanel` renders all content without height capping; can grow to 9+ lines
+- Budget formula assumed row2 = `maxContentH + 3`, but playerPanel is not bounded by `maxContentH`
+- When `playerPanelH > maxContentH + 3`, rawH gets clamped up from negative, adding extra lines
+- Fix: compute playerPanel first, derive `boardVPH = playerPanelH - 3` to match it, recalculate row3 budget
+- Symptom: `TestDump_FitsWithinHeight/turn=0/w=120/h=30` fails with 31 lines instead of 30
+- Reproduces when late-game player panel has many fields (name+health+armor+triples+hero+last+win = 7 content + 2 border = 9 lines)
+- Fix in `viewStep()` in `internal/debugtui/model.go`; requires golden file regeneration after
 
 ## GameID Scheme (changed — timestamp-based)
 - Production code generates `game-<unixmilli>` when EventGameStart has a non-zero Timestamp
