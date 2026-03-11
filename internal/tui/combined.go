@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"fmt"
-
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -185,7 +183,7 @@ func (c *CombinedModel) View() string {
 		if c.replay != nil {
 			body = c.replay.View()
 		} else {
-			body = fmt.Sprintf("\n  Loading replay data…\n")
+			body = "\n  Loading replay data…\n"
 		}
 	}
 

@@ -298,7 +298,7 @@ func cmdRun() *cobra.Command {
 				home, _ := os.UserHomeDir()
 				cfg.Logging.File = filepath.Join(home, ".battlestream", "battlestream.log")
 				// Ensure directory exists.
-				os.MkdirAll(filepath.Dir(cfg.Logging.File), 0755)
+				_ = os.MkdirAll(filepath.Dir(cfg.Logging.File), 0755)
 			}
 			setupLogging(cfg.Logging)
 
