@@ -176,14 +176,19 @@ func (m *Machine) State() BGGameState {
 func (m *Machine) GameStart(gameID string, t time.Time) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	// Save the locked mutex, reset everything, then restore it so the
-	// deferred Unlock operates on the original (locked) mutex.
-	mu := m.mu
-	*m = Machine{}
-	m.mu = mu
-	m.state.GameID = gameID
-	m.state.Phase = PhaseLobby
-	m.state.StartTime = t
+	// Reset all fields individually — zeroing *m while locked would destroy
+	// the mutex and panic on the deferred Unlock.
+	m.state = BGGameState{
+		GameID:    gameID,
+		Phase:     PhaseLobby,
+		StartTime: t,
+	}
+	m.gameEntityTurn = 0
+	m.boardSnapshot = nil
+	m.goldTotal = 0
+	m.goldUsed = 0
+	m.partnerGoldTotal = 0
+	m.partnerGoldUsed = 0
 }
 
 // GameEnd marks the game as over.
