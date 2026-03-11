@@ -145,6 +145,7 @@ type Model struct {
 
 	// Toggle states.
 	showAnomalyDesc bool // toggle anomaly description display
+	showLastResult  bool // toggle last combat result display
 }
 
 // New creates a Model that will connect to the daemon at grpcAddr.
@@ -236,6 +237,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.game != nil && m.game.AnomalyDescription != "" {
 				m.showAnomalyDesc = !m.showAnomalyDesc
 			}
+		case "l":
+			m.showLastResult = !m.showLastResult
 		}
 
 	case tea.WindowSizeMsg:
@@ -386,9 +389,9 @@ func (m *Model) View() string {
 	rowSession := m.renderSessionBar(m.width - 4)
 
 	// ── Help bar ──────────────────────────────────────────────
-	helpText := "  [r] Refresh game  [R] Refresh stats  [d] Anomaly desc  [q] Quit  scroll: mouse wheel"
+	helpText := "  [r] Refresh game  [R] Refresh stats  [d] Anomaly desc  [l] Last result  [q] Quit  scroll: mouse wheel"
 	if m.game != nil && m.game.IsDuos {
-		helpText = "  [r] Refresh  [R] Stats  [d] Anomaly desc  [q] Quit  scroll: mouse wheel"
+		helpText = "  [r] Refresh  [R] Stats  [d] Anomaly desc  [l] Last result  [q] Quit  scroll: mouse wheel"
 	}
 	help := styleHelp.Render(helpText)
 
@@ -483,11 +486,13 @@ func (m *Model) renderHeroPanel(w int) string {
 		b.WriteString(styleLabel.Render("Hero    ") + styleValue.Render(gamestate.CardName(p.HeroCardId)) + "\n")
 	}
 
-	// Win/loss last round indicator.
-	if p.WinStreak > 0 {
-		b.WriteString(styleLabel.Render("Last    ") + styleWin.Render(fmt.Sprintf("WIN (streak: %d)", p.WinStreak)) + "\n")
-	} else if p.LossStreak > 0 {
-		b.WriteString(styleLabel.Render("Last    ") + styleLoss.Render(fmt.Sprintf("LOSS (streak: %d)", p.LossStreak)) + "\n")
+	// Win/loss last round indicator (toggled via [l]).
+	if m.showLastResult {
+		if p.WinStreak > 0 {
+			b.WriteString(styleLabel.Render("Last    ") + styleWin.Render(fmt.Sprintf("WIN (streak: %d)", p.WinStreak)) + "\n")
+		} else if p.LossStreak > 0 {
+			b.WriteString(styleLabel.Render("Last    ") + styleLoss.Render(fmt.Sprintf("LOSS (streak: %d)", p.LossStreak)) + "\n")
+		}
 	}
 
 	// Partner section in Duos.
@@ -605,7 +610,6 @@ func buffCategoryColor(cat string) lipgloss.Color {
 		"FREE_REFRESH":    colorGold,
 		"GOLD_NEXT_TURN":  colorGold,
 		"CONSUMED":        colorDim,
-		"SHOP_BUFF":       colorTavern,
 		"GENERAL":         colorGeneral,
 	}
 	if c, ok := colors[cat]; ok {
@@ -627,7 +631,7 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	// Wheel: route to whichever panel the cursor is over.
 	if tea.MouseEvent(msg).IsWheel() {
 		var cmd tea.Cmd
-		if msg.X >= m.modsScrollX-1 {
+		if msg.X >= m.width/2 {
 			m.modsVP, cmd = m.modsVP.Update(msg)
 		} else {
 			m.boardVP, cmd = m.boardVP.Update(msg)

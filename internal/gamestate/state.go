@@ -176,15 +176,14 @@ func (m *Machine) State() BGGameState {
 func (m *Machine) GameStart(gameID string, t time.Time) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.state = BGGameState{
-		GameID:    gameID,
-		Phase:     PhaseLobby,
-		StartTime: t,
-		Player:    PlayerState{},
-	}
-	m.gameEntityTurn = 0
-	m.partnerGoldTotal = 0
-	m.partnerGoldUsed = 0
+	// Save the locked mutex, reset everything, then restore it so the
+	// deferred Unlock operates on the original (locked) mutex.
+	mu := m.mu
+	*m = Machine{}
+	m.mu = mu
+	m.state.GameID = gameID
+	m.state.Phase = PhaseLobby
+	m.state.StartTime = t
 }
 
 // GameEnd marks the game as over.
@@ -237,7 +236,7 @@ func (m *Machine) SetGameEntityTurn(turn int) {
 		// Snapshot the board before combat — minions die during combat and
 		// are replaced by simulation copies with base stats. The recruit
 		// board has the fully-buffed stats we want to preserve.
-		m.boardSnapshot = append([]MinionState(nil), m.state.Board...)
+		m.boardSnapshot = deepCopyBoard(m.state.Board)
 		m.state.Phase = PhaseCombat
 	}
 }
@@ -247,7 +246,23 @@ func (m *Machine) SetGameEntityTurn(turn int) {
 func (m *Machine) UpdateBoardSnapshot() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.boardSnapshot = append([]MinionState(nil), m.state.Board...)
+	m.boardSnapshot = deepCopyBoard(m.state.Board)
+}
+
+// deepCopyBoard returns a deep copy of a board slice, including Enchantment slices.
+func deepCopyBoard(board []MinionState) []MinionState {
+	if len(board) == 0 {
+		return nil
+	}
+	cp := make([]MinionState, len(board))
+	for i, mn := range board {
+		cp[i] = mn
+		if len(mn.Enchantments) > 0 {
+			cp[i].Enchantments = make([]Enchantment, len(mn.Enchantments))
+			copy(cp[i].Enchantments, mn.Enchantments)
+		}
+	}
+	return cp
 }
 
 // UpdatePlayerTag applies a tag change to the local player state.

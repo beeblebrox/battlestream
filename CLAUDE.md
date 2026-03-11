@@ -52,6 +52,18 @@ Entry point: `cmd/battlestream/main.go` (cobra subcommands: daemon, tui, replay,
 - Triples tracked via `PLAYER_TRIPLES` tag (absolute value).
 - Modifications: only board-wide buffs (2+ minions with same turn/stat/delta) are recorded.
 
+## Board Snapshot Invariants
+
+The board snapshot (`Machine.boardSnapshot`) preserves the recruit-phase board for restoration at game end (combat replaces minions with simulation copies that have base stats).
+
+**Critical rules for any code that mutates the board during recruit phase:**
+- After `UpsertMinion()` → call `UpdateBoardSnapshot()` if phase is RECRUIT.
+- After `RemoveMinion()` → call `UpdateBoardSnapshot()` if phase is RECRUIT.
+- After `UpdateMinionStat()` returns true → call `UpdateBoardSnapshot()` if phase is RECRUIT.
+- The snapshot MUST be a deep copy (including `Enchantments` slices) to avoid shared backing arrays.
+- During COMBAT phase, do NOT sync the snapshot — it preserves the recruit board intentionally.
+- During GAME_OVER phase, do NOT add/remove minions — the restored snapshot is the final board.
+
 ## Buff Source Tracking
 
 Covers all 13 HDT BgCounters. Four tracking mechanisms:

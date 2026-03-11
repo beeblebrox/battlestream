@@ -4,7 +4,7 @@
 - `internal/debugtui/testdata/golden/` holds TUI screenshot golden files
 - Regenerate with: `go test battlestream.fixates.io/internal/debugtui -run TestDump_Golden -update-golden -count=1 -timeout 60s`
 - NOTE: `./internal/debugtui/` relative path may fail if shell cwd is reset; prefer the import path form
-- Regenerate whenever `debugtui` rendering logic or `jumpToTurn` behavior changes
+- Regenerate whenever `debugtui` rendering logic, `jumpToTurn` behavior, or buff source category names/values change
 - Also regenerate when `AvailableTribes` ordering changes (order is log-event order from `AddAvailableTribe`)
 - The `-update-golden` flag is defined via `flag.Bool` in replay_test.go
 - CRITICAL: Also regenerate when `Step.Turn` assignment in `replay.go` changes — it affects `jumpToTurn` landing position
@@ -42,8 +42,8 @@
 ## Known Slow Packages Under Race
 | Package | Race time | Reason |
 |---------|-----------|--------|
-| internal/debugtui | ~36s | 3 golden tests × LoadReplay (multiple full replays) |
-| internal/gamestate | ~104s | all log-2026 tests share 1 parse; 592K line file; Duos tests added |
+| internal/debugtui | ~41s | 3 golden tests × LoadReplay (multiple full replays) |
+| internal/gamestate | ~108s | all log-2026 tests share 1 parse; 592K line file; Duos tests added |
 
 See `patterns.md` for more architectural details.
 
@@ -73,21 +73,42 @@ See `patterns.md` for more architectural details.
 - Tests asserting on the ID format should use `strings.HasPrefix(id, "game-")` or compute the expected value via `fmt.Sprintf("game-%d", ts.UnixMilli())`
 - `TestProcessorGameStartTimestampID` covers the timestamp path; `TestProcessorGameStartIncrementsID` covers sequential fallback
 
-## Win/Loss Streak Detection Bug (fixed 2026-03-07)
-- BG GameState log contains TWO types of PROPOSED_ATTACKER events:
-  1. Real-time combat block: fires during actual combat, reliable for win/loss
-  2. Post-combat simulation replay block: fires after combat at a later timestamp, UNRELIABLE
-- The simulation replay may show `PROPOSED_ATTACKER=localHeroID` even when the local player LOST
-- Fix: added `localHeroTookDamage bool` to Processor; set when local hero ARMOR or HEALTH decreases
-- At TURN boundary: `localHeroTookDamage=true` → LOSS (overrides PROPOSED_ATTACKER signal)
-- PROPOSED_ATTACKER is still used as secondary signal when hero took no damage
-- Relevant test: `TestGameLog2026_03_07_WinLossStreak` expects WinStreak=2 (rounds 14+15), LossStreak=0
+## Win/Loss Streak Detection (current implementation — 2026-03-10)
+- Processor uses `pendingHeroAttackerID` + `localCombatResult` (replaces old `lastCombatHeroAttackerID`)
+- PROPOSED_ATTACKER on GameEntity → buffers `pendingHeroAttackerID` (only if it's a hero entity)
+- PROPOSED_DEFENDER on GameEntity → if both attacker and defender are heroes, resolve local hero role:
+  - local hero is attacker → `localCombatResult = 1` (win)
+  - local hero is defender → `localCombatResult = -1` (loss)
+  - neither is local hero → ignore (partner's combat in Duos)
+- At TURN boundary: `localCombatResult > 0` → RecordRoundWin; `< 0` → RecordRoundLoss; reset to 0
+- At EventGameEnd: record final round from `localCombatResult` before calling GameEnd (last combat has no TURN boundary)
+- Relevant test: `TestGameLog2026_03_07_WinLossStreak` expects WinStreak=12, LossStreak=0
+
+## Final-Round Streak Fix (2026-03-10)
+- The TURN-based streak update never fires after the last combat (game ends before TURN=N+1)
+- Fix: at EventGameEnd handler, flush `localCombatResult` → RecordRoundWin/Loss before calling GameEnd
+- After fix: `TestGameLog2026_03_07_WinLossStreak` expects WinStreak=12 (was 11 pre-fix)
+- After fix: `last-turn.txt` golden file shows `streak: 4` (was `streak: 3` pre-fix)
+- Whenever this fix or its revert changes, regenerate golden files AND update the WinStreak assertion
 
 ## GoldNextTurn Display Format
 - Production format (processor.go `updateGoldNextTurnCounter`): `"%d (+%d if win)"` when bonus > 0
 - Example: 2 sure + 3 overconfidence bonus → `"2 (+3 if win)"` (NOT `"2 (5)"`)
 - Tests `TestCounterGoldNextTurnWithOverconfidence` and `TestCounterGoldNextTurnMultipleOverconfidence` use this format
 - The bonus is conditional on winning combat, hence the `"if win"` phrasing — do NOT revert to total-sum format
+
+## GameStart Mutex Bug Pattern (CRITICAL)
+- `Machine.GameStart` previously used `*m = Machine{}` to reset state — THIS PANICS
+- `*m = Machine{}` zeroes the embedded `sync.RWMutex` while it is locked → `defer m.mu.Unlock()` panics: "sync: Unlock of unlocked RWMutex"
+- Fix: reset each field explicitly (state, gameEntityTurn, boardSnapshot, goldTotal, goldUsed, partnerGoldTotal, partnerGoldUsed) WITHOUT touching the mutex
+- The `deepCopyBoard` helper and `UpdateBoardSnapshot` method were added in this same change (board snapshot deep copy)
+- Symptom: panic on first test that calls `GameStart` (e.g. `TestDebugTurn8Board`)
+- Fixed in `internal/gamestate/state.go` `GameStart()` method
+
+## Known Slow Packages Under Race (Updated Timing)
+- `internal/gamestate` now takes ~96s under `-race` (two large log parses share sync.Once each)
+- `internal/debugtui` takes ~36s under `-race`
+- Total suite time under `-race -timeout 300s`: ~140s (well within 300s)
 
 ## Naga Synergy Counter Pattern (tag 3809)
 - `HasNagaSynergyMinion(board)` gates whether tag=3809 emits or removes `CatNagaSpells`

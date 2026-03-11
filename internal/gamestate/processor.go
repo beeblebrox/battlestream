@@ -87,12 +87,15 @@ type Processor struct {
 	localBuffs buffTracker
 
 	// Win/loss streak tracking.
-	// lastCombatHeroAttackerID stores the entity ID of the last hero that
-	// attacked during combat. In BG, the winning side's hero attacks the losing
-	// hero at end of combat. If this matches localHeroID → win, another hero → loss,
-	// 0 → tie. Evaluated and reset at each player TURN boundary.
-	lastCombatHeroAttackerID int
-	bgTurnsStarted           int // counts how many BG turns have started (skip recording for turn 1)
+	// In BG, the winning side's hero attacks the losing hero at end of combat.
+	// We track both attacker and defender to filter for the local hero's combat
+	// (critical in Duos where partner's combat also fires hero attacks).
+	// localCombatResult: 1=win, -1=loss, 0=unknown/tie.
+	localCombatResult int
+	// pendingHeroAttackerID/DefenderID capture the current PROPOSED_ATTACKER/DEFENDER
+	// pair. When both are hero entities, we check if the local hero is involved.
+	pendingHeroAttackerID int
+	bgTurnsStarted        int // counts how many BG turns have started (skip recording for turn 1)
 
 	// Available tribes detected from BACON_SUBSET_* tags.
 	seenTribes        map[string]bool
@@ -136,7 +139,8 @@ func (p *Processor) Handle(e parser.GameEvent) {
 		p.heroEntities = make(map[int]bool)
 		p.entityProps = make(map[int]*entityInfo)
 		p.localBuffs = newBuffTracker()
-		p.lastCombatHeroAttackerID = 0
+		p.localCombatResult = 0
+		p.pendingHeroAttackerID = 0
 		p.bgTurnsStarted = 0
 		p.seenTribes = make(map[string]bool)
 		p.entityTribeReg = make(map[int]string)
@@ -162,6 +166,14 @@ func (p *Processor) Handle(e parser.GameEvent) {
 
 	case parser.EventGameEnd:
 		p.flushPendingStatChanges()
+		// Record the final combat result before ending the game.
+		// The TURN-based streak update won't fire after the last combat.
+		if p.localCombatResult > 0 {
+			p.machine.RecordRoundWin()
+		} else if p.localCombatResult < 0 {
+			p.machine.RecordRoundLoss()
+		}
+		p.localCombatResult = 0
 		placement := p.pendingPlacement
 		if pl, ok := e.Tags["PLAYER_LEADERBOARD_PLACE"]; ok {
 			if v, err := strconv.Atoi(pl); err == nil {
@@ -318,13 +330,36 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 
 		case "PROPOSED_ATTACKER":
 			// GameEntity's PROPOSED_ATTACKER tag fires for every attack during combat.
-			// We only care about hero attacks — the end-of-combat hero attack determines
-			// the combat winner (HDT's LastAttackingHero pattern).
+			// Buffer the hero attacker ID; we resolve the result when PROPOSED_DEFENDER arrives.
 			if e.EntityName == "GameEntity" {
 				attackerID := parseInt(value)
 				if attackerID > 0 && p.heroEntities[attackerID] {
-					p.lastCombatHeroAttackerID = attackerID
+					p.pendingHeroAttackerID = attackerID
+				} else {
+					p.pendingHeroAttackerID = 0
 				}
+			}
+
+		case "PROPOSED_DEFENDER":
+			// PROPOSED_DEFENDER fires right after PROPOSED_ATTACKER for each attack.
+			// When both attacker and defender are heroes, this is the end-of-combat
+			// hero attack. In Duos, multiple combats happen per round — only record
+			// the result for the combat involving the local hero.
+			if e.EntityName == "GameEntity" && p.pendingHeroAttackerID > 0 {
+				defenderID := parseInt(value)
+				if defenderID > 0 && p.heroEntities[defenderID] {
+					// Both attacker and defender are heroes — end-of-combat attack.
+					// Winner's hero attacks the loser's hero.
+					if p.pendingHeroAttackerID == p.localHeroID {
+						// Local hero is the attacker → local won this combat.
+						p.localCombatResult = 1
+					} else if defenderID == p.localHeroID {
+						// Local hero is the defender → local lost this combat.
+						p.localCombatResult = -1
+					}
+					// If neither is the local hero, it's the partner's or another combat — ignore.
+				}
+				p.pendingHeroAttackerID = 0
 			}
 
 		case "DAMAGE":
@@ -416,6 +451,9 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 				// sold minions (PLAY->HAND) that were previously missed.
 				p.machine.RemoveMinion(e.EntityID)
 				p.machine.RemoveEnchantmentsForEntity(e.EntityID)
+				if p.machine.Phase() == PhaseRecruit {
+					p.machine.UpdateBoardSnapshot()
+				}
 			}
 
 		case "TURN":
@@ -425,17 +463,16 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 				turn, _ := strconv.Atoi(value)
 				if turn > 0 {
 					// Record outcome of the combat that just resolved (turns 2+).
-					// lastCombatHeroAttackerID is set by PROPOSED_ATTACKER on a hero entity.
-					// The winning side's hero attacks the losing hero at end of combat.
+					// localCombatResult is set by PROPOSED_ATTACKER/DEFENDER hero pairs.
 					if p.bgTurnsStarted > 0 {
-						if p.lastCombatHeroAttackerID == p.localHeroID && p.localHeroID > 0 {
+						if p.localCombatResult > 0 {
 							p.machine.RecordRoundWin()
-						} else if p.lastCombatHeroAttackerID > 0 {
+						} else if p.localCombatResult < 0 {
 							p.machine.RecordRoundLoss()
 						}
-						// If lastCombatHeroAttackerID == 0, it's a tie — no streak change.
+						// localCombatResult == 0 → tie or no hero attack — no streak change.
 					}
-					p.lastCombatHeroAttackerID = 0
+					p.localCombatResult = 0
 					p.bgTurnsStarted++
 					p.flushPendingStatChanges()
 
@@ -802,6 +839,9 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 	}
 	if controllerID == p.localPlayerID {
 		p.machine.UpsertMinion(mn)
+		if p.machine.Phase() == PhaseRecruit {
+			p.machine.UpdateBoardSnapshot()
+		}
 	}
 }
 
@@ -931,6 +971,9 @@ func (p *Processor) updateMinionStat(e parser.GameEvent, stat, value string) {
 
 	// Update board minion stats if it's on the board.
 	onBoard := p.machine.UpdateMinionStat(e.EntityID, stat, newVal)
+	if onBoard && p.machine.Phase() == PhaseRecruit {
+		p.machine.UpdateBoardSnapshot()
+	}
 
 	// Buffer stat changes during recruit phase for board-wide buff detection.
 	// Skip during combat (simulation noise).
@@ -1133,8 +1176,6 @@ func (p *Processor) handleDntTagChange(entityID int, tag string, value int) {
 	isSD1 := tag == "TAG_SCRIPT_DATA_NUM_1"
 
 	switch cardID {
-	case "BG_ShopBuff":
-		p.handleGenericShopBuffDnt(entityID, isSD1, value, CatShopBuff)
 	case "BG_ShopBuff_Elemental":
 		p.handleShopBuffDnt(entityID, isSD1, value)
 	case "BG30_MagicItem_544pe":
@@ -1170,31 +1211,6 @@ func (p *Processor) handleAbsoluteDnt(category string, isSD1 bool, value, baseAt
 		state[0] = baseAtk + value
 	} else {
 		state[1] = baseHp + value
-	}
-	bt.buffSourceState[category] = state
-	p.machine.SetBuffSource(category, state[0], state[1])
-}
-
-// handleGenericShopBuffDnt handles a generic shop-buff DNT enchantment with differential
-// accumulation, updating the given buff category.
-func (p *Processor) handleGenericShopBuffDnt(entityID int, isSD1 bool, value int, category string) {
-	bt := &p.localBuffs
-	prev := bt.shopBuffPrev[entityID]
-	var delta int
-	if isSD1 {
-		delta = value - prev[0]
-		prev[0] = value
-	} else {
-		delta = value - prev[1]
-		prev[1] = value
-	}
-	bt.shopBuffPrev[entityID] = prev
-
-	state := bt.buffSourceState[category]
-	if isSD1 {
-		state[0] += delta
-	} else {
-		state[1] += delta
 	}
 	bt.buffSourceState[category] = state
 	p.machine.SetBuffSource(category, state[0], state[1])

@@ -135,14 +135,14 @@ func TestGameLog2026_03_07_AvailableTribes(t *testing.T) {
 //   Rounds 1-2:  LOSS  (opponent hero is PROPOSED_ATTACKER → attacks local hero)
 //   Rounds 3-15: WIN or TIE (local hero is PROPOSED_ATTACKER, or no hero attacks)
 //   Round 13:    WIN  (armor drops from Imposing Percussionist self-damage, NOT combat loss)
-//   Round 16:    not recorded (game ends before TURN=17 fires)
+//   Round 16:    WIN  (recorded at EventGameEnd from localCombatResult before GameEnd)
 //
-// At game end: WinStreak=11, LossStreak=0.
+// At game end: WinStreak=12, LossStreak=0.
 // Ties (no hero attack) preserve the current streak without incrementing.
 func TestGameLog2026_03_07_WinLossStreak(t *testing.T) {
 	s := sharedLog2026State(t)
-	if s.Player.WinStreak != 11 {
-		t.Errorf("WinStreak at game end: expected 11, got %d", s.Player.WinStreak)
+	if s.Player.WinStreak != 12 {
+		t.Errorf("WinStreak at game end: expected 12, got %d", s.Player.WinStreak)
 	}
 	if s.Player.LossStreak != 0 {
 		t.Errorf("LossStreak at game end: expected 0 (last result was a win), got %d", s.Player.LossStreak)

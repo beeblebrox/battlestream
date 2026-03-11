@@ -18,7 +18,6 @@ const (
 	CatNagaSpells      = "NAGA_SPELLS"
 	CatFreeRefresh     = "FREE_REFRESH"
 	CatGoldNextTurn    = "GOLD_NEXT_TURN"
-	CatShopBuff        = "SHOP_BUFF"
 	CatGeneral         = "GENERAL"
 )
 
@@ -26,7 +25,8 @@ const (
 // Values sourced from HearthDb.CardIds.NonCollectible.Neutral (reference/HearthDb/).
 var categoryByEnchantmentCardID = map[string]string{
 	// --- Player-level Dnt enchantments (running totals) ---
-	"BG_ShopBuff":             CatShopBuff,     // Tavern spell shop buff (Staff of Enrichment, Shadowdancer, etc.)
+	// BG_ShopBuff (generic) is NOT tracked — HDT has no counter for it;
+	// its stats overlap with TAVERN_SPELL_* player tags (CatTavernSpell).
 	"BG_ShopBuff_Elemental":   CatNomi,         // Nomi shop buff total
 	"BG30_MagicItem_544pe":    CatNomi,          // Nomi Sticker
 	"BGS_104pe":               CatNomi,          // NomiKitchenNightmare Dnt (regular Nomi)
@@ -175,7 +175,6 @@ var CategoryDisplayName = map[string]string{
 	CatNagaSpells:      "Spells Played",
 	CatFreeRefresh:     "Refreshes",
 	CatGoldNextTurn:    "Bonus Gold",
-	CatShopBuff:        "Shop Buff",
 	CatConsumed:        "Consumed",
 	CatGeneral:         "General",
 }
