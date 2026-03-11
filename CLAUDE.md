@@ -24,6 +24,8 @@ go vet ./...
 scripts/gen-proto.sh
 ```
 
+**Before committing and pushing**, always run `go vet ./...` to catch issues like `copylocks`, `printf` format mismatches, and unreachable code. CI runs both `go vet` and `golangci-lint` — if `golangci-lint` is installed locally, run `golangci-lint run` as well. This prevents avoidable CI failures after push.
+
 ## Architecture
 
 Hearthstone Battlegrounds stat tracker. The daemon tails `Power.log`, parses game events, maintains live state, and exposes it via multiple APIs.
