@@ -9,6 +9,7 @@ import (
 
 	"battlestream.fixates.io/internal/gamestate"
 	"battlestream.fixates.io/internal/parser"
+	"battlestream.fixates.io/internal/store"
 )
 
 // Step represents a single parsed event with its associated state snapshot.
@@ -187,6 +188,97 @@ func DumpFromReplay(replay *Replay, turn int, width int) (string, error) {
 	}
 
 	return m.View(), nil
+}
+
+// LoadFromStore builds a Replay from per-turn snapshots stored in the database.
+func LoadFromStore(st *store.Store, gameID string) (*Replay, error) {
+	snaps, err := st.GetTurnSnapshots(gameID)
+	if err != nil {
+		return nil, fmt.Errorf("loading turn snapshots: %w", err)
+	}
+	if len(snaps) == 0 {
+		return nil, fmt.Errorf("no turn snapshots for game %s", gameID)
+	}
+
+	var steps []Step
+	for i, snap := range snaps {
+		steps = append(steps, Step{
+			Index: i,
+			Event: parser.GameEvent{
+				Type: parser.EventTurnStart,
+				Tags: map[string]string{"TURN": fmt.Sprintf("%d", snap.Turn)},
+			},
+			State: snap.State,
+			Turn:  snap.Turn,
+		})
+	}
+
+	last := snaps[len(snaps)-1]
+	game := GameSummary{
+		Index:      0,
+		PlayerName: last.State.Player.Name,
+		HeroCardID: last.State.Player.HeroCardID,
+		Placement:  last.State.Placement,
+		MaxTurn:    last.Turn,
+		TavernTier: last.State.TavernTier,
+		Phase:      last.State.Phase,
+		StartTime:  last.State.StartTime,
+		SourceFile: "(database)",
+		StepStart:  0,
+		StepEnd:    len(steps),
+		IsDuos:     last.State.IsDuos,
+	}
+
+	return &Replay{Steps: steps, Games: []GameSummary{game}}, nil
+}
+
+// LoadAllFromStore builds a Replay with all games from the database that have turn snapshots.
+func LoadAllFromStore(st *store.Store) (*Replay, error) {
+	metas, err := st.ListGames(0, 0)
+	if err != nil {
+		return nil, fmt.Errorf("listing games: %w", err)
+	}
+
+	var allSteps []Step
+	var allGames []GameSummary
+
+	for _, meta := range metas {
+		snaps, err := st.GetTurnSnapshots(meta.GameID)
+		if err != nil || len(snaps) == 0 {
+			continue
+		}
+
+		stepStart := len(allSteps)
+		for i, snap := range snaps {
+			allSteps = append(allSteps, Step{
+				Index: stepStart + i,
+				Event: parser.GameEvent{
+					Type: parser.EventTurnStart,
+					Tags: map[string]string{"TURN": fmt.Sprintf("%d", snap.Turn)},
+				},
+				State: snap.State,
+				Turn:  snap.Turn,
+			})
+		}
+
+		last := snaps[len(snaps)-1]
+		allGames = append(allGames, GameSummary{
+			Index:      len(allGames),
+			PlayerName: last.State.Player.Name,
+			HeroCardID: last.State.Player.HeroCardID,
+			Placement:  last.State.Placement,
+			MaxTurn:    last.Turn,
+			TavernTier: last.State.TavernTier,
+			Phase:      last.State.Phase,
+			StartTime:  last.State.StartTime,
+			SourceFile: "(database)",
+			StepStart:  stepStart,
+			StepEnd:    len(allSteps),
+			IsDuos:     last.State.IsDuos,
+		})
+	}
+
+	return &Replay{Steps: allSteps, Games: allGames}, nil
 }
 
 func buildSummary(idx int, steps []Step, start, end int, file string) GameSummary {

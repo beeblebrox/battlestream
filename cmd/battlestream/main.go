@@ -47,9 +47,9 @@ persists aggregate stats, and exposes them via gRPC, REST, WebSocket, and file o
 	root.PersistentFlags().StringVar(&profileFlag, "profile", "", "profile name to use (default: active_profile or sole profile)")
 
 	root.AddCommand(
+		cmdRun(),
 		cmdDaemon(),
 		cmdTUI(),
-		cmdDebug(),
 		cmdReplay(),
 		cmdDiscover(),
 		cmdConfig(),
@@ -65,6 +65,186 @@ persists aggregate stats, and exposes them via gRPC, REST, WebSocket, and file o
 
 // --- daemon ---
 
+// daemonServices holds references needed to clean up daemon resources.
+type daemonServices struct {
+	store   *store.Store
+	watcher *watcher.Watcher
+	machine *gamestate.Machine
+	done    chan struct{}
+}
+
+// startDaemon starts all daemon services (watcher, parser, state machine, gRPC, REST)
+// and returns immediately. The caller must cancel ctx to initiate shutdown, then
+// wait on svc.done for goroutines to finish. Caller owns svc.store.Close() and svc.watcher.Stop().
+func startDaemon(ctx context.Context, cfg *config.Config, profile *config.ProfileConfig) (*daemonServices, error) {
+	// --- Resolve log path ---
+	logPath := profile.Hearthstone.LogPath
+	if logPath == "" {
+		info, err := discovery.Discover()
+		if err != nil {
+			return nil, fmt.Errorf("auto-discovery failed: %w\nRun 'battlestream discover' to set paths manually", err)
+		}
+		logPath = info.LogPath
+		slog.Info("auto-discovered HS logs", "path", logPath)
+
+		if profile.Hearthstone.AutoPatchLogConfig {
+			if err := logconfig.EnsureVerboseLogging(info.LogConfig); err != nil {
+				slog.Warn("could not patch log.config", "err", err)
+			} else {
+				slog.Info("log.config patched", "path", info.LogConfig)
+			}
+		}
+	}
+
+	// --- Open store ---
+	st, err := store.Open(profile.Storage.DBPath)
+	if err != nil {
+		return nil, fmt.Errorf("opening store: %w", err)
+	}
+
+	// --- File output ---
+	var fw *fileout.Writer
+	if profile.Output.Enabled {
+		fw, err = fileout.New(profile.Output.Path)
+		if err != nil {
+			st.Close()
+			return nil, fmt.Errorf("creating file writer: %w", err)
+		}
+		slog.Info("file output enabled", "path", profile.Output.Path)
+	}
+
+	// --- Game state machine ---
+	machine := gamestate.New()
+	proc := gamestate.NewProcessor(machine)
+
+	// --- Event bus ---
+	parsedCh := make(chan parser.GameEvent, 512)
+	broadcastCh := make(chan parser.GameEvent, 512)
+	p := parser.New(parsedCh)
+
+	// --- Log watcher ---
+	w, err := watcher.New(ctx, watcher.Config{
+		LogDir:        logPath,
+		Files:         []string{"Power.log"},
+		Reopen:        true,
+		MustExist:     false,
+		ReadFromStart: true,
+	})
+	if err != nil {
+		st.Close()
+		return nil, fmt.Errorf("starting watcher: %w", err)
+	}
+
+	done := make(chan struct{})
+
+	// --- Line ingestion: watcher -> parser ---
+	go func() {
+		for {
+			select {
+			case line, ok := <-w.Lines:
+				if !ok {
+					return
+				}
+				p.Feed(line.Text)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// --- Event processing: parsedCh -> state machine + broadcast ---
+	go func() {
+		defer close(done)
+		interval := time.Duration(profile.Output.WriteIntervalMs) * time.Millisecond
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case e, ok := <-parsedCh:
+				if !ok {
+					return
+				}
+				proc.Handle(e)
+
+				// Persist game end
+				if e.Type == parser.EventGameEnd {
+					s := machine.State()
+					if st.HasGame(s.GameID) {
+						slog.Info("game already persisted, skipping", "gameID", s.GameID)
+					} else {
+						if err := st.SaveFullGame(s); err != nil {
+							slog.Error("persisting game", "err", err)
+						}
+						// Persist per-turn snapshots.
+						if snaps := machine.TurnSnapshots(); len(snaps) > 0 {
+							if err := st.SaveTurnSnapshots(s.GameID, snaps); err != nil {
+								slog.Error("persisting turn snapshots", "err", err)
+							}
+						}
+					}
+					if fw != nil {
+						if err := fw.WriteHistory(s); err != nil {
+							slog.Error("writing history", "err", err)
+						}
+						agg, err := st.GetAggregate()
+						if err == nil {
+							if err := fw.WriteAggregate(agg); err != nil {
+								slog.Error("writing aggregate", "err", err)
+							}
+						}
+					}
+				}
+
+				// Fan to broadcast channel (non-blocking)
+				select {
+				case broadcastCh <- e:
+				default:
+				}
+
+			case <-ticker.C:
+				if fw != nil {
+					s := machine.State()
+					if err := fw.WriteCurrentState(s); err != nil {
+						slog.Error("writing current state", "err", err)
+					}
+				}
+
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// --- gRPC server ---
+	grpcSrv := grpcserver.New(machine, st, broadcastCh)
+	go func() {
+		if err := grpcSrv.Serve(ctx, cfg.API.GRPCAddr); err != nil {
+			slog.Error("gRPC server error", "err", err)
+		}
+	}()
+
+	// --- REST server ---
+	restSrv := rest.New(grpcSrv, cfg.API.APIKey)
+	go func() {
+		if err := restSrv.Serve(ctx, cfg.API.RESTAddr); err != nil {
+			slog.Error("REST server error", "err", err)
+		}
+	}()
+
+	slog.Info("battlestream daemon started",
+		"grpc", cfg.API.GRPCAddr,
+		"rest", cfg.API.RESTAddr,
+	)
+
+	return &daemonServices{
+		store:   st,
+		watcher: w,
+		machine: machine,
+		done:    done,
+	}, nil
+}
+
 func cmdDaemon() *cobra.Command {
 	return &cobra.Command{
 		Use:   "daemon",
@@ -75,7 +255,6 @@ func cmdDaemon() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("loading config: %w", err)
 			}
-
 			setupLogging(cfg.Logging)
 
 			profile, err := cfg.GetProfile(profileFlag)
@@ -83,162 +262,80 @@ func cmdDaemon() *cobra.Command {
 				return err
 			}
 
-			// --- Resolve log path ---
-			logPath := profile.Hearthstone.LogPath
-			if logPath == "" {
-				info, err := discovery.Discover()
-				if err != nil {
-					return fmt.Errorf("auto-discovery failed: %w\nRun 'battlestream discover' to set paths manually", err)
-				}
-				logPath = info.LogPath
-				slog.Info("auto-discovered HS logs", "path", logPath)
+			ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			defer cancel()
 
-				if profile.Hearthstone.AutoPatchLogConfig {
-					if err := logconfig.EnsureVerboseLogging(info.LogConfig); err != nil {
-						slog.Warn("could not patch log.config", "err", err)
-					} else {
-						slog.Info("log.config patched", "path", info.LogConfig)
-					}
-				}
-			}
-
-			// --- Open store ---
-			st, err := store.Open(profile.Storage.DBPath)
+			svc, err := startDaemon(ctx, cfg, profile)
 			if err != nil {
-				return fmt.Errorf("opening store: %w", err)
+				return err
 			}
-			defer st.Close()
+			defer svc.store.Close()
+			defer svc.watcher.Stop()
 
-			// --- File output ---
-			var fw *fileout.Writer
-			if profile.Output.Enabled {
-				fw, err = fileout.New(profile.Output.Path)
-				if err != nil {
-					return fmt.Errorf("creating file writer: %w", err)
-				}
-				slog.Info("file output enabled", "path", profile.Output.Path)
+			<-ctx.Done()
+			slog.Info("shutting down")
+			<-svc.done
+			return nil
+		},
+	}
+}
+
+// --- run ---
+
+func cmdRun() *cobra.Command {
+	return &cobra.Command{
+		Use:   "run",
+		Short: "Start daemon and TUI in a single process",
+		Long:  "Starts the daemon services and opens the live TUI dashboard in one process.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load(cfgFile)
+			if err != nil {
+				return fmt.Errorf("loading config: %w", err)
 			}
 
-			// --- Game state machine ---
-			machine := gamestate.New()
-			proc := gamestate.NewProcessor(machine)
+			// Force file-only logging since the TUI owns the terminal.
+			if cfg.Logging.File == "" {
+				home, _ := os.UserHomeDir()
+				cfg.Logging.File = filepath.Join(home, ".battlestream", "battlestream.log")
+				// Ensure directory exists.
+				os.MkdirAll(filepath.Dir(cfg.Logging.File), 0755)
+			}
+			setupLogging(cfg.Logging)
+
+			profile, err := cfg.GetProfile(profileFlag)
+			if err != nil {
+				return err
+			}
 
 			ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer cancel()
 
-			// --- Event bus ---
-			parsedCh := make(chan parser.GameEvent, 512)
-			broadcastCh := make(chan parser.GameEvent, 512)
-			p := parser.New(parsedCh)
-
-			// --- Log watcher ---
-			w, err := watcher.New(ctx, watcher.Config{
-				LogDir:        logPath,
-				Files:         []string{"Power.log"},
-				Reopen:        true,
-				MustExist:     false,
-				ReadFromStart: true,
-			})
+			svc, err := startDaemon(ctx, cfg, profile)
 			if err != nil {
-				return fmt.Errorf("starting watcher: %w", err)
+				return err
 			}
-			defer w.Stop()
+			defer svc.store.Close()
+			defer svc.watcher.Stop()
 
-			// --- Line ingestion: watcher → parser ---
-			go func() {
-				for {
-					select {
-					case line, ok := <-w.Lines:
-						if !ok {
-							return
-						}
-						p.Feed(line.Text)
-					case <-ctx.Done():
-						return
-					}
+			// Resolve Power.log files for replay mode fallback.
+			logPath := profile.Hearthstone.LogPath
+			if logPath == "" {
+				info, _ := discovery.Discover()
+				if info != nil {
+					logPath = info.LogPath
 				}
-			}()
+			}
+			var logFiles []string
+			if logPath != "" {
+				logFiles = findPowerLogs(logPath)
+			}
 
-			// --- Event processing: parsedCh → state machine + broadcast ---
-			go func() {
-				interval := time.Duration(profile.Output.WriteIntervalMs) * time.Millisecond
-				ticker := time.NewTicker(interval)
-				defer ticker.Stop()
+			// Run the combined TUI (live + replay).
+			tuiErr := tui.NewCombined(cfg.API.GRPCAddr, svc.store, logFiles).Run()
 
-				for {
-					select {
-					case e, ok := <-parsedCh:
-						if !ok {
-							return
-						}
-						proc.Handle(e)
-
-						// Persist game end
-						if e.Type == parser.EventGameEnd {
-							s := machine.State()
-							if st.HasGame(s.GameID) {
-								slog.Info("game already persisted, skipping", "gameID", s.GameID)
-							} else if err := st.SaveFullGame(s); err != nil {
-								slog.Error("persisting game", "err", err)
-							}
-							if fw != nil {
-								if err := fw.WriteHistory(s); err != nil {
-									slog.Error("writing history", "err", err)
-								}
-								agg, err := st.GetAggregate()
-								if err == nil {
-									if err := fw.WriteAggregate(agg); err != nil {
-										slog.Error("writing aggregate", "err", err)
-									}
-								}
-							}
-						}
-
-						// Fan to broadcast channel (non-blocking)
-						select {
-						case broadcastCh <- e:
-						default:
-						}
-
-					case <-ticker.C:
-						if fw != nil {
-							s := machine.State()
-							if err := fw.WriteCurrentState(s); err != nil {
-								slog.Error("writing current state", "err", err)
-							}
-						}
-
-					case <-ctx.Done():
-						return
-					}
-				}
-			}()
-
-			// --- gRPC server ---
-			grpcSrv := grpcserver.New(machine, st, broadcastCh)
-
-			go func() {
-				if err := grpcSrv.Serve(ctx, cfg.API.GRPCAddr); err != nil {
-					slog.Error("gRPC server error", "err", err)
-				}
-			}()
-
-			// --- REST server ---
-			restSrv := rest.New(grpcSrv, cfg.API.APIKey)
-			go func() {
-				if err := restSrv.Serve(ctx, cfg.API.RESTAddr); err != nil {
-					slog.Error("REST server error", "err", err)
-				}
-			}()
-
-			slog.Info("battlestream daemon started",
-				"grpc", cfg.API.GRPCAddr,
-				"rest", cfg.API.RESTAddr,
-			)
-
-			<-ctx.Done()
-			slog.Info("shutting down")
-			return nil
+			cancel()
+			<-svc.done
+			return tuiErr
 		},
 	}
 }
@@ -272,50 +369,6 @@ func cmdTUI() *cobra.Command {
 	cmd.Flags().BoolVar(&dumpFlag, "dump", false, "dump rendered TUI to stdout (no TTY needed)")
 	cmd.Flags().IntVar(&widthFlag, "width", 120, "terminal width for --dump rendering")
 	return cmd
-}
-
-// --- debug ---
-
-func cmdDebug() *cobra.Command {
-	return &cobra.Command{
-		Use:   "debug [power.log...]",
-		Short: "Step through Power.log files interactively",
-		Long: `Opens a debug TUI to step through Power.log events one by one.
-
-If no file arguments are given, discovers log files from config (same locations
-as 'battlestream reparse'). All games found are listed for selection.`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			var logFiles []string
-
-			if len(args) > 0 {
-				logFiles = args
-			} else {
-				// Discover log files from config, same as reparse.
-				cfg, err := config.Load(cfgFile)
-				if err != nil {
-					return fmt.Errorf("loading config: %w", err)
-				}
-				profile, err := cfg.GetProfile(profileFlag)
-				if err != nil {
-					return err
-				}
-				logPath := profile.Hearthstone.LogPath
-				if logPath == "" {
-					info, dErr := discovery.Discover()
-					if dErr != nil {
-						return fmt.Errorf("auto-discovery failed: %w\nSpecify log files as arguments or run 'battlestream discover'", dErr)
-					}
-					logPath = info.LogPath
-				}
-				logFiles = findPowerLogs(logPath)
-				if len(logFiles) == 0 {
-					return fmt.Errorf("no Power.log files found in %s", logPath)
-				}
-			}
-
-			return debugtui.New(logFiles).Run()
-		},
-	}
 }
 
 // --- replay ---
@@ -675,6 +728,12 @@ func cmdReparse() *cobra.Command {
 							slog.Error("persisting game", "err", err)
 						} else {
 							gamesSaved++
+							// Persist per-turn snapshots.
+							if snaps := machine.TurnSnapshots(); len(snaps) > 0 {
+								if err := st.SaveTurnSnapshots(s.GameID, snaps); err != nil {
+									slog.Error("persisting turn snapshots", "err", err)
+								}
+							}
 						}
 					}
 				}

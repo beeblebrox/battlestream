@@ -119,6 +119,32 @@ type AbilityCounter struct {
 	Display  string `json:"display"` // computed display string
 }
 
+// TurnSnapshot captures the game state at the end of a recruit phase turn,
+// plus the deltas (buff changes) that occurred during that turn with source attribution.
+type TurnSnapshot struct {
+	Turn          int              `json:"turn"`
+	State         BGGameState      `json:"state"`
+	BuffDeltas    []BuffDelta      `json:"buff_deltas,omitempty"`
+	AbilityDeltas []AbilityDelta   `json:"ability_deltas,omitempty"`
+	Modifications []StatMod        `json:"modifications,omitempty"`
+}
+
+// BuffDelta records the change in a buff source for a single turn.
+type BuffDelta struct {
+	Category    string `json:"category"`
+	AttackDelta int    `json:"attack_delta"`
+	HealthDelta int    `json:"health_delta"`
+	Source      string `json:"source,omitempty"`
+	CardID      string `json:"card_id,omitempty"`
+}
+
+// AbilityDelta records the change in an ability counter for a single turn.
+type AbilityDelta struct {
+	Category   string `json:"category"`
+	ValueDelta int    `json:"value_delta"`
+	Source     string `json:"source,omitempty"`
+}
+
 // Machine manages the BGGameState and applies events.
 type Machine struct {
 	mu              sync.RWMutex
@@ -131,6 +157,12 @@ type Machine struct {
 	// Partner (Duos) state
 	partnerGoldTotal int
 	partnerGoldUsed  int
+
+	// Per-turn snapshot accumulation
+	turnSnapshots   []TurnSnapshot
+	prevBuffSources []BuffSource
+	prevAbilityCtrs []AbilityCounter
+	prevModCount    int
 }
 
 // New creates a new Machine in IDLE phase.
@@ -189,6 +221,10 @@ func (m *Machine) GameStart(gameID string, t time.Time) {
 	m.goldUsed = 0
 	m.partnerGoldTotal = 0
 	m.partnerGoldUsed = 0
+	m.turnSnapshots = nil
+	m.prevBuffSources = nil
+	m.prevAbilityCtrs = nil
+	m.prevModCount = 0
 }
 
 // GameEnd marks the game as over.
@@ -208,6 +244,10 @@ func (m *Machine) GameEnd(placement int, t time.Time) {
 		}
 		m.state.Board = m.boardSnapshot
 	}
+	// Capture final turn snapshot.
+	if m.state.Turn > 0 {
+		m.captureTurnSnapshot(m.state.Turn)
+	}
 	m.boardSnapshot = nil
 }
 
@@ -223,8 +263,11 @@ func (m *Machine) SetPhase(phase GamePhase) {
 func (m *Machine) SetTurn(turn int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// Capture snapshot for the previous turn before advancing.
+	if m.state.Turn > 0 && turn > m.state.Turn {
+		m.captureTurnSnapshot(m.state.Turn)
+	}
 	m.state.Turn = turn
-	// Player turn always starts a recruit phase.
 	m.state.Phase = PhaseRecruit
 }
 
@@ -595,6 +638,89 @@ func (m *Machine) UpdatePartnerGold(tag string, value int) {
 		m.partnerGoldUsed = value
 	}
 	m.state.Partner.CurrentGold = m.partnerGoldTotal - m.partnerGoldUsed
+}
+
+// captureTurnSnapshot computes deltas and appends a snapshot for the given turn.
+// Must be called with m.mu held.
+func (m *Machine) captureTurnSnapshot(turn int) {
+	snap := TurnSnapshot{
+		Turn:  turn,
+		State: m.deepCopyState(),
+	}
+
+	// Compute buff deltas.
+	prevMap := make(map[string]BuffSource)
+	for _, bs := range m.prevBuffSources {
+		prevMap[bs.Category] = bs
+	}
+	for _, bs := range m.state.BuffSources {
+		prev := prevMap[bs.Category]
+		atkDelta := bs.Attack - prev.Attack
+		hpDelta := bs.Health - prev.Health
+		if atkDelta != 0 || hpDelta != 0 {
+			snap.BuffDeltas = append(snap.BuffDeltas, BuffDelta{
+				Category:    bs.Category,
+				AttackDelta: atkDelta,
+				HealthDelta: hpDelta,
+			})
+		}
+	}
+
+	// Compute ability deltas.
+	prevAC := make(map[string]AbilityCounter)
+	for _, ac := range m.prevAbilityCtrs {
+		prevAC[ac.Category] = ac
+	}
+	for _, ac := range m.state.AbilityCounters {
+		prev := prevAC[ac.Category]
+		valDelta := ac.Value - prev.Value
+		if valDelta != 0 {
+			snap.AbilityDeltas = append(snap.AbilityDeltas, AbilityDelta{
+				Category:   ac.Category,
+				ValueDelta: valDelta,
+			})
+		}
+	}
+
+	// Capture modifications from this turn only.
+	if m.prevModCount < len(m.state.Modifications) {
+		snap.Modifications = append([]StatMod(nil), m.state.Modifications[m.prevModCount:]...)
+	}
+
+	m.turnSnapshots = append(m.turnSnapshots, snap)
+
+	// Update prev state for next turn's delta computation.
+	m.prevBuffSources = append([]BuffSource(nil), m.state.BuffSources...)
+	m.prevAbilityCtrs = append([]AbilityCounter(nil), m.state.AbilityCounters...)
+	m.prevModCount = len(m.state.Modifications)
+}
+
+// deepCopyState returns a deep copy of the current state (without lock).
+func (m *Machine) deepCopyState() BGGameState {
+	s := m.state
+	s.Board = make([]MinionState, len(m.state.Board))
+	for i, mn := range m.state.Board {
+		s.Board[i] = mn
+		s.Board[i].Enchantments = append([]Enchantment(nil), mn.Enchantments...)
+	}
+	s.OpponentBoard = append([]MinionState(nil), m.state.OpponentBoard...)
+	s.Modifications = append([]StatMod(nil), m.state.Modifications...)
+	s.BuffSources = append([]BuffSource(nil), m.state.BuffSources...)
+	s.AbilityCounters = append([]AbilityCounter(nil), m.state.AbilityCounters...)
+	s.Enchantments = append([]Enchantment(nil), m.state.Enchantments...)
+	s.AvailableTribes = append([]string(nil), m.state.AvailableTribes...)
+	if m.state.Partner != nil {
+		p := *m.state.Partner
+		s.Partner = &p
+	}
+	return s
+}
+
+// TurnSnapshots returns the accumulated per-turn snapshots for the current game.
+func (m *Machine) TurnSnapshots() []TurnSnapshot {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return append([]TurnSnapshot(nil), m.turnSnapshots...)
 }
 
 func parseInt(s string) int {

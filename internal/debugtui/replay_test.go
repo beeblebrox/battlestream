@@ -265,13 +265,13 @@ func TestDump_TopLineNotClipped(t *testing.T) {
 				t.Errorf("first line should start with '╭', got: %q", first)
 			}
 
-			// Second line should contain "DEBUG REPLAY".
+			// Second line should contain "REPLAY".
 			if len(lines) < 2 {
 				t.Fatal("output too short")
 			}
 			second := stripANSI(lines[1])
-			if !strings.Contains(second, "DEBUG REPLAY") {
-				t.Errorf("second line should contain 'DEBUG REPLAY', got: %q", second)
+			if !strings.Contains(second, "REPLAY") {
+				t.Errorf("second line should contain 'REPLAY', got: %q", second)
 			}
 		})
 	}
@@ -289,7 +289,7 @@ func TestDump_AllPanelsPresent(t *testing.T) {
 	stripped := stripANSI(out)
 
 	panels := []string{
-		"DEBUG REPLAY",
+		"REPLAY",
 		"Moch#1358",  // player name
 		"BOARD",       // board panel title
 		"BUFF SOURCES",

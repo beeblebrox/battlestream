@@ -18,12 +18,21 @@ import (
 
 	"battlestream.fixates.io/internal/gamestate"
 	"battlestream.fixates.io/internal/parser"
+	"battlestream.fixates.io/internal/store"
 )
 
 // replayLoadedMsg is sent when async loading completes.
 type replayLoadedMsg struct {
 	replay *Replay
 	err    error
+	source sourceMode
+}
+
+// sourceReloadMsg is sent when the user toggles data source.
+type sourceReloadMsg struct {
+	replay *Replay
+	err    error
+	source sourceMode
 }
 
 // loadProgressMsg is sent periodically during loading to update the display.
@@ -35,6 +44,14 @@ type loadProgress struct {
 	gamesFound atomic.Int32
 	fileIdx    atomic.Int32
 }
+
+// sourceMode indicates where replay data was loaded from.
+type sourceMode int
+
+const (
+	sourceLogs sourceMode = iota
+	sourceDB
+)
 
 // Model is the Bubbletea model for the debug replay TUI.
 type Model struct {
@@ -92,8 +109,13 @@ type Model struct {
 
 	// Duos partner panel state.
 	showPartner    bool
+	source         sourceMode
 	partnerBoardVP viewport.Model
 	partnerBuffVP  viewport.Model
+
+	// Source switching: retained so the user can toggle between DB and log sources.
+	store    *store.Store
+	logFiles []string
 }
 
 func newJumpInput() textinput.Model {
@@ -142,6 +164,17 @@ func NewFromReplay(replay *Replay) *Model {
 	}
 	return m
 }
+
+// SetSources provides the store and log files for runtime source switching.
+// mode sets the initial source indicator.
+func (m *Model) SetSources(st *store.Store, logFiles []string, mode sourceMode) {
+	m.store = st
+	m.logFiles = logFiles
+	m.source = mode
+}
+
+// SourceDB is the exported constant for database source mode.
+const SourceDB = sourceDB
 
 // Run starts the Bubbletea program.
 func (m *Model) Run() error {
@@ -236,7 +269,7 @@ func loadReplayCmd(paths []string, prog *loadProgress) tea.Cmd {
 		defer slog.SetDefault(old)
 
 		replay, err := LoadAllGamesWithProgress(paths, prog)
-		return replayLoadedMsg{replay: replay, err: err}
+		return replayLoadedMsg{replay: replay, err: err, source: sourceLogs}
 	}
 }
 
@@ -268,8 +301,28 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.replay = msg.replay
+		m.source = msg.source
 		if len(m.replay.Games) == 0 {
 			m.loadErr = fmt.Errorf("no games found in %d log file(s)", len(m.paths))
+			return m, nil
+		}
+		m.picking = len(m.replay.Games) > 1
+		if len(m.replay.Games) == 1 {
+			m.selectGame(0)
+		}
+		return m, nil
+
+	case sourceReloadMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.loadErr = msg.err
+			return m, nil
+		}
+		m.replay = msg.replay
+		m.source = msg.source
+		m.loadErr = nil
+		if len(m.replay.Games) == 0 {
+			m.loadErr = fmt.Errorf("no games found for source")
 			return m, nil
 		}
 		m.picking = len(m.replay.Games) > 1
@@ -409,6 +462,8 @@ func (m *Model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filter = (m.filter + 1) % len(eventTypeNames)
 		m.rebuildFiltered()
 		m.rawVP.GotoTop()
+	case "L":
+		return m.switchSource()
 	}
 	return m, nil
 }
@@ -589,6 +644,36 @@ func (m *Model) prevPhase() {
 				return
 			}
 		}
+	}
+}
+
+func (m *Model) switchSource() (tea.Model, tea.Cmd) {
+	target := sourceLogs
+	if m.source == sourceLogs {
+		target = sourceDB
+	}
+
+	// Check if the target source is available.
+	if target == sourceDB && m.store == nil {
+		return m, nil // no store available
+	}
+	if target == sourceLogs && len(m.logFiles) == 0 {
+		return m, nil // no log files available
+	}
+
+	m.loading = true
+	m.loadErr = nil
+	return m, func() tea.Msg {
+		old := slog.Default()
+		slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+		defer slog.SetDefault(old)
+
+		if target == sourceDB {
+			replay, err := LoadAllFromStore(m.store)
+			return sourceReloadMsg{replay: replay, err: err, source: sourceDB}
+		}
+		replay, err := LoadAllGames(m.logFiles)
+		return sourceReloadMsg{replay: replay, err: err, source: sourceLogs}
 	}
 }
 
@@ -899,9 +984,13 @@ func (m *Model) viewStep() string {
 
 func (m *Model) renderHeader(step *Step, w int) string {
 	var b strings.Builder
-	title := "DEBUG REPLAY"
+	sourceLabel := "Logs"
+	if m.source == sourceDB {
+		sourceLabel = "DB"
+	}
+	title := fmt.Sprintf("REPLAY (%s)", sourceLabel)
 	if step.State.IsDuos {
-		title = "DEBUG REPLAY [DUOS]"
+		title = fmt.Sprintf("REPLAY (%s) [DUOS]", sourceLabel)
 	}
 	b.WriteString(styleTitle.Render(title))
 
@@ -1008,7 +1097,7 @@ func (m *Model) renderHelpBar() string {
 	if m.inputMode {
 		return styleHelp.Render("  Type turn number, Enter to jump, Esc to cancel")
 	}
-	help := "  h/l:step  [/]:turn  {/}:phase  g/G:start/end  t:jump  j/k:raw log  J/K:panels  mouse:raw log  f:filter  q:quit"
+	help := "  h/l:step  [/]:turn  {/}:phase  g/G:start/end  t:jump  j/k:raw log  J/K:panels  f:filter  L:source  q:quit"
 	if s := m.currentStep(); s != nil && s.State.IsDuos {
 		help += "  d:partner"
 	}

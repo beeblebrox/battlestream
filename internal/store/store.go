@@ -19,6 +19,7 @@ const (
 	keyAggWins      = "stat:aggregate:wins"
 	keyAggLosses    = "stat:aggregate:losses"
 	keyAggPlacement = "stat:aggregate:placements"
+	prefixGameTurns = "game:turns:"
 )
 
 // Store wraps a BadgerDB instance.
@@ -217,6 +218,35 @@ func (s *Store) GetGame(id string) (*gamestate.BGGameState, error) {
 		return nil, err
 	}
 	return &gs, nil
+}
+
+// SaveTurnSnapshots persists per-turn snapshots for a game.
+func (s *Store) SaveTurnSnapshots(gameID string, snapshots []gamestate.TurnSnapshot) error {
+	return s.db.Update(func(txn *badger.Txn) error {
+		data, err := json.Marshal(snapshots)
+		if err != nil {
+			return err
+		}
+		return txn.Set([]byte(prefixGameTurns+gameID), data)
+	})
+}
+
+// GetTurnSnapshots retrieves per-turn snapshots for a game.
+func (s *Store) GetTurnSnapshots(gameID string) ([]gamestate.TurnSnapshot, error) {
+	var snapshots []gamestate.TurnSnapshot
+	err := s.db.View(func(txn *badger.Txn) error {
+		item, err := txn.Get([]byte(prefixGameTurns + gameID))
+		if err == badger.ErrKeyNotFound {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		return item.Value(func(val []byte) error {
+			return json.Unmarshal(val, &snapshots)
+		})
+	})
+	return snapshots, err
 }
 
 // badgerLogger adapts slog to badger's Logger interface.
