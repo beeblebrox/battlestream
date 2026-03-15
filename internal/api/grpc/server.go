@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"sync"
+	"sync/atomic"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -207,7 +208,7 @@ func (s *Server) Unsubscribe(ch chan parser.GameEvent) {
 }
 
 func (s *Server) subscribe() chan parser.GameEvent {
-	ch := make(chan parser.GameEvent, 64)
+	ch := make(chan parser.GameEvent, 512)
 	s.subsMu.Lock()
 	s.subs = append(s.subs, ch)
 	s.subsMu.Unlock()
@@ -228,6 +229,7 @@ func (s *Server) unsubscribe(ch chan parser.GameEvent) {
 }
 
 func (s *Server) fanOut(ctx context.Context) {
+	var dropped atomic.Int64
 	for {
 		select {
 		case e, ok := <-s.events:
@@ -239,11 +241,18 @@ func (s *Server) fanOut(ctx context.Context) {
 				select {
 				case ch <- e:
 				default:
-					// slow subscriber: drop rather than block
+					n := dropped.Add(1)
+					// Log first drop, then every 1000th to avoid flooding the log.
+					if n == 1 || n%1000 == 0 {
+						slog.Warn("dropping events for slow subscriber", "total_dropped", n)
+					}
 				}
 			}
 			s.subsMu.Unlock()
 		case <-ctx.Done():
+			if n := dropped.Load(); n > 0 {
+				slog.Warn("subscriber event drop summary", "total_dropped", n)
+			}
 			return
 		}
 	}

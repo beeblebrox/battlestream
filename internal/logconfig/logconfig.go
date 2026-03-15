@@ -29,6 +29,7 @@ var requiredSections = []*Section{
 			"FilePrinting":    "true",
 			"ConsolePrinting": "false",
 			"ScreenPrinting":  "false",
+			"Verbose":         "true",
 		},
 	},
 	{
@@ -182,15 +183,23 @@ func (c *Config) IsComplete() bool {
 // EnsureVerboseLogging parses, merges required sections, and writes back.
 // If the config is already complete the write is skipped.
 func EnsureVerboseLogging(path string) error {
+	_, err := CheckAndPatch(path)
+	return err
+}
+
+// CheckAndPatch parses log.config, patches it if needed, and returns whether
+// a patch was applied. When patched is true, Hearthstone must be restarted
+// for the changes to take effect.
+func CheckAndPatch(path string) (patched bool, err error) {
 	cfg, err := Parse(path)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if cfg.IsComplete() {
-		return nil
+		return false, nil
 	}
 	cfg.Merge()
-	return cfg.Write(path)
+	return true, cfg.Write(path)
 }
 
 func (c *Config) findSection(name string) *Section {
@@ -203,11 +212,15 @@ func (c *Config) findSection(name string) *Section {
 }
 
 func sectionKeyOrder(name string) []string {
-	return []string{"LogLevel", "FilePrinting", "ConsolePrinting", "ScreenPrinting"}
+	keys := []string{"LogLevel", "FilePrinting", "ConsolePrinting", "ScreenPrinting"}
+	if strings.EqualFold(name, "Power") {
+		keys = append(keys, "Verbose")
+	}
+	return keys
 }
 
 func isRequiredKey(k string) bool {
-	for _, req := range []string{"LogLevel", "FilePrinting", "ConsolePrinting", "ScreenPrinting"} {
+	for _, req := range []string{"LogLevel", "FilePrinting", "ConsolePrinting", "ScreenPrinting", "Verbose"} {
 		if strings.EqualFold(k, req) {
 			return true
 		}

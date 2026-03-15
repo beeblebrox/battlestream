@@ -67,33 +67,55 @@ persists aggregate stats, and exposes them via gRPC, REST, WebSocket, and file o
 
 // daemonServices holds references needed to clean up daemon resources.
 type daemonServices struct {
-	store   *store.Store
-	watcher *watcher.Watcher
-	machine *gamestate.Machine
-	done    chan struct{}
+	store          *store.Store
+	watcher        *watcher.Watcher
+	machine        *gamestate.Machine
+	done           chan struct{}
+	logConfigFixed bool // true if log.config was patched (HS restart needed)
 }
 
 // startDaemon starts all daemon services (watcher, parser, state machine, gRPC, REST)
 // and returns immediately. The caller must cancel ctx to initiate shutdown, then
 // wait on svc.done for goroutines to finish. Caller owns svc.store.Close() and svc.watcher.Stop().
 func startDaemon(ctx context.Context, cfg *config.Config, profile *config.ProfileConfig) (*daemonServices, error) {
-	// --- Resolve log path ---
+	// --- Resolve log path and ensure log.config is correct ---
 	logPath := profile.Hearthstone.LogPath
+	var logConfigPath string
 	if logPath == "" {
 		info, err := discovery.Discover()
 		if err != nil {
 			return nil, fmt.Errorf("auto-discovery failed: %w\nRun 'battlestream discover' to set paths manually", err)
 		}
 		logPath = info.LogPath
+		logConfigPath = info.LogConfig
 		slog.Info("auto-discovered HS logs", "path", logPath)
-
-		if profile.Hearthstone.AutoPatchLogConfig {
-			if err := logconfig.EnsureVerboseLogging(info.LogConfig); err != nil {
-				slog.Warn("could not patch log.config", "err", err)
-			} else {
-				slog.Info("log.config patched", "path", info.LogConfig)
-			}
+	} else if profile.Hearthstone.InstallPath != "" {
+		// Manual log path — try to derive log.config from install path.
+		info, err := discovery.DiscoverFromRoot(profile.Hearthstone.InstallPath)
+		if err == nil {
+			logConfigPath = info.LogConfig
 		}
+	}
+	// If we still don't have the log.config path, try discovery as fallback.
+	if logConfigPath == "" {
+		if info, err := discovery.Discover(); err == nil {
+			logConfigPath = info.LogConfig
+		}
+	}
+
+	var logConfigFixed bool
+	if logConfigPath != "" {
+		patched, err := logconfig.CheckAndPatch(logConfigPath)
+		if err != nil {
+			slog.Warn("could not check/patch log.config", "path", logConfigPath, "err", err)
+		} else if patched {
+			slog.Info("log.config was missing required settings, patched", "path", logConfigPath)
+			logConfigFixed = true
+		} else {
+			slog.Info("log.config verified OK", "path", logConfigPath)
+		}
+	} else {
+		slog.Warn("could not locate log.config — Hearthstone logging may not work")
 	}
 
 	// --- Open store ---
@@ -200,6 +222,7 @@ func startDaemon(ctx context.Context, cfg *config.Config, profile *config.Profil
 				select {
 				case broadcastCh <- e:
 				default:
+					slog.Warn("broadcastCh full, dropping event", "type", e.Type)
 				}
 
 			case <-ticker.C:
@@ -238,10 +261,11 @@ func startDaemon(ctx context.Context, cfg *config.Config, profile *config.Profil
 	)
 
 	return &daemonServices{
-		store:   st,
-		watcher: w,
-		machine: machine,
-		done:    done,
+		store:          st,
+		watcher:        w,
+		machine:        machine,
+		done:           done,
+		logConfigFixed: logConfigFixed,
 	}, nil
 }
 
@@ -271,6 +295,16 @@ func cmdDaemon() *cobra.Command {
 			}
 			defer svc.store.Close()
 			defer svc.watcher.Stop()
+
+			if svc.logConfigFixed {
+				fmt.Println()
+				fmt.Println("┌─────────────────────────────────────────────────────────┐")
+				fmt.Println("│  Hearthstone log.config was updated.                    │")
+				fmt.Println("│  You must restart Hearthstone for logging to work.      │")
+				fmt.Println("│  Press Enter to continue...                             │")
+				fmt.Println("└─────────────────────────────────────────────────────────┘")
+				fmt.Scanln()
+			}
 
 			<-ctx.Done()
 			slog.Info("shutting down")
@@ -331,7 +365,11 @@ func cmdRun() *cobra.Command {
 			}
 
 			// Run the combined TUI (live + replay).
-			tuiErr := tui.NewCombined(cfg.API.GRPCAddr, svc.store, logFiles).Run()
+			combined := tui.NewCombined(cfg.API.GRPCAddr, svc.store, logFiles)
+			if svc.logConfigFixed {
+				combined.SetStartupNotice("Hearthstone log.config was updated. You must restart Hearthstone for logging to work.")
+			}
+			tuiErr := combined.Run()
 
 			cancel()
 			<-svc.done

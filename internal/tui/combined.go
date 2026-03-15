@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"time"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -29,6 +31,9 @@ type CombinedModel struct {
 	height int
 
 	replayInitialized bool
+
+	// Startup notice (e.g. log.config was patched). Blocks until Enter.
+	startupNotice string
 }
 
 // NewCombined creates a CombinedModel that starts in live mode.
@@ -40,6 +45,11 @@ func NewCombined(grpcAddr string, st *store.Store, logFiles []string) *CombinedM
 		logFiles: logFiles,
 		store:    st,
 	}
+}
+
+// SetStartupNotice sets a notice to display when the TUI starts.
+func (c *CombinedModel) SetStartupNotice(msg string) {
+	c.startupNotice = msg
 }
 
 // Run starts the Bubbletea program with the combined model.
@@ -55,10 +65,42 @@ type replayInitDoneMsg struct {
 }
 
 func (c *CombinedModel) Init() tea.Cmd {
+	// Don't start the live model until the user dismisses the startup notice.
+	if c.startupNotice != "" {
+		return nil
+	}
 	return c.live.Init()
 }
 
 func (c *CombinedModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// While startup notice is showing, block everything except Enter to confirm.
+	// Allow WindowSizeMsg through so dimensions are captured for later.
+	if c.startupNotice != "" {
+		switch msg := msg.(type) {
+		case tea.WindowSizeMsg:
+			c.width = msg.Width
+			c.height = msg.Height
+			return c, nil
+		case tea.KeyMsg:
+			if msg.String() == "enter" {
+				c.startupNotice = ""
+				// Start the live model and send it the stored window size.
+				cmds := []tea.Cmd{c.live.Init()}
+				if c.width > 0 {
+					inner := tea.WindowSizeMsg{Width: c.width, Height: c.height - 1}
+					_, cmd := c.live.Update(inner)
+					cmds = append(cmds, cmd)
+				}
+				return c, tea.Batch(cmds...)
+			}
+			if msg.String() == "q" || msg.String() == "ctrl+c" {
+				return c, tea.Quit
+			}
+		}
+		// Swallow all other messages while notice is up.
+		return c, nil
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -80,35 +122,42 @@ func (c *CombinedModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		c.height = msg.Height
 		// Reserve 1 row for the mode indicator bar at the top.
 		inner := tea.WindowSizeMsg{Width: msg.Width, Height: msg.Height - 1}
+		var cmds []tea.Cmd
 		if c.live != nil {
-			c.live.Update(inner)
+			_, cmd := c.live.Update(inner)
+			cmds = append(cmds, cmd)
 		}
 		if c.replay != nil {
-			c.replay.Update(inner)
+			_, cmd := c.replay.Update(inner)
+			cmds = append(cmds, cmd)
 		}
-		return c, nil
+		return c, tea.Batch(cmds...)
 
 	case replayInitDoneMsg:
 		c.replay = msg.model
 		c.replayInitialized = true
-		// Send window size to newly initialized replay model.
+		// Start the replay model's async loading (spinner, progress, file parsing).
+		var cmds []tea.Cmd
+		cmds = append(cmds, c.replay.Init())
 		if c.width > 0 {
-			c.replay.Update(tea.WindowSizeMsg{Width: c.width, Height: c.height - 1})
+			_, cmd := c.replay.Update(tea.WindowSizeMsg{Width: c.width, Height: c.height - 1})
+			cmds = append(cmds, cmd)
 		}
-		return c, nil
+		return c, tea.Batch(cmds...)
 	}
 
-	// Route to active model.
-	var cmd tea.Cmd
-	switch c.mode {
-	case modeLive:
-		_, cmd = c.live.Update(msg)
-	case modeReplay:
-		if c.replay != nil {
-			_, cmd = c.replay.Update(msg)
-		}
+	// Always forward to live model to keep event chain alive.
+	var cmds []tea.Cmd
+	if c.live != nil {
+		_, cmd := c.live.Update(msg)
+		cmds = append(cmds, cmd)
 	}
-	return c, cmd
+	// Also forward to replay if it's the active mode and initialized.
+	if c.mode == modeReplay && c.replay != nil {
+		_, cmd := c.replay.Update(msg)
+		cmds = append(cmds, cmd)
+	}
+	return c, tea.Batch(cmds...)
 }
 
 func (c *CombinedModel) switchMode() (tea.Model, tea.Cmd) {
@@ -121,34 +170,59 @@ func (c *CombinedModel) switchMode() (tea.Model, tea.Cmd) {
 		return c, nil
 	}
 	c.mode = modeLive
-	return c, nil
+	// Re-establish live event chain and refresh state.
+	var cmds []tea.Cmd
+	if c.live != nil && c.live.client != nil {
+		cmds = append(cmds, fetchGameCmd(c.live.ctx, c.live.client))
+		if c.live.eventCh != nil {
+			cmds = append(cmds, waitForEventCmd(c.live.eventCh))
+		}
+	}
+	return c, tea.Batch(cmds...)
 }
 
 func (c *CombinedModel) initReplayCmd() tea.Cmd {
+	st := c.store
+	logFiles := c.logFiles
 	return func() tea.Msg {
-		var model *debugtui.Model
+		done := make(chan replayInitDoneMsg, 1)
+		go func() {
+			var model *debugtui.Model
 
-		// Try loading from database first.
-		if c.store != nil {
-			replay, err := debugtui.LoadAllFromStore(c.store)
-			if err == nil && len(replay.Games) > 0 {
-				model = debugtui.NewFromReplay(replay)
-				model.SetSources(c.store, c.logFiles, debugtui.SourceDB)
-				return replayInitDoneMsg{model: model}
+			// Try loading from database first.
+			if st != nil {
+				replay, err := debugtui.LoadAllFromStore(st)
+				if err == nil && len(replay.Games) > 0 {
+					model = debugtui.NewFromReplay(replay)
+					model.SetSources(st, logFiles, debugtui.SourceDB)
+					done <- replayInitDoneMsg{model: model}
+					return
+				}
 			}
-		}
 
-		// Fall back to log files.
-		if len(c.logFiles) > 0 {
-			model = debugtui.New(c.logFiles)
-			model.SetSources(c.store, c.logFiles, 0)
+			// Fall back to log files.
+			if len(logFiles) > 0 {
+				model = debugtui.New(logFiles)
+				model.SetSources(st, logFiles, 0)
+				done <- replayInitDoneMsg{model: model}
+				return
+			}
+
+			// No data available — create empty model.
+			model = debugtui.NewFromReplay(&debugtui.Replay{})
+			model.SetSources(st, logFiles, 0)
+			done <- replayInitDoneMsg{model: model}
+		}()
+
+		select {
+		case msg := <-done:
+			return msg
+		case <-time.After(5 * time.Second):
+			// Timeout — return empty model to avoid freezing the TUI.
+			model := debugtui.NewFromReplay(&debugtui.Replay{})
+			model.SetSources(st, logFiles, 0)
 			return replayInitDoneMsg{model: model}
 		}
-
-		// No data available — create empty model.
-		model = debugtui.NewFromReplay(&debugtui.Replay{})
-		model.SetSources(c.store, c.logFiles, 0)
-		return replayInitDoneMsg{model: model}
 	}
 }
 
@@ -185,6 +259,21 @@ func (c *CombinedModel) View() string {
 		} else {
 			body = "\n  Loading replay data…\n"
 		}
+	}
+
+	// If startup notice is active, show ONLY the notice (full screen).
+	if c.startupNotice != "" {
+		noticeStyle := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("230")).
+			Background(lipgloss.Color("202")).
+			Padding(0, 1)
+		promptStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("255")).
+			Bold(true)
+		return "\n" +
+			noticeStyle.Render(" "+c.startupNotice+" ") + "\n\n" +
+			promptStyle.Render("  Press Enter to continue...") + "\n"
 	}
 
 	return indicator + "\n" + body

@@ -103,6 +103,7 @@ type eventMsg struct{ event *bspb.GameEvent }
 type disconnectedMsg struct{ err error }
 type reconnectMsg struct{}
 type aggTickMsg struct{}
+type gameTickMsg struct{}
 
 // ============================================================
 // Model
@@ -155,11 +156,12 @@ func New(grpcAddr string) *Model {
 	sp.Spinner = spinner.Dot
 	sp.Style = lipgloss.NewStyle().Foreground(colorPurple)
 	return &Model{
-		grpcAddr:  grpcAddr,
-		ctx:       ctx,
-		cancel:    cancel,
-		connState: stateConnecting,
-		spinner:   sp,
+		grpcAddr:       grpcAddr,
+		ctx:            ctx,
+		cancel:         cancel,
+		connState:      stateConnecting,
+		spinner:        sp,
+		showLastResult: true,
 	}
 }
 
@@ -264,6 +266,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(
 			waitForEventCmd(m.eventCh),
 			aggTickCmd(),
+			gameTickCmd(),
 		)
 
 	case disconnectedMsg:
@@ -302,6 +305,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(
 				fetchAggCmd(m.ctx, m.client),
 				tea.Tick(10*time.Second, func(t time.Time) tea.Msg { return aggTickMsg{} }),
+			)
+		}
+
+	case gameTickMsg:
+		if m.client != nil {
+			return m, tea.Batch(
+				fetchGameCmd(m.ctx, m.client),
+				gameTickCmd(),
 			)
 		}
 	}
@@ -921,5 +932,11 @@ func waitForEventCmd(ch <-chan *bspb.GameEvent) tea.Cmd {
 func aggTickCmd() tea.Cmd {
 	return tea.Tick(10*time.Second, func(t time.Time) tea.Msg {
 		return aggTickMsg{}
+	})
+}
+
+func gameTickCmd() tea.Cmd {
+	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+		return gameTickMsg{}
 	})
 }

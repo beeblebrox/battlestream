@@ -50,7 +50,7 @@ func (c *Client) StreamEvents(ctx context.Context) (<-chan *bspb.GameEvent, erro
 		return nil, fmt.Errorf("opening event stream: %w", err)
 	}
 
-	ch := make(chan *bspb.GameEvent, 64)
+	ch := make(chan *bspb.GameEvent, 512)
 	go func() {
 		defer close(ch)
 		for {

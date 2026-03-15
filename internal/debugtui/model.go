@@ -38,6 +38,9 @@ type sourceReloadMsg struct {
 // loadProgressMsg is sent periodically during loading to update the display.
 type loadProgressMsg struct{}
 
+// clearNoticeMsg is sent after a timeout to dismiss a temporary notice.
+type clearNoticeMsg struct{}
+
 // loadProgress tracks parsing progress from the background goroutine.
 type loadProgress struct {
 	linesRead  atomic.Int64
@@ -116,6 +119,9 @@ type Model struct {
 	// Source switching: retained so the user can toggle between DB and log sources.
 	store    *store.Store
 	logFiles []string
+
+	// Temporary notice (shown briefly then auto-dismissed).
+	notice string
 }
 
 func newJumpInput() textinput.Model {
@@ -318,17 +324,30 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.loadErr = msg.err
 			return m, nil
 		}
+		if len(msg.replay.Games) == 0 {
+			// No games in the target source — show a temporary notice
+			// and stay on the current source (don't replace m.replay).
+			sourceName := "log files"
+			if msg.source == sourceDB {
+				sourceName = "database"
+			}
+			m.notice = fmt.Sprintf("No completed games found in %s.", sourceName)
+			return m, func() tea.Msg {
+				time.Sleep(3 * time.Second)
+				return clearNoticeMsg{}
+			}
+		}
 		m.replay = msg.replay
 		m.source = msg.source
 		m.loadErr = nil
-		if len(m.replay.Games) == 0 {
-			m.loadErr = fmt.Errorf("no games found for source")
-			return m, nil
-		}
 		m.picking = len(m.replay.Games) > 1
 		if len(m.replay.Games) == 1 {
 			m.selectGame(0)
 		}
+		return m, nil
+
+	case clearNoticeMsg:
+		m.notice = ""
 		return m, nil
 
 	case tea.MouseMsg:
@@ -337,6 +356,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyMsg:
+		// Dismiss temporary notice on any keypress.
+		if m.notice != "" {
+			m.notice = ""
+			return m, nil
+		}
 		if m.loading {
 			if msg.String() == "q" || msg.String() == "ctrl+c" {
 				return m, tea.Quit
@@ -735,7 +759,27 @@ func (m *Model) View() string {
 	if m.picking {
 		return m.viewPicker()
 	}
-	return m.viewStep()
+
+	view := m.viewStep()
+
+	// Overlay a temporary notice banner at the top if present.
+	if m.notice != "" {
+		noticeStyle := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("230")).
+			Background(lipgloss.Color("202")).
+			Padding(0, 1)
+		banner := noticeStyle.Render(" " + m.notice + " (press any key) ")
+		// Replace first line of the view with the banner.
+		lines := strings.SplitN(view, "\n", 2)
+		if len(lines) > 1 {
+			view = banner + "\n" + lines[1]
+		} else {
+			view = banner + "\n" + view
+		}
+	}
+
+	return view
 }
 
 func (m *Model) viewPicker() string {

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -99,11 +100,15 @@ func (w *Watcher) startTails(ctx context.Context, logDir string, cfg Config, fro
 		}
 		// loc=nil means start from the beginning of the file.
 
+		usePoll := runtime.GOOS == "darwin" // kqueue unreliable for appended writes on macOS
+		slog.Info("started tailing file", "file", name, "path", path, "poll", usePoll, "fromStart", fromStart)
+
 		t, err := tail.TailFile(path, tail.Config{
 			Follow:    true,
 			ReOpen:    cfg.Reopen,
 			MustExist: cfg.MustExist,
 			Location:  loc,
+			Poll:      usePoll,
 			Logger:    tail.DiscardingLogger,
 		})
 		if err != nil {
@@ -112,6 +117,7 @@ func (w *Watcher) startTails(ctx context.Context, logDir string, cfg Config, fro
 		w.tails = append(w.tails, t)
 
 		go func(t *tail.Tail, fname string) {
+			firstLine := true
 			for {
 				select {
 				case line, ok := <-t.Lines:
@@ -121,6 +127,10 @@ func (w *Watcher) startTails(ctx context.Context, logDir string, cfg Config, fro
 					if line.Err != nil {
 						slog.Error("tail error", "file", fname, "err", line.Err)
 						continue
+					}
+					if firstLine {
+						slog.Info("first line received from tail", "file", fname)
+						firstLine = false
 					}
 					select {
 					case w.lines <- Line{File: fname, Text: line.Text}:
