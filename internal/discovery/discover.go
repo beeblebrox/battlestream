@@ -12,9 +12,10 @@ import (
 
 // InstallInfo describes a found Hearthstone installation.
 type InstallInfo struct {
-	InstallRoot string // root of the HS install
-	LogPath     string // path to the Logs directory (where Power.log lives)
-	LogConfig   string // path to log.config
+	InstallRoot   string // root of the HS install
+	LogPath       string // path to the Logs directory (where Power.log lives)
+	LogConfig     string // path to log.config
+	PlayerLogPath string // path to Unity Player.log (macOS: ~/Library/Logs/Blizzard Entertainment/Hearthstone/Player.log)
 }
 
 // errStopWalk is used as a sentinel to abort WalkDir early.
@@ -103,9 +104,10 @@ func probeRoot(root string) (*InstallInfo, error) {
 	} {
 		if _, err := os.Stat(c); err == nil {
 			return &InstallInfo{
-				InstallRoot: root,
-				LogPath:     filepath.Join(root, "Logs"),
-				LogConfig:   logConfigPath(root),
+				InstallRoot:   root,
+				LogPath:       filepath.Join(root, "Logs"),
+				LogConfig:     logConfigPath(root),
+				PlayerLogPath: PlayerLogPath(),
 			}, nil
 		}
 	}
@@ -114,9 +116,10 @@ func probeRoot(root string) (*InstallInfo, error) {
 	if _, err := os.Stat(filepath.Join(root, "Power.log")); err == nil {
 		parent := filepath.Dir(root)
 		return &InstallInfo{
-			InstallRoot: parent,
-			LogPath:     root,
-			LogConfig:   logConfigPath(parent),
+			InstallRoot:   parent,
+			LogPath:       root,
+			LogConfig:     logConfigPath(parent),
+			PlayerLogPath: PlayerLogPath(),
 		}, nil
 	}
 
@@ -184,6 +187,19 @@ func logConfigInPrefix(prefixRoot, home string) string {
 	}
 	// Neither user directory exists yet; default to host username.
 	return filepath.Join(usersDir, filepath.Base(home), tail)
+}
+
+// PlayerLogPath returns the path to Unity's Player.log on macOS.
+// On other platforms, returns empty string (Player.log is macOS-only).
+func PlayerLogPath() string {
+	if runtime.GOOS != "darwin" {
+		return ""
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, "Library", "Logs", "Blizzard Entertainment", "Hearthstone", "Player.log")
 }
 
 // WalkForInstall walks startDir looking for a Hearthstone install.

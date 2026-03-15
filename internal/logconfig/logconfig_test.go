@@ -3,6 +3,7 @@ package logconfig
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -243,6 +244,57 @@ ScreenPrinting=false
 	}
 	if cfg.IsComplete() {
 		t.Error("expected IsComplete=false when Power.LogLevel=0")
+	}
+}
+
+func TestCheckAndPatchReturnsPatched(t *testing.T) {
+	// Empty file should need patching.
+	path := writeTmp(t, "")
+	patched, err := CheckAndPatch(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !patched {
+		t.Error("expected patched=true for empty config")
+	}
+
+	// Second call on the now-complete file should not patch.
+	patched2, err := CheckAndPatch(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if patched2 {
+		t.Error("expected patched=false for already-complete config")
+	}
+}
+
+func TestMergeSetsPowerVerbose(t *testing.T) {
+	cfg := &Config{}
+	cfg.Merge()
+	power := cfg.findSection("Power")
+	if power == nil {
+		t.Fatal("Power section not found after Merge")
+	}
+	if power.Fields["Verbose"] != "true" {
+		t.Errorf("expected Verbose=true for Power, got %q", power.Fields["Verbose"])
+	}
+}
+
+func TestMergePowerConsolePrintingPlatform(t *testing.T) {
+	cfg := &Config{}
+	cfg.Merge()
+	power := cfg.findSection("Power")
+	if power == nil {
+		t.Fatal("Power section not found after Merge")
+	}
+	if runtime.GOOS == "darwin" {
+		if power.Fields["ConsolePrinting"] != "true" {
+			t.Errorf("on macOS, expected ConsolePrinting=true for Power, got %q", power.Fields["ConsolePrinting"])
+		}
+	} else {
+		if power.Fields["ConsolePrinting"] != "false" {
+			t.Errorf("on non-macOS, expected ConsolePrinting=false for Power, got %q", power.Fields["ConsolePrinting"])
+		}
 	}
 }
 

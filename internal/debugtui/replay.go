@@ -5,12 +5,16 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"battlestream.fixates.io/internal/gamestate"
 	"battlestream.fixates.io/internal/parser"
 	"battlestream.fixates.io/internal/store"
 )
+
+// playerLogPowerPrefix is the category tag prepended to Power lines in Player.log.
+const playerLogPowerPrefix = "[Power] "
 
 // Step represents a single parsed event with its associated state snapshot.
 type Step struct {
@@ -116,6 +120,9 @@ func LoadAllGamesWithProgress(paths []string, prog *loadProgress) (*Replay, erro
 		var lineCount int64
 		for scanner.Scan() {
 			line := scanner.Text()
+			// Player.log (macOS) prefixes Power lines with "[Power] ".
+			// Strip it so the parser sees the same format as Power.log.
+			line = strings.TrimPrefix(line, playerLogPowerPrefix)
 			accum = append(accum, line)
 			p.Feed(line)
 			lineCount++

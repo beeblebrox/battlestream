@@ -36,11 +36,12 @@ type Line struct {
 
 // Config configures which log files to watch.
 type Config struct {
-	LogDir    string   // directory containing the log files (or session subdirs)
-	Files     []string // file names to tail (e.g. "Power.log", "Zone.log")
-	Reopen    bool     // reopen file when truncated (log rotation)
-	MustExist bool     // fail if file does not exist at startup
-	ReadFromStart bool // read existing content on initial startup (catch up with current game)
+	LogDir        string   // directory containing the log files (or session subdirs)
+	Files         []string // file names to tail (e.g. "Power.log", "Zone.log")
+	Reopen        bool     // reopen file when truncated (log rotation)
+	MustExist     bool     // fail if file does not exist at startup
+	ReadFromStart bool     // read existing content on initial startup (catch up with current game)
+	PlayerLogPath string   // macOS: path to Unity Player.log (console output fallback)
 }
 
 // New creates and starts a Watcher. It will continue until ctx is cancelled
@@ -58,9 +59,21 @@ func New(ctx context.Context, cfg Config) (*Watcher, error) {
 		done:   make(chan struct{}),
 	}
 
-	// Resolve the actual directory containing the log files.
-	// Hearthstone may place logs directly in LogDir or inside
-	// timestamped session subdirectories (Hearthstone_YYYY_MM_DD_HH_MM_SS/).
+	// On macOS, use Player.log exclusively. Hearthstone's per-file logging
+	// (FilePrinting) hits a ~5MB Unity limit and stops mid-game. Console
+	// output (ConsolePrinting) goes to Player.log without that limit.
+	if cfg.PlayerLogPath != "" {
+		if err := w.startPlayerLogTail(ctx, cfg.PlayerLogPath, cfg.ReadFromStart); err != nil {
+			return nil, err
+		}
+		go func() {
+			<-ctx.Done()
+			w.Stop()
+		}()
+		return w, nil
+	}
+
+	// Non-macOS: tail per-session log files in the Logs directory.
 	logDir := resolveLogDir(cfg.LogDir, cfg.Files)
 	slog.Info("resolved log directory", "configured", cfg.LogDir, "resolved", logDir)
 
@@ -254,4 +267,70 @@ func (w *Watcher) Stop() {
 		close(w.done)
 	}
 	w.stopTails()
+}
+
+// powerLogPrefix is the category prefix prepended to Power log lines in Player.log.
+const powerLogPrefix = "[Power] "
+
+// startPlayerLogTail is the macOS primary log source. It tails Player.log,
+// filters for [Power] lines, strips the prefix, and sends them to the lines
+// channel. Player.log does not have the ~5MB Unity file size limit that
+// kills per-section FilePrinting output mid-game.
+func (w *Watcher) startPlayerLogTail(ctx context.Context, path string, fromStart bool) error {
+	var loc *tail.SeekInfo
+	if !fromStart {
+		loc = &tail.SeekInfo{Offset: 0, Whence: io.SeekEnd}
+	}
+
+	slog.Info("using Player.log as primary source (macOS)", "path", path, "fromStart", fromStart)
+
+	t, err := tail.TailFile(path, tail.Config{
+		Follow:    true,
+		ReOpen:    true,
+		MustExist: false,
+		Location:  loc,
+		Poll:      true, // macOS always
+		Logger:    tail.DiscardingLogger,
+	})
+	if err != nil {
+		return fmt.Errorf("tailing Player.log: %w", err)
+	}
+
+	w.mu.Lock()
+	w.tails = append(w.tails, t)
+	w.mu.Unlock()
+
+	go func() {
+		firstLine := true
+		for {
+			select {
+			case line, ok := <-t.Lines:
+				if !ok {
+					return
+				}
+				if line.Err != nil {
+					slog.Error("Player.log tail error", "err", line.Err)
+					continue
+				}
+				// Only pass through [Power] lines, stripping the prefix.
+				if !strings.HasPrefix(line.Text, powerLogPrefix) {
+					continue
+				}
+				text := strings.TrimPrefix(line.Text, powerLogPrefix)
+				if firstLine {
+					slog.Info("first Power line received from Player.log")
+					firstLine = false
+				}
+				select {
+				case w.lines <- Line{File: "Power.log", Text: text}:
+				case <-ctx.Done():
+					return
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	return nil
 }

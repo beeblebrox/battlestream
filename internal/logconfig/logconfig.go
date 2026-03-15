@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -20,45 +21,56 @@ type Config struct {
 	Sections []*Section
 }
 
-// required sections and their values for verbose BG logging.
-var requiredSections = []*Section{
-	{
-		Name: "Power",
-		Fields: map[string]string{
-			"LogLevel":        "1",
-			"FilePrinting":    "true",
-			"ConsolePrinting": "false",
-			"ScreenPrinting":  "false",
-			"Verbose":         "true",
+// getRequiredSections returns the required log.config sections.
+// On macOS, Power requires ConsolePrinting=true to work around a Unity
+// ~5MB file size limit that causes FilePrinting to stop mid-game.
+func getRequiredSections() []*Section {
+	// On macOS, enable ConsolePrinting for Power so lines flow to Player.log
+	// which does not have the same size limit as per-section file output.
+	powerConsolePrinting := "false"
+	if runtime.GOOS == "darwin" {
+		powerConsolePrinting = "true"
+	}
+
+	return []*Section{
+		{
+			Name: "Power",
+			Fields: map[string]string{
+				"LogLevel":        "1",
+				"FilePrinting":    "true",
+				"ConsolePrinting": powerConsolePrinting,
+				"ScreenPrinting":  "false",
+				"Verbose":         "true",
+			},
 		},
-	},
-	{
-		Name: "Zone",
-		Fields: map[string]string{
-			"LogLevel":        "1",
-			"FilePrinting":    "true",
-			"ConsolePrinting": "false",
-			"ScreenPrinting":  "false",
+		{
+			Name: "Zone",
+			Fields: map[string]string{
+				"LogLevel":        "1",
+				"FilePrinting":    "true",
+				"ConsolePrinting": "false",
+				"ScreenPrinting":  "false",
+			},
 		},
-	},
-	{
-		Name: "Decks",
-		Fields: map[string]string{
-			"LogLevel":        "1",
-			"FilePrinting":    "true",
-			"ConsolePrinting": "false",
-			"ScreenPrinting":  "false",
+		{
+			Name: "Decks",
+			Fields: map[string]string{
+				"LogLevel":        "1",
+				"FilePrinting":    "true",
+				"ConsolePrinting": "false",
+				"ScreenPrinting":  "false",
+			},
 		},
-	},
-	{
-		Name: "LoadingScreen",
-		Fields: map[string]string{
-			"LogLevel":        "1",
-			"FilePrinting":    "true",
-			"ConsolePrinting": "false",
-			"ScreenPrinting":  "false",
+		{
+			Name: "LoadingScreen",
+			Fields: map[string]string{
+				"LogLevel":        "1",
+				"FilePrinting":    "true",
+				"ConsolePrinting": "false",
+				"ScreenPrinting":  "false",
+			},
 		},
-	},
+	}
 }
 
 // Parse reads and parses a log.config file.
@@ -101,7 +113,7 @@ func Parse(path string) (*Config, error) {
 // Merge ensures required sections exist with correct values.
 // Existing user sections not in requiredSections are preserved.
 func (c *Config) Merge() {
-	for _, req := range requiredSections {
+	for _, req := range getRequiredSections() {
 		existing := c.findSection(req.Name)
 		if existing == nil {
 			// Add the section
@@ -166,7 +178,7 @@ func (c *Config) Write(path string) error {
 // IsComplete reports whether the config already contains all required sections
 // with the correct field values. If true, EnsureVerboseLogging skips the write.
 func (c *Config) IsComplete() bool {
-	for _, req := range requiredSections {
+	for _, req := range getRequiredSections() {
 		s := c.findSection(req.Name)
 		if s == nil {
 			return false

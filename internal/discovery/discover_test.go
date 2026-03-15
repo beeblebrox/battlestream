@@ -3,6 +3,8 @@ package discovery
 import (
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -251,6 +253,42 @@ func containsSegment(p, seg string) bool {
 		cur = parent
 	}
 	return false
+}
+
+func TestPlayerLogPathOnDarwin(t *testing.T) {
+	path := PlayerLogPath()
+	if runtime.GOOS == "darwin" {
+		if path == "" {
+			t.Error("on macOS, PlayerLogPath should return a non-empty path")
+		}
+		if !strings.Contains(path, "Player.log") {
+			t.Errorf("expected Player.log in path, got %q", path)
+		}
+		if !strings.Contains(path, "Blizzard Entertainment") {
+			t.Errorf("expected 'Blizzard Entertainment' in path, got %q", path)
+		}
+	} else {
+		if path != "" {
+			t.Errorf("on non-macOS, expected empty PlayerLogPath, got %q", path)
+		}
+	}
+}
+
+func TestProbeRootSetsPlayerLogPath(t *testing.T) {
+	dir := makeInstallDir(t)
+	info, err := probeRoot(dir)
+	if err != nil {
+		t.Fatalf("probeRoot: %v", err)
+	}
+	if runtime.GOOS == "darwin" {
+		if info.PlayerLogPath == "" {
+			t.Error("on macOS, PlayerLogPath should be set")
+		}
+	} else {
+		if info.PlayerLogPath != "" {
+			t.Errorf("on non-macOS, expected empty PlayerLogPath, got %q", info.PlayerLogPath)
+		}
+	}
 }
 
 func TestWalkForInstall(t *testing.T) {

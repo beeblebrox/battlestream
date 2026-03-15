@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -103,6 +104,10 @@ func startDaemon(ctx context.Context, cfg *config.Config, profile *config.Profil
 		}
 	}
 
+	// On macOS, always use Player.log as the primary source.
+	// This is computed independently of discovery — it's a well-known path.
+	playerLogPath := discovery.PlayerLogPath()
+
 	var logConfigFixed bool
 	if logConfigPath != "" {
 		patched, err := logconfig.CheckAndPatch(logConfigPath)
@@ -151,6 +156,7 @@ func startDaemon(ctx context.Context, cfg *config.Config, profile *config.Profil
 		Reopen:        true,
 		MustExist:     false,
 		ReadFromStart: true,
+		PlayerLogPath: playerLogPath,
 	})
 	if err != nil {
 		st.Close()
@@ -351,17 +357,28 @@ func cmdRun() *cobra.Command {
 			defer svc.store.Close()
 			defer svc.watcher.Stop()
 
-			// Resolve Power.log files for replay mode fallback.
-			logPath := profile.Hearthstone.LogPath
-			if logPath == "" {
-				info, _ := discovery.Discover()
-				if info != nil {
-					logPath = info.LogPath
+			// Resolve log files for replay mode.
+			// On macOS, use Player.log exclusively to avoid duplicates
+			// (Power.log and Player.log contain the same data when
+			// ConsolePrinting is enabled).
+			var logFiles []string
+			if runtime.GOOS == "darwin" {
+				if plp := discovery.PlayerLogPath(); plp != "" && fileExists(plp) {
+					logFiles = append(logFiles, plp)
 				}
 			}
-			var logFiles []string
-			if logPath != "" {
-				logFiles = findPowerLogs(logPath)
+			if len(logFiles) == 0 {
+				// Non-macOS, or Player.log doesn't exist yet: use session Power.logs.
+				replayLogPath := profile.Hearthstone.LogPath
+				if replayLogPath == "" {
+					info, _ := discovery.Discover()
+					if info != nil {
+						replayLogPath = info.LogPath
+					}
+				}
+				if replayLogPath != "" {
+					logFiles = findPowerLogs(replayLogPath)
+				}
 			}
 
 			// Run the combined TUI (live + replay).
@@ -437,17 +454,24 @@ If no file arguments are given, discovers log files from config.`,
 				if err != nil {
 					return err
 				}
-				logPath := profile.Hearthstone.LogPath
-				if logPath == "" {
-					info, dErr := discovery.Discover()
-					if dErr != nil {
-						return fmt.Errorf("auto-discovery failed: %w\nSpecify log files as arguments or run 'battlestream discover'", dErr)
+				if runtime.GOOS == "darwin" {
+					if plp := discovery.PlayerLogPath(); plp != "" && fileExists(plp) {
+						logFiles = append(logFiles, plp)
 					}
-					logPath = info.LogPath
 				}
-				logFiles = findPowerLogs(logPath)
 				if len(logFiles) == 0 {
-					return fmt.Errorf("no Power.log files found in %s", logPath)
+					logPath := profile.Hearthstone.LogPath
+					if logPath == "" {
+						info, dErr := discovery.Discover()
+						if dErr != nil {
+							return fmt.Errorf("auto-discovery failed: %w\nSpecify log files as arguments or run 'battlestream discover'", dErr)
+						}
+						logPath = info.LogPath
+					}
+					logFiles = findPowerLogs(logPath)
+				}
+				if len(logFiles) == 0 {
+					return fmt.Errorf("no log files found")
 				}
 			}
 
@@ -724,24 +748,19 @@ func cmdReparse() *cobra.Command {
 			machine := gamestate.New()
 			proc := gamestate.NewProcessor(machine)
 
-			// Find all Power.log files in the log directory.
+			// Find all log files to reparse.
 			var logFiles []string
-			entries, _ := os.ReadDir(logPath)
-			for _, e := range entries {
-				if e.IsDir() && strings.HasPrefix(e.Name(), "Hearthstone_") {
-					candidate := filepath.Join(logPath, e.Name(), "Power.log")
-					if _, err := os.Stat(candidate); err == nil {
-						logFiles = append(logFiles, candidate)
-					}
+			if runtime.GOOS == "darwin" {
+				if plp := discovery.PlayerLogPath(); plp != "" && fileExists(plp) {
+					logFiles = append(logFiles, plp)
 				}
 			}
-			// Also check for Power.log directly in the log dir.
-			if direct := filepath.Join(logPath, "Power.log"); fileExists(direct) {
-				logFiles = append(logFiles, direct)
+			if len(logFiles) == 0 {
+				logFiles = findPowerLogs(logPath)
 			}
 
 			if len(logFiles) == 0 {
-				fmt.Println("No Power.log files found in", logPath)
+				fmt.Println("No log files found in", logPath)
 				return nil
 			}
 
@@ -788,7 +807,8 @@ func cmdReparse() *cobra.Command {
 				scanner := bufio.NewScanner(f)
 				scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 				for scanner.Scan() {
-					p.Feed(scanner.Text())
+					line := strings.TrimPrefix(scanner.Text(), "[Power] ")
+					p.Feed(line)
 				}
 				f.Close()
 			}
