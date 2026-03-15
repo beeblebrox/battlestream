@@ -303,7 +303,7 @@ func cmdDaemon() *cobra.Command {
 				fmt.Println("│  You must restart Hearthstone for logging to work.      │")
 				fmt.Println("│  Press Enter to continue...                             │")
 				fmt.Println("└─────────────────────────────────────────────────────────┘")
-				fmt.Scanln()
+				_, _ = fmt.Scanln()
 			}
 
 			<-ctx.Done()
