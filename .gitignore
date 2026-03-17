@@ -41,6 +41,9 @@ Thumbs.db
 # Config with secrets
 config.yaml
 
+# Claude Code local settings
+.claude/settings.local.json
+
 # Generated protobuf files are committed (see internal/api/grpc/gen/)
 
 # Air live reload
