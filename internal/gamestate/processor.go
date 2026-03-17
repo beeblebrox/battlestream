@@ -1176,6 +1176,8 @@ func (p *Processor) handleDntTagChange(entityID int, tag string, value int) {
 	isSD1 := tag == "TAG_SCRIPT_DATA_NUM_1"
 
 	switch cardID {
+	case "BG_ShopBuff":
+		p.handleGenericShopBuffDnt(entityID, isSD1, value, CatShopBuff)
 	case "BG_ShopBuff_Elemental":
 		p.handleShopBuffDnt(entityID, isSD1, value)
 	case "BG30_MagicItem_544pe":
@@ -1211,6 +1213,30 @@ func (p *Processor) handleAbsoluteDnt(category string, isSD1 bool, value, baseAt
 		state[0] = baseAtk + value
 	} else {
 		state[1] = baseHp + value
+	}
+	bt.buffSourceState[category] = state
+	p.machine.SetBuffSource(category, state[0], state[1])
+}
+
+// handleGenericShopBuffDnt handles BG_ShopBuff (generic shop buff) with differential accumulation.
+func (p *Processor) handleGenericShopBuffDnt(entityID int, isSD1 bool, value int, category string) {
+	bt := &p.localBuffs
+	prev := bt.shopBuffPrev[entityID]
+	var delta int
+	if isSD1 {
+		delta = value - prev[0]
+		prev[0] = value
+	} else {
+		delta = value - prev[1]
+		prev[1] = value
+	}
+	bt.shopBuffPrev[entityID] = prev
+
+	state := bt.buffSourceState[category]
+	if isSD1 {
+		state[0] += delta
+	} else {
+		state[1] += delta
 	}
 	bt.buffSourceState[category] = state
 	p.machine.SetBuffSource(category, state[0], state[1])
