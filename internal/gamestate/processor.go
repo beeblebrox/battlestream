@@ -190,6 +190,17 @@ func (p *Processor) Handle(e parser.GameEvent) {
 			p.machine.SetGameEntityTurn(turn)
 		}
 
+	case parser.EventGameEntityTags:
+		for tag, value := range e.Tags {
+			if tag == "BACON_DUOS_PUNISH_LEAVERS" && value == "1" {
+				if !p.isDuos {
+					p.isDuos = true
+					p.machine.SetDuosMode(true)
+					slog.Info("Duos detected from GameEntity tag", "tag", tag)
+				}
+			}
+		}
+
 	case parser.EventTagChange:
 		p.handleTagChange(e)
 
@@ -295,6 +306,13 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 
 	for tag, value := range e.Tags {
 		switch tag {
+		case "BACON_DUO_PASSABLE":
+			if value == "1" && !p.isDuos {
+				p.isDuos = true
+				p.machine.SetDuosMode(true)
+				slog.Info("Duos detected from BACON_DUO_PASSABLE")
+			}
+
 		case "BACON_DUO_TEAMMATE_PLAYER_ID":
 			// Duos detection: this tag on the local player entity identifies the partner.
 			if p.isLocalPlayerEntity(e) {

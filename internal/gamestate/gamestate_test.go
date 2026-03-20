@@ -1890,3 +1890,60 @@ func TestDuosPartnerHealthTracking(t *testing.T) {
 	}
 }
 
+func TestDuosDetectionViaPunishLeavers(t *testing.T) {
+	m, p := newProc()
+	// Game start
+	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+	// GameEntity tags with BACON_DUOS_PUNISH_LEAVERS
+	p.Handle(parser.GameEvent{
+		Type: parser.EventGameEntityTags,
+		Tags: map[string]string{"BACON_DUOS_PUNISH_LEAVERS": "1"},
+	})
+	// Local player (no BACON_DUO_TEAMMATE_PLAYER_ID)
+	p.Handle(parser.GameEvent{
+		Type: parser.EventPlayerDef, EntityID: 14, PlayerID: 5,
+		Tags: map[string]string{"hi": "144115193835963207", "lo": "30722021", "PLAYER_ID": "5", "HERO_ENTITY": "33"},
+	})
+	// Dummy player
+	p.Handle(parser.GameEvent{
+		Type: parser.EventPlayerDef, EntityID: 15, PlayerID: 13,
+		Tags: map[string]string{"hi": "0", "lo": "0", "PLAYER_ID": "13"},
+	})
+
+	s := m.State()
+	if !s.IsDuos {
+		t.Error("expected IsDuos=true from BACON_DUOS_PUNISH_LEAVERS")
+	}
+	// Partner ID not yet known
+	if p.partnerPlayerID != 0 {
+		t.Errorf("expected partnerPlayerID=0 (deferred), got %d", p.partnerPlayerID)
+	}
+}
+
+func TestDuosDetectionViaDuoPassable(t *testing.T) {
+	m, p := newProc()
+	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventPlayerDef, EntityID: 14, PlayerID: 5,
+		Tags: map[string]string{"hi": "144115193835963207", "lo": "30722021", "PLAYER_ID": "5"},
+	})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventPlayerDef, EntityID: 15, PlayerID: 13,
+		Tags: map[string]string{"hi": "0", "lo": "0", "PLAYER_ID": "13"},
+	})
+
+	if m.State().IsDuos {
+		t.Fatal("should not be duos yet")
+	}
+
+	// BACON_DUO_PASSABLE on a card entity triggers duos detection
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 1143,
+		Tags: map[string]string{"BACON_DUO_PASSABLE": "1"},
+	})
+
+	if !m.State().IsDuos {
+		t.Error("expected IsDuos=true from BACON_DUO_PASSABLE")
+	}
+}
+
