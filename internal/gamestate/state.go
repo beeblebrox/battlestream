@@ -362,6 +362,9 @@ func (m *Machine) UpsertMinion(minion MinionState) {
 			return
 		}
 	}
+	if len(m.state.Board) >= 7 {
+		return // BG board max is 7
+	}
 	m.state.Board = append(m.state.Board, minion)
 }
 

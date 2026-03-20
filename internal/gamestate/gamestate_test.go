@@ -167,6 +167,20 @@ func TestMachineRemoveMinion(t *testing.T) {
 	}
 }
 
+func TestMachineUpsertMinionMaxSeven(t *testing.T) {
+	m := New()
+	m.GameStart("g", time.Now())
+	m.SetPhase(PhaseRecruit)
+
+	for i := 0; i < 10; i++ {
+		m.UpsertMinion(MinionState{EntityID: 100 + i, Name: fmt.Sprintf("M%d", i), Attack: 1, Health: 1})
+	}
+	s := m.State()
+	if len(s.Board) > 7 {
+		t.Errorf("expected max 7 board minions, got %d", len(s.Board))
+	}
+}
+
 func TestMachineStatSnapshot(t *testing.T) {
 	m := New()
 	m.GameStart("g", time.Now())
