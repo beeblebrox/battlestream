@@ -2368,7 +2368,15 @@ func TestPartnerBoardCombatSpawnFiltering(t *testing.T) {
 		})
 	}
 
+	// First combat action — signals board setup is complete
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 1,
+		EntityName: "GameEntity",
+		Tags: map[string]string{"PROPOSED_ATTACKER": "701"},
+	})
+
 	// Mid-combat spawns (deathrattle tokens) — should be filtered out
+	// because they arrive after PROPOSED_ATTACKER
 	for i := 0; i < 3; i++ {
 		p.Handle(parser.GameEvent{
 			Type: parser.EventEntityUpdate, EntityID: 750 + i, CardID: "BG34_Giant_584",
@@ -2399,6 +2407,91 @@ func TestPartnerBoardCombatSpawnFiltering(t *testing.T) {
 	for i, mn := range s.PartnerBoard.Minions {
 		if mn.Attack < 50 {
 			t.Errorf("minion[%d] has base stats (atk=%d), expected buffed initial board minion", i, mn.Attack)
+		}
+	}
+}
+
+func TestPartnerBoardSmallBoardNoSpawns(t *testing.T) {
+	// A partner with <7 minions should not include combat spawns.
+	// This verifies the PROPOSED_ATTACKER cutoff works even when
+	// a simple count-based cap would fail.
+	m, p := newProc()
+	setupDuosGame(p)
+
+	p.Handle(parser.GameEvent{
+		Type: parser.EventEntityUpdate, EntityID: 146, CardID: "BG32_HERO_002",
+		EntityName: "Buttons",
+		Tags: map[string]string{"CONTROLLER": "15", "CARDTYPE": "HERO", "PLAYER_ID": "8", "HEALTH": "30", "ZONE": "PLAY"},
+	})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 20, PlayerID: 7,
+		EntityName: "LocalPlayer#1234",
+		Tags: map[string]string{"TURN": "3"},
+	})
+
+	// Partner combat starts
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 20, PlayerID: 7,
+		EntityName: "LocalPlayer#1234",
+		Tags: map[string]string{"BACON_CURRENT_COMBAT_PLAYER_ID": "8"},
+	})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventEntityUpdate, EntityID: 700, CardID: "BG32_HERO_002",
+		Tags: map[string]string{"CONTROLLER": "7", "CARDTYPE": "HERO", "HEALTH": "30", "ZONE": "PLAY"},
+	})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 700,
+		Tags: map[string]string{"PLAYER_ID": "8"},
+	})
+
+	// Only 3 initial board minions (early game)
+	for i := 0; i < 3; i++ {
+		p.Handle(parser.GameEvent{
+			Type: parser.EventEntityUpdate, EntityID: 701 + i, CardID: "BGS_119",
+			EntityName: fmt.Sprintf("Minion%d", i),
+			Tags: map[string]string{
+				"CONTROLLER": "7", "CARDTYPE": "MINION",
+				"ATK": fmt.Sprintf("%d", 20+i*5), "HEALTH": fmt.Sprintf("%d", 15+i*5),
+				"ZONE": "PLAY", "ZONE_POSITION": fmt.Sprintf("%d", i+1),
+			},
+		})
+	}
+
+	// Combat action fires
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 1,
+		EntityName: "GameEntity",
+		Tags: map[string]string{"PROPOSED_ATTACKER": "701"},
+	})
+
+	// Deathrattle spawn — should NOT be collected
+	p.Handle(parser.GameEvent{
+		Type: parser.EventEntityUpdate, EntityID: 750, CardID: "BG34_Giant_584",
+		EntityName: "Timewarped Kil'rek",
+		Tags: map[string]string{
+			"CONTROLLER": "7", "CARDTYPE": "MINION",
+			"ATK": "4", "HEALTH": "7",
+			"ZONE": "PLAY", "ZONE_POSITION": "1",
+		},
+	})
+
+	// Combat ends
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 20, PlayerID: 7,
+		EntityName: "LocalPlayer#1234",
+		Tags: map[string]string{"BACON_CURRENT_COMBAT_PLAYER_ID": "7"},
+	})
+
+	s := m.State()
+	if s.PartnerBoard == nil {
+		t.Fatal("expected PartnerBoard != nil")
+	}
+	if len(s.PartnerBoard.Minions) != 3 {
+		t.Errorf("expected 3 partner minions (no spawns), got %d", len(s.PartnerBoard.Minions))
+	}
+	for i, mn := range s.PartnerBoard.Minions {
+		if mn.Attack < 20 {
+			t.Errorf("minion[%d] has base stats (atk=%d), expected initial board minion", i, mn.Attack)
 		}
 	}
 }

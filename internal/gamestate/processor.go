@@ -78,9 +78,10 @@ type Processor struct {
 	isDuos            bool
 
 	// Partner combat tracking
-	partnerCombatActive   bool          // true while partner's combat is in progress
-	partnerCombatHeroCtrl int           // CONTROLLER of partner's hero copy in combat
-	partnerCombatMinions  []MinionState // collected partner minions during combat
+	partnerCombatActive    bool          // true while partner's combat is in progress
+	partnerCombatHeroCtrl  int           // CONTROLLER of partner's hero copy in combat
+	partnerCombatMinions   []MinionState // collected partner minions during combat
+	partnerBoardSetupDone  bool          // true after first combat action (PROPOSED_ATTACKER) — stops collection
 	combatPhaseActive     bool          // true during the combat phase (BACON_CURRENT_COMBAT_PLAYER_ID > 0)
 	combatPhaseEntityIDs  []int         // entity IDs created during current combat phase (for retroactive scan)
 
@@ -154,6 +155,7 @@ func (p *Processor) Handle(e parser.GameEvent) {
 		p.partnerCombatActive = false
 		p.partnerCombatHeroCtrl = 0
 		p.partnerCombatMinions = nil
+		p.partnerBoardSetupDone = false
 		p.combatPhaseActive = false
 		p.combatPhaseEntityIDs = nil
 		p.entityController = make(map[int]int)
@@ -380,6 +382,7 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 					p.partnerCombatActive = true
 					p.partnerCombatHeroCtrl = 0
 					p.partnerCombatMinions = nil
+					p.partnerBoardSetupDone = false
 					// Retroactively collect partner combat copies that were
 					// created before this flag fired. In duos the partner's
 					// hero copy (PLAYER_ID=partnerPlayerID, CONTROLLER=localPlayerID)
@@ -436,6 +439,12 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 			// GameEntity's PROPOSED_ATTACKER tag fires for every attack during combat.
 			// Buffer the hero attacker ID; we resolve the result when PROPOSED_DEFENDER arrives.
 			if e.EntityName == "GameEntity" {
+				// First combat action means board setup is complete — stop collecting
+				// partner combat minions. Initial board entities arrive as FULL_ENTITY
+				// before any attacks; deathrattle/reborn spawns come after.
+				if p.partnerCombatActive && !p.partnerBoardSetupDone {
+					p.partnerBoardSetupDone = true
+				}
 				attackerID := parseInt(value)
 				if attackerID > 0 && p.heroEntities[attackerID] {
 					p.pendingHeroAttackerID = attackerID
@@ -826,13 +835,13 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 	// Only collect minions with ZONE_POSITION > 0 (initial board setup),
 	// not mid-combat spawns (deathrattles, etc.) which lack a zone position.
 	zonePos := parseInt(e.Tags["ZONE_POSITION"])
-	if p.partnerCombatActive && controllerID > 0 && controllerID == p.localPlayerID {
+	if p.partnerCombatActive && !p.partnerBoardSetupDone &&
+		controllerID > 0 && controllerID == p.localPlayerID {
 		if cardType == "HERO" {
 			// Partner hero copy — CONTROLLER matches localPlayerID during combat.
 			p.partnerCombatHeroCtrl = controllerID
 		} else if cardType == "MINION" && zonePos > 0 &&
-			info.Attack > 0 && info.Health > 0 && info.Zone == "PLAY" &&
-			len(p.partnerCombatMinions) < 7 {
+			info.Attack > 0 && info.Health > 0 && info.Zone == "PLAY" {
 			mn := MinionState{
 				EntityID: e.EntityID,
 				CardID:   info.CardID,
@@ -1086,6 +1095,7 @@ func (p *Processor) finalizePartnerCombat() {
 	}
 	p.partnerCombatMinions = nil
 	p.partnerCombatHeroCtrl = 0
+	p.partnerBoardSetupDone = false
 }
 
 // collectPartnerCombatRetro scans recently created combat entities for partner
@@ -1128,8 +1138,7 @@ func (p *Processor) collectPartnerCombatRetro() {
 		if info.CardType == "MINION" && info.Zone == "PLAY" &&
 			info.ZonePosition > 0 &&
 			info.Attack > 0 && info.Health > 0 &&
-			p.entityController[eid] == heroCtrl &&
-			len(p.partnerCombatMinions) < 7 {
+			p.entityController[eid] == heroCtrl {
 			mn := MinionState{
 				EntityID: eid,
 				CardID:   info.CardID,
