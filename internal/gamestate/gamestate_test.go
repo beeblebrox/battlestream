@@ -1935,6 +1935,46 @@ func TestDeferredPartnerResolution(t *testing.T) {
 	}
 }
 
+func TestDuosDntEnchantmentWithBotController(t *testing.T) {
+	m, p := newProc()
+	setupDuosGame(p)
+
+	// Set up local hero entity 33 controlled by local player 7
+	p.Handle(parser.GameEvent{
+		Type: parser.EventEntityUpdate, EntityID: 33, CardID: "TB_BaconShop_HERO_49",
+		Tags: map[string]string{"CONTROLLER": "7", "CARDTYPE": "HERO", "HEALTH": "40", "ZONE": "PLAY"},
+	})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 20, PlayerID: 7,
+		EntityName: "LocalPlayer#1234",
+		Tags: map[string]string{"HERO_ENTITY": "33"},
+	})
+
+	// BG_ShopBuff Dnt enchantment with CONTROLLER=15 (bot), ATTACHED to local hero 33
+	p.Handle(parser.GameEvent{
+		Type: parser.EventEntityUpdate, EntityID: 500, CardID: "BG_ShopBuff",
+		Tags: map[string]string{
+			"CONTROLLER": "15", "CARDTYPE": "ENCHANTMENT",
+			"ATTACHED": "33", "ZONE": "PLAY",
+			"TAG_SCRIPT_DATA_NUM_1": "7", "TAG_SCRIPT_DATA_NUM_2": "7",
+		},
+	})
+
+	s := m.State()
+	found := false
+	for _, bs := range s.BuffSources {
+		if bs.Category == CatShopBuff {
+			found = true
+			if bs.Attack != 7 || bs.Health != 7 {
+				t.Errorf("expected ShopBuff +7/+7, got +%d/+%d", bs.Attack, bs.Health)
+			}
+		}
+	}
+	if !found {
+		t.Error("expected Shop Buff source to be tracked despite bot CONTROLLER")
+	}
+}
+
 func TestDuosDetectionViaPunishLeavers(t *testing.T) {
 	m, p := newProc()
 	// Game start

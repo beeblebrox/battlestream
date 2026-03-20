@@ -595,9 +595,9 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 		case "TAG_SCRIPT_DATA_NUM_1", "TAG_SCRIPT_DATA_NUM_2":
 			if e.EntityID > 0 {
 				p.updateEnchantmentScriptData(e.EntityID, tag, value)
-				// Only process enchantments controlled by local player.
+				// Process enchantments controlled by local player or attached to local entities.
 				ctrl := p.entityController[e.EntityID]
-				if ctrl == p.localPlayerID {
+				if ctrl == p.localPlayerID || p.isLocalDntTarget(e.EntityID) {
 					p.handleDntTagChange(e.EntityID, tag, parseInt(value))
 				}
 			}
@@ -946,6 +946,25 @@ func (p *Processor) isPartnerHero(e parser.GameEvent, controllerID int) bool {
 	return p.heroEntities[e.EntityID]
 }
 
+// isLocalDntTarget returns true if the enchantment entity is attached to the local
+// hero or local player entity. Used in duos where Dnt enchantments may have
+// CONTROLLER=botID but are attached to local entities.
+func (p *Processor) isLocalDntTarget(entityID int) bool {
+	info := p.entityProps[entityID]
+	if info == nil {
+		return false
+	}
+	if info.AttachedTo > 0 {
+		if info.AttachedTo == p.localHeroID {
+			return true
+		}
+		if pid, ok := p.playerEntityIDs[info.AttachedTo]; ok && pid == p.localPlayerID {
+			return true
+		}
+	}
+	return false
+}
+
 // resolvePartner retroactively identifies the partner from a PlayerID discovered
 // via BACON_CURRENT_COMBAT_PLAYER_ID. Scans heroEntities for a hero with matching
 // PLAYER_ID and sets partner state accordingly.
@@ -1188,7 +1207,6 @@ func (p *Processor) handleEnchantmentEntity(e parser.GameEvent, info *entityInfo
 	targetCtrl := p.entityController[info.AttachedTo]
 	enchCtrl := p.entityController[e.EntityID]
 	isLocalMinion := targetCtrl == p.localPlayerID
-
 	if !isLocalMinion {
 		isLocalEnch := enchCtrl == p.localPlayerID
 		if !isLocalEnch {
@@ -1213,7 +1231,7 @@ func (p *Processor) handleEnchantmentEntity(e parser.GameEvent, info *entityInfo
 
 	// Process initial SD values from FULL_ENTITY/SHOW_ENTITY as counter updates.
 	if info.ScriptData1 != 0 || info.ScriptData2 != 0 {
-		if enchCtrl == p.localPlayerID {
+		if enchCtrl == p.localPlayerID || p.isLocalDntTarget(e.EntityID) {
 			if info.ScriptData1 != 0 {
 				p.handleDntTagChange(e.EntityID, "TAG_SCRIPT_DATA_NUM_1", info.ScriptData1)
 			}
@@ -1231,9 +1249,9 @@ func (p *Processor) handleDntTagChange(entityID int, tag string, value int) {
 	if info == nil {
 		return
 	}
-	// Only process enchantments controlled by local player.
+	// Only process enchantments controlled by local player or attached to local entities.
 	ctrl := p.entityController[entityID]
-	if ctrl != p.localPlayerID {
+	if ctrl != p.localPlayerID && !p.isLocalDntTarget(entityID) {
 		return
 	}
 
