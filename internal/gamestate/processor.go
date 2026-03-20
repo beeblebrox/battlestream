@@ -831,7 +831,8 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 			// Partner hero copy — CONTROLLER matches localPlayerID during combat.
 			p.partnerCombatHeroCtrl = controllerID
 		} else if cardType == "MINION" && zonePos > 0 &&
-			info.Attack > 0 && info.Health > 0 && info.Zone == "PLAY" {
+			info.Attack > 0 && info.Health > 0 && info.Zone == "PLAY" &&
+			len(p.partnerCombatMinions) < 7 {
 			mn := MinionState{
 				EntityID: e.EntityID,
 				CardID:   info.CardID,
@@ -1127,7 +1128,8 @@ func (p *Processor) collectPartnerCombatRetro() {
 		if info.CardType == "MINION" && info.Zone == "PLAY" &&
 			info.ZonePosition > 0 &&
 			info.Attack > 0 && info.Health > 0 &&
-			p.entityController[eid] == heroCtrl {
+			p.entityController[eid] == heroCtrl &&
+			len(p.partnerCombatMinions) < 7 {
 			mn := MinionState{
 				EntityID: eid,
 				CardID:   info.CardID,

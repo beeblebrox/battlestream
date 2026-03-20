@@ -2323,6 +2323,86 @@ func TestPartnerBoardMaxSeven(t *testing.T) {
 	}
 }
 
+func TestPartnerBoardCombatSpawnFiltering(t *testing.T) {
+	m, p := newProc()
+	setupDuosGame(p)
+
+	// Set up partner hero
+	p.Handle(parser.GameEvent{
+		Type: parser.EventEntityUpdate, EntityID: 146, CardID: "BG32_HERO_002",
+		EntityName: "Buttons",
+		Tags: map[string]string{"CONTROLLER": "15", "CARDTYPE": "HERO", "PLAYER_ID": "8", "HEALTH": "30", "ZONE": "PLAY"},
+	})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 20, PlayerID: 7,
+		EntityName: "LocalPlayer#1234",
+		Tags: map[string]string{"TURN": "5"},
+	})
+
+	// Partner combat starts
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 20, PlayerID: 7,
+		EntityName: "LocalPlayer#1234",
+		Tags: map[string]string{"BACON_CURRENT_COMBAT_PLAYER_ID": "8"},
+	})
+	// Partner hero copy
+	p.Handle(parser.GameEvent{
+		Type: parser.EventEntityUpdate, EntityID: 700, CardID: "BG32_HERO_002",
+		Tags: map[string]string{"CONTROLLER": "7", "CARDTYPE": "HERO", "HEALTH": "30", "ZONE": "PLAY"},
+	})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 700,
+		Tags: map[string]string{"PLAYER_ID": "8"},
+	})
+
+	// 7 initial board minions
+	for i := 0; i < 7; i++ {
+		p.Handle(parser.GameEvent{
+			Type: parser.EventEntityUpdate, EntityID: 701 + i, CardID: "BGS_119",
+			EntityName: fmt.Sprintf("Minion%d", i),
+			Tags: map[string]string{
+				"CONTROLLER": "7", "CARDTYPE": "MINION",
+				"ATK": fmt.Sprintf("%d", 50+i*10), "HEALTH": fmt.Sprintf("%d", 40+i*10),
+				"ZONE": "PLAY", "ZONE_POSITION": fmt.Sprintf("%d", i+1),
+			},
+		})
+	}
+
+	// Mid-combat spawns (deathrattle tokens) — should be filtered out
+	for i := 0; i < 3; i++ {
+		p.Handle(parser.GameEvent{
+			Type: parser.EventEntityUpdate, EntityID: 750 + i, CardID: "BG34_Giant_584",
+			EntityName: "Timewarped Kil'rek",
+			Tags: map[string]string{
+				"CONTROLLER": "7", "CARDTYPE": "MINION",
+				"ATK": "4", "HEALTH": "7",
+				"ZONE": "PLAY", "ZONE_POSITION": "1",
+			},
+		})
+	}
+
+	// Combat ends
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 20, PlayerID: 7,
+		EntityName: "LocalPlayer#1234",
+		Tags: map[string]string{"BACON_CURRENT_COMBAT_PLAYER_ID": "7"},
+	})
+
+	s := m.State()
+	if s.PartnerBoard == nil {
+		t.Fatal("expected PartnerBoard != nil")
+	}
+	if len(s.PartnerBoard.Minions) != 7 {
+		t.Errorf("expected 7 partner minions (no combat spawns), got %d", len(s.PartnerBoard.Minions))
+	}
+	// Verify we kept the initial board minions (buffed stats), not combat spawns (base stats)
+	for i, mn := range s.PartnerBoard.Minions {
+		if mn.Attack < 50 {
+			t.Errorf("minion[%d] has base stats (atk=%d), expected buffed initial board minion", i, mn.Attack)
+		}
+	}
+}
+
 func TestIntegrationDuosWithTeammateID(t *testing.T) {
 	s := parseLogFile(t, "testdata/duos_with_teammate_id.txt")
 
