@@ -84,3 +84,4 @@ tasks with a log of what is done and what remains.
 | 31 | [31-metrics.md](31-metrics.md) | No metrics/observability — no Prometheus or similar export |
 | 32 | [32-trinkets-artifacts.md](32-trinkets-artifacts.md) | No trinkets/artifacts support — post-2025 mechanics not covered |
 | 36 | [36-placement-in-result.md](36-placement-in-result.md) | ~~TUI shows WIN/LOSS without placement number~~ **DONE** — displays "WIN #4" / "LOSS #7" |
+| 37 | [37-gamenetlogger-signals.md](37-gamenetlogger-signals.md) | GameNetLogger.log has disconnect/reconnect signals not used by battlestream |
