@@ -1935,6 +1935,46 @@ func TestDeferredPartnerResolution(t *testing.T) {
 	}
 }
 
+func TestPartnerBoardSnapshot(t *testing.T) {
+	m := New()
+	m.GameStart("test", time.Now())
+	m.SetDuosMode(true)
+
+	minions := []MinionState{
+		{EntityID: 100, CardID: "BGS_119", Name: "Crackling Cyclone", Attack: 220, Health: 177},
+		{EntityID: 101, CardID: "BG32_111", Name: "Mirror Monster", Attack: 150, Health: 132},
+	}
+	m.SetPartnerBoard(minions, 17)
+
+	s := m.State()
+	if s.PartnerBoard == nil {
+		t.Fatal("expected PartnerBoard != nil")
+	}
+	if s.PartnerBoard.Turn != 17 {
+		t.Errorf("expected turn 17, got %d", s.PartnerBoard.Turn)
+	}
+	if len(s.PartnerBoard.Minions) != 2 {
+		t.Errorf("expected 2 minions, got %d", len(s.PartnerBoard.Minions))
+	}
+	if s.PartnerBoard.Stale {
+		t.Error("expected not stale")
+	}
+
+	// Mark stale
+	m.MarkPartnerBoardStale()
+	s = m.State()
+	if !s.PartnerBoard.Stale {
+		t.Error("expected stale after MarkPartnerBoardStale")
+	}
+
+	// New snapshot clears stale
+	m.SetPartnerBoard(minions, 18)
+	s = m.State()
+	if s.PartnerBoard.Stale {
+		t.Error("expected not stale after new snapshot")
+	}
+}
+
 func TestDuosDntEnchantmentWithBotController(t *testing.T) {
 	m, p := newProc()
 	setupDuosGame(p)

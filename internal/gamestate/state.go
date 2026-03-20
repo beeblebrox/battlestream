@@ -43,8 +43,16 @@ type BGGameState struct {
 	Placement     int
 
 	// Duos fields
-	IsDuos  bool         `json:"is_duos,omitempty"`
-	Partner *PlayerState `json:"partner,omitempty"`
+	IsDuos       bool          `json:"is_duos,omitempty"`
+	Partner      *PlayerState  `json:"partner,omitempty"`
+	PartnerBoard *PartnerBoard `json:"partner_board,omitempty"`
+}
+
+// PartnerBoard holds the last-seen partner board snapshot from combat copies.
+type PartnerBoard struct {
+	Minions []MinionState `json:"minions"`
+	Turn    int           `json:"turn"`
+	Stale   bool          `json:"stale"`
 }
 
 // PlayerState holds per-player stats.
@@ -200,6 +208,16 @@ func (m *Machine) State() BGGameState {
 	if m.state.Partner != nil {
 		p := *m.state.Partner
 		s.Partner = &p
+	}
+	// Deep copy partner board
+	if m.state.PartnerBoard != nil {
+		pb := *m.state.PartnerBoard
+		pb.Minions = make([]MinionState, len(m.state.PartnerBoard.Minions))
+		for i, mn := range m.state.PartnerBoard.Minions {
+			pb.Minions[i] = mn
+			pb.Minions[i].Enchantments = append([]Enchantment(nil), mn.Enchantments...)
+		}
+		s.PartnerBoard = &pb
 	}
 	return s
 }
@@ -640,6 +658,31 @@ func (m *Machine) UpdatePartnerGold(tag string, value int) {
 	m.state.Partner.CurrentGold = m.partnerGoldTotal - m.partnerGoldUsed
 }
 
+// SetPartnerBoard sets the partner board snapshot from combat copy minions.
+func (m *Machine) SetPartnerBoard(minions []MinionState, turn int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := make([]MinionState, len(minions))
+	for i, mn := range minions {
+		cp[i] = mn
+		cp[i].Enchantments = append([]Enchantment(nil), mn.Enchantments...)
+	}
+	m.state.PartnerBoard = &PartnerBoard{
+		Minions: cp,
+		Turn:    turn,
+		Stale:   false,
+	}
+}
+
+// MarkPartnerBoardStale marks the partner board snapshot as stale (not updated this turn).
+func (m *Machine) MarkPartnerBoardStale() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.state.PartnerBoard != nil {
+		m.state.PartnerBoard.Stale = true
+	}
+}
+
 // captureTurnSnapshot computes deltas and appends a snapshot for the given turn.
 // Must be called with m.mu held.
 func (m *Machine) captureTurnSnapshot(turn int) {
@@ -712,6 +755,15 @@ func (m *Machine) deepCopyState() BGGameState {
 	if m.state.Partner != nil {
 		p := *m.state.Partner
 		s.Partner = &p
+	}
+	if m.state.PartnerBoard != nil {
+		pb := *m.state.PartnerBoard
+		pb.Minions = make([]MinionState, len(m.state.PartnerBoard.Minions))
+		for i, mn := range m.state.PartnerBoard.Minions {
+			pb.Minions[i] = mn
+			pb.Minions[i].Enchantments = append([]Enchantment(nil), mn.Enchantments...)
+		}
+		s.PartnerBoard = &pb
 	}
 	return s
 }
