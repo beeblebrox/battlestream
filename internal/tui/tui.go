@@ -417,7 +417,7 @@ func (m *Model) View() string {
 		m.partnerBoardVP.SetContent(m.partnerBoardItems())
 
 		title := "PARTNER BOARD"
-		if m.game.PartnerBoard != nil && len(m.game.PartnerBoard) > 0 {
+		if len(m.game.PartnerBoard) > 0 {
 			if m.game.PartnerBoardStale {
 				title = fmt.Sprintf("PARTNER BOARD (Turn %d — last seen)", m.game.PartnerBoardTurn)
 			} else {
