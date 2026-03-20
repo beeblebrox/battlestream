@@ -2305,6 +2305,24 @@ func TestIntegrationDuosPunishLeavers(t *testing.T) {
 	t.Logf("Player: %s, IsDuos: %v, Partner: %+v", s.Player.Name, s.IsDuos, s.Partner)
 }
 
+func TestPartnerBoardMaxSeven(t *testing.T) {
+	m := New()
+	m.GameStart("test", time.Now())
+	m.SetDuosMode(true)
+
+	// Try to set 12 minions
+	minions := make([]MinionState, 12)
+	for i := range minions {
+		minions[i] = MinionState{EntityID: 100 + i, Name: fmt.Sprintf("Minion%d", i), Attack: 10, Health: 10}
+	}
+	m.SetPartnerBoard(minions, 5)
+
+	s := m.State()
+	if len(s.PartnerBoard.Minions) > 7 {
+		t.Errorf("expected max 7 partner minions, got %d", len(s.PartnerBoard.Minions))
+	}
+}
+
 func TestIntegrationDuosWithTeammateID(t *testing.T) {
 	s := parseLogFile(t, "testdata/duos_with_teammate_id.txt")
 

@@ -662,6 +662,9 @@ func (m *Machine) UpdatePartnerGold(tag string, value int) {
 func (m *Machine) SetPartnerBoard(minions []MinionState, turn int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if len(minions) > 7 {
+		minions = minions[:7]
+	}
 	cp := make([]MinionState, len(minions))
 	for i, mn := range minions {
 		cp[i] = mn

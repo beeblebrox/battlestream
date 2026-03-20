@@ -3,6 +3,7 @@ package gamestate
 import (
 	"fmt"
 	"log/slog"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -1064,6 +1065,20 @@ func (p *Processor) isPartnerHero(e parser.GameEvent, controllerID int) bool {
 func (p *Processor) finalizePartnerCombat() {
 	p.partnerCombatActive = false
 	if len(p.partnerCombatMinions) > 0 {
+		// Sort by ZONE_POSITION (ascending) so positions 1-7 are kept.
+		sort.Slice(p.partnerCombatMinions, func(i, j int) bool {
+			posI, posJ := 0, 0
+			if info := p.entityProps[p.partnerCombatMinions[i].EntityID]; info != nil {
+				posI = info.ZonePosition
+			}
+			if info := p.entityProps[p.partnerCombatMinions[j].EntityID]; info != nil {
+				posJ = info.ZonePosition
+			}
+			return posI < posJ
+		})
+		if len(p.partnerCombatMinions) > 7 {
+			p.partnerCombatMinions = p.partnerCombatMinions[:7]
+		}
 		turn := p.machine.currentTurn()
 		p.machine.SetPartnerBoard(p.partnerCombatMinions, turn)
 		slog.Info("partner board captured from combat", "minions", len(p.partnerCombatMinions), "turn", turn)
