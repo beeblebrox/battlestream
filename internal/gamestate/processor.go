@@ -970,12 +970,12 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 	}
 
 	// Skip non-minion entities (heroes, enchantments, etc.)
-	if info.CardType != "" && info.CardType != "MINION" {
+	if info.CardType != "MINION" {
 		return
 	}
 
 	// Only add minions in PLAY zone to the board.
-	if info.Zone != "" && info.Zone != "PLAY" {
+	if info.Zone != "PLAY" {
 		return
 	}
 
@@ -1367,7 +1367,7 @@ func (p *Processor) tryAddMinionFromRegistry(entityID, controllerID int) {
 	if info == nil || (info.Attack == 0 && info.Health == 0) {
 		return
 	}
-	if info.CardType != "" && info.CardType != "MINION" {
+	if info.CardType != "MINION" {
 		return
 	}
 	if p.machine.Phase() == PhaseGameOver {
