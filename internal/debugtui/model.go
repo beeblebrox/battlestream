@@ -984,23 +984,48 @@ func (m *Model) viewStep() string {
 	changesPanel := styleBorder.Width(halfW).Render(styleTitle.Render("CHANGES") + "\n" + changesVPView)
 	row3 := lipgloss.JoinHorizontal(lipgloss.Top, buffPanel, changesPanel)
 
-	// ── Row 4 (Duos): Partner info ──────────────────────────────────
+	// ── Row 4 (Duos): Partner info + board ──────────────────────────
 	var row4 string
 	if showPartnerRow {
 		var pInfoStr strings.Builder
 		partner := step.State.Partner
 		if partner != nil {
-			pInfoStr.WriteString(fmt.Sprintf("Name: %s\n", partner.Name))
 			heroName := gamestate.CardName(partner.HeroCardID)
 			if heroName == "" {
 				heroName = partner.HeroCardID
 			}
-			pInfoStr.WriteString(fmt.Sprintf("Hero: %s\n", heroName))
-			pInfoStr.WriteString(fmt.Sprintf("Tier: %d  Triples: %d", partner.TavernTier, partner.TripleCount))
+			pInfoStr.WriteString(fmt.Sprintf("%s  Hero: %s  Tier: %d  Triples: %d\n",
+				partner.Name, heroName, partner.TavernTier, partner.TripleCount))
 		} else {
-			pInfoStr.WriteString(styleDim.Render("(no partner data)"))
+			pInfoStr.WriteString(styleDim.Render("(no partner data)") + "\n")
 		}
-		row4 = styleBorder.Width(innerW).Render(styleTitle.Render("PARTNER") + "\n" + pInfoStr.String())
+
+		// Partner board from combat copies
+		title := "PARTNER"
+		if step.State.PartnerBoard != nil {
+			pb := step.State.PartnerBoard
+			if pb.Stale {
+				title = fmt.Sprintf("PARTNER (Board: Turn %d — last seen)", pb.Turn)
+			} else if pb.Turn > 0 {
+				title = fmt.Sprintf("PARTNER (Board: Turn %d)", pb.Turn)
+			}
+			for _, mn := range pb.Minions {
+				name := mn.Name
+				if name == "" {
+					name = gamestate.CardName(mn.CardID)
+				}
+				if name == "" {
+					name = mn.CardID
+				}
+				pInfoStr.WriteString(fmt.Sprintf("  %-22s %d/%d\n", name, mn.Attack, mn.Health))
+			}
+			if len(pb.Minions) == 0 {
+				pInfoStr.WriteString(styleDim.Render("  (empty board)") + "\n")
+			}
+		} else {
+			pInfoStr.WriteString(styleDim.Render("  (awaiting first combat)") + "\n")
+		}
+		row4 = styleBorder.Width(innerW).Render(styleTitle.Render(title) + "\n" + pInfoStr.String())
 	}
 
 	// ── Event summary ───────────────────────────────────────────────
