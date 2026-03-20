@@ -312,6 +312,13 @@ func gameStateToProto(s gamestate.BGGameState) *bspb.GameState {
 	if s.Partner != nil {
 		gs.Partner = playerStateToProto(*s.Partner)
 	}
+	if s.PartnerBoard != nil {
+		for _, mn := range s.PartnerBoard.Minions {
+			gs.PartnerBoard = append(gs.PartnerBoard, minionToProto(mn))
+		}
+		gs.PartnerBoardTurn = int32(s.PartnerBoard.Turn)
+		gs.PartnerBoardStale = s.PartnerBoard.Stale
+	}
 	return gs
 }
 

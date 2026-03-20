@@ -86,10 +86,13 @@ message GameState {
   repeated string available_tribes = 16;
   bool is_duos = 17;
   PlayerStats partner = 18;
-  reserved 19, 20, 21;
+  repeated MinionState partner_board = 19;
+  reserved 20, 21;
   string anomaly_card_id = 22;
   string anomaly_name = 23;
   string anomaly_description = 24;
+  int32 partner_board_turn = 25;
+  bool partner_board_stale = 26;
 }
 
 message GameEvent {

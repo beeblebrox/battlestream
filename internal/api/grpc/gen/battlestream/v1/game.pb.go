@@ -609,9 +609,12 @@ type GameState struct {
 	AvailableTribes    []string               `protobuf:"bytes,16,rep,name=available_tribes,json=availableTribes,proto3" json:"available_tribes,omitempty"`
 	IsDuos             bool                   `protobuf:"varint,17,opt,name=is_duos,json=isDuos,proto3" json:"is_duos,omitempty"`
 	Partner            *PlayerStats           `protobuf:"bytes,18,opt,name=partner,proto3" json:"partner,omitempty"`
+	PartnerBoard       []*MinionState         `protobuf:"bytes,19,rep,name=partner_board,json=partnerBoard,proto3" json:"partner_board,omitempty"`
 	AnomalyCardId      string                 `protobuf:"bytes,22,opt,name=anomaly_card_id,json=anomalyCardId,proto3" json:"anomaly_card_id,omitempty"`
 	AnomalyName        string                 `protobuf:"bytes,23,opt,name=anomaly_name,json=anomalyName,proto3" json:"anomaly_name,omitempty"`
 	AnomalyDescription string                 `protobuf:"bytes,24,opt,name=anomaly_description,json=anomalyDescription,proto3" json:"anomaly_description,omitempty"`
+	PartnerBoardTurn   int32                  `protobuf:"varint,25,opt,name=partner_board_turn,json=partnerBoardTurn,proto3" json:"partner_board_turn,omitempty"`
+	PartnerBoardStale  bool                   `protobuf:"varint,26,opt,name=partner_board_stale,json=partnerBoardStale,proto3" json:"partner_board_stale,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -772,6 +775,13 @@ func (x *GameState) GetPartner() *PlayerStats {
 	return nil
 }
 
+func (x *GameState) GetPartnerBoard() []*MinionState {
+	if x != nil {
+		return x.PartnerBoard
+	}
+	return nil
+}
+
 func (x *GameState) GetAnomalyCardId() string {
 	if x != nil {
 		return x.AnomalyCardId
@@ -791,6 +801,20 @@ func (x *GameState) GetAnomalyDescription() string {
 		return x.AnomalyDescription
 	}
 	return ""
+}
+
+func (x *GameState) GetPartnerBoardTurn() int32 {
+	if x != nil {
+		return x.PartnerBoardTurn
+	}
+	return 0
+}
+
+func (x *GameState) GetPartnerBoardStale() bool {
+	if x != nil {
+		return x.PartnerBoardStale
+	}
+	return false
 }
 
 type GameEvent struct {
@@ -946,7 +970,7 @@ const file_battlestream_v1_game_proto_rawDesc = "" +
 	"\x05delta\x18\x04 \x01(\x05R\x05delta\x12\x16\n" +
 	"\x06source\x18\x05 \x01(\tR\x06source\x12\x1a\n" +
 	"\bcategory\x18\x06 \x01(\tR\bcategory\x12\x17\n" +
-	"\acard_id\x18\a \x01(\tR\x06cardId\"\xda\a\n" +
+	"\acard_id\x18\a \x01(\tR\x06cardId\"\xf5\b\n" +
 	"\tGameState\x12\x17\n" +
 	"\agame_id\x18\x01 \x01(\tR\x06gameId\x12\x14\n" +
 	"\x05phase\x18\x02 \x01(\tR\x05phase\x12\x12\n" +
@@ -967,10 +991,13 @@ const file_battlestream_v1_game_proto_rawDesc = "" +
 	"\x10ability_counters\x18\x0f \x03(\v2\x1f.battlestream.v1.AbilityCounterR\x0fabilityCounters\x12)\n" +
 	"\x10available_tribes\x18\x10 \x03(\tR\x0favailableTribes\x12\x17\n" +
 	"\ais_duos\x18\x11 \x01(\bR\x06isDuos\x126\n" +
-	"\apartner\x18\x12 \x01(\v2\x1c.battlestream.v1.PlayerStatsR\apartner\x12&\n" +
+	"\apartner\x18\x12 \x01(\v2\x1c.battlestream.v1.PlayerStatsR\apartner\x12A\n" +
+	"\rpartner_board\x18\x13 \x03(\v2\x1c.battlestream.v1.MinionStateR\fpartnerBoard\x12&\n" +
 	"\x0fanomaly_card_id\x18\x16 \x01(\tR\ranomalyCardId\x12!\n" +
 	"\fanomaly_name\x18\x17 \x01(\tR\vanomalyName\x12/\n" +
-	"\x13anomaly_description\x18\x18 \x01(\tR\x12anomalyDescriptionJ\x04\b\x13\x10\x14J\x04\b\x14\x10\x15J\x04\b\x15\x10\x16\"\x90\x02\n" +
+	"\x13anomaly_description\x18\x18 \x01(\tR\x12anomalyDescription\x12,\n" +
+	"\x12partner_board_turn\x18\x19 \x01(\x05R\x10partnerBoardTurn\x12.\n" +
+	"\x13partner_board_stale\x18\x1a \x01(\bR\x11partnerBoardStaleJ\x04\b\x14\x10\x15J\x04\b\x15\x10\x16\"\x90\x02\n" +
 	"\tGameEvent\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12%\n" +
 	"\x0etimestamp_unix\x18\x02 \x01(\x03R\rtimestampUnix\x12\x1b\n" +
@@ -1018,12 +1045,13 @@ var file_battlestream_v1_game_proto_depIdxs = []int32{
 	2,  // 7: battlestream.v1.GameState.enchantments:type_name -> battlestream.v1.Enchantment
 	3,  // 8: battlestream.v1.GameState.ability_counters:type_name -> battlestream.v1.AbilityCounter
 	0,  // 9: battlestream.v1.GameState.partner:type_name -> battlestream.v1.PlayerStats
-	8,  // 10: battlestream.v1.GameEvent.tags:type_name -> battlestream.v1.GameEvent.TagsEntry
-	11, // [11:11] is the sub-list for method output_type
-	11, // [11:11] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	1,  // 10: battlestream.v1.GameState.partner_board:type_name -> battlestream.v1.MinionState
+	8,  // 11: battlestream.v1.GameEvent.tags:type_name -> battlestream.v1.GameEvent.TagsEntry
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_battlestream_v1_game_proto_init() }
