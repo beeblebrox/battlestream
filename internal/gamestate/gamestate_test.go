@@ -240,6 +240,43 @@ func setupGame(p *Processor) {
 	})
 }
 
+func TestEntityRegistryPrunedAfterCombat(t *testing.T) {
+	_, p := newProc()
+	setupGame(p)
+
+	// Simulate combat entities in dead zones
+	for i := 500; i < 600; i++ {
+		p.entityProps[i] = &entityInfo{CardType: "MINION", Zone: "REMOVEDFROMGAME"}
+		p.entityController[i] = 15
+	}
+	for i := 600; i < 650; i++ {
+		p.entityProps[i] = &entityInfo{CardType: "MINION", Zone: "GRAVEYARD"}
+		p.entityController[i] = 15
+	}
+	// Keep some alive entities
+	p.entityProps[999] = &entityInfo{CardType: "MINION", Zone: "PLAY"}
+	p.entityController[999] = 7
+
+	sizeBefore := len(p.entityProps)
+	p.pruneStaleEntities()
+	sizeAfter := len(p.entityProps)
+
+	if sizeAfter >= sizeBefore {
+		t.Errorf("expected pruning to reduce entity count, before=%d after=%d", sizeBefore, sizeAfter)
+	}
+	// The 150 dead entities should be gone
+	if _, ok := p.entityProps[500]; ok {
+		t.Error("REMOVEDFROMGAME entity should have been pruned")
+	}
+	if _, ok := p.entityProps[600]; ok {
+		t.Error("GRAVEYARD entity should have been pruned")
+	}
+	// Active entity should remain
+	if _, ok := p.entityProps[999]; !ok {
+		t.Error("PLAY entity should not have been pruned")
+	}
+}
+
 func TestProcessorGameStartIncrementsID(t *testing.T) {
 	// Zero timestamps fall back to sequential game-<n> IDs (used when no
 	// log timestamp is available, e.g. synthetic events in tests).

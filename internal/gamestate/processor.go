@@ -211,6 +211,10 @@ func (p *Processor) Handle(e parser.GameEvent) {
 		if t, ok := e.Tags["TURN"]; ok {
 			turn, _ := strconv.Atoi(t)
 			p.machine.SetGameEntityTurn(turn)
+			// Prune dead entities on recruit phase transition (odd GameEntity turn).
+			if turn%2 == 1 {
+				p.pruneStaleEntities()
+			}
 		}
 
 	case parser.EventGameEntityTags:
@@ -1386,6 +1390,19 @@ func (p *Processor) tryAddMinionFromRegistry(entityID, controllerID int) {
 	p.machine.UpsertMinion(mn)
 	if p.machine.Phase() == PhaseRecruit {
 		p.machine.UpdateBoardSnapshot()
+	}
+}
+
+// pruneStaleEntities removes dead entities (REMOVEDFROMGAME, GRAVEYARD) from
+// the entity registry. Called on recruit phase transitions to prevent unbounded
+// growth from combat simulation entities.
+func (p *Processor) pruneStaleEntities() {
+	for id, info := range p.entityProps {
+		if info.Zone == "REMOVEDFROMGAME" || info.Zone == "GRAVEYARD" {
+			delete(p.entityProps, id)
+			delete(p.entityController, id)
+			delete(p.heroEntities, id)
+		}
 	}
 }
 
