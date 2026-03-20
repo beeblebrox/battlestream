@@ -74,6 +74,11 @@ type Processor struct {
 	partnerHeroID     int    // entity ID of the partner's hero card
 	isDuos            bool
 
+	// Partner combat tracking
+	partnerCombatActive   bool          // true while partner's combat is in progress
+	partnerCombatHeroCtrl int           // CONTROLLER of partner's hero copy in combat
+	partnerCombatMinions  []MinionState // collected partner minions during combat
+
 	// Entity registry — maps entity IDs to their controller PlayerIDs.
 	entityController map[int]int
 	// heroEntities tracks entity IDs known to be HERO card types.
@@ -136,6 +141,9 @@ func (p *Processor) Handle(e parser.GameEvent) {
 		p.partnerPlayerName = ""
 		p.partnerHeroID = 0
 		p.isDuos = false
+		p.partnerCombatActive = false
+		p.partnerCombatHeroCtrl = 0
+		p.partnerCombatMinions = nil
 		p.entityController = make(map[int]int)
 		p.heroEntities = make(map[int]bool)
 		p.entityProps = make(map[int]*entityInfo)
@@ -317,8 +325,22 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 		case "BACON_CURRENT_COMBAT_PLAYER_ID":
 			if p.isLocalPlayerEntity(e) {
 				combatPlayerID, _ := strconv.Atoi(value)
+
+				// If partner combat was active and is now ending, snapshot the board
+				if p.partnerCombatActive && combatPlayerID != p.partnerPlayerID {
+					p.finalizePartnerCombat()
+				}
+
+				// Deferred partner resolution
 				if combatPlayerID > 0 && combatPlayerID != p.localPlayerID && p.isDuos && p.partnerPlayerID == 0 {
 					p.resolvePartner(combatPlayerID)
+				}
+
+				// Start tracking if this is partner's combat
+				if combatPlayerID > 0 && combatPlayerID == p.partnerPlayerID {
+					p.partnerCombatActive = true
+					p.partnerCombatHeroCtrl = 0
+					p.partnerCombatMinions = nil
 				}
 			}
 
@@ -731,6 +753,29 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 		p.heroEntities[e.EntityID] = true
 	}
 
+	// Track partner combat copies during partner's combat phase.
+	if p.partnerCombatActive && controllerID > 0 {
+		if cardType == "HERO" && info.PlayerID == p.partnerPlayerID {
+			// This is the partner's hero copy in combat — track its controller
+			// so we can identify which minions belong to the partner's side.
+			p.partnerCombatHeroCtrl = controllerID
+		} else if cardType == "MINION" && p.partnerCombatHeroCtrl > 0 &&
+			controllerID == p.partnerCombatHeroCtrl &&
+			info.Attack > 0 && info.Health > 0 && info.Zone == "PLAY" {
+			mn := MinionState{
+				EntityID: e.EntityID,
+				CardID:   info.CardID,
+				Name:     info.Name,
+				Attack:   info.Attack,
+				Health:   info.Health,
+			}
+			if mn.Name == "" && mn.CardID != "" {
+				mn.Name = CardName(mn.CardID)
+			}
+			p.partnerCombatMinions = append(p.partnerCombatMinions, mn)
+		}
+	}
+
 	// Detect anomaly from FULL_ENTITY with CARDTYPE=BATTLEGROUND_ANOMALY.
 	if cardType == "BATTLEGROUND_ANOMALY" && info.CardID != "" {
 		name := CardName(info.CardID)
@@ -944,6 +989,18 @@ func (p *Processor) isPartnerHero(e parser.GameEvent, controllerID int) bool {
 		return false
 	}
 	return p.heroEntities[e.EntityID]
+}
+
+// finalizePartnerCombat snapshots the collected partner combat minions.
+func (p *Processor) finalizePartnerCombat() {
+	p.partnerCombatActive = false
+	if len(p.partnerCombatMinions) > 0 {
+		turn := p.machine.currentTurn()
+		p.machine.SetPartnerBoard(p.partnerCombatMinions, turn)
+		slog.Info("partner board captured from combat", "minions", len(p.partnerCombatMinions), "turn", turn)
+	}
+	p.partnerCombatMinions = nil
+	p.partnerCombatHeroCtrl = 0
 }
 
 // isLocalDntTarget returns true if the enchantment entity is attached to the local

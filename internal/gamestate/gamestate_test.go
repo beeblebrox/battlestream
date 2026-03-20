@@ -1975,6 +1975,77 @@ func TestPartnerBoardSnapshot(t *testing.T) {
 	}
 }
 
+func TestPartnerBoardCaptureFromCombat(t *testing.T) {
+	m, p := newProc()
+	setupDuosGame(p)
+
+	// Set up partner hero (PLAYER_ID=8, CONTROLLER=15=bot)
+	p.Handle(parser.GameEvent{
+		Type: parser.EventEntityUpdate, EntityID: 146, CardID: "BG32_HERO_002",
+		EntityName: "Buttons",
+		Tags: map[string]string{"CONTROLLER": "15", "CARDTYPE": "HERO", "PLAYER_ID": "8", "HEALTH": "30", "ZONE": "PLAY"},
+	})
+
+	// Advance to turn 5 to have a turn number
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 20, PlayerID: 7,
+		EntityName: "LocalPlayer#1234",
+		Tags: map[string]string{"TURN": "5"},
+	})
+
+	// Partner's combat starts: BACON_CURRENT_COMBAT_PLAYER_ID = 8 (partner)
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 20, PlayerID: 7,
+		EntityName: "LocalPlayer#1234",
+		Tags: map[string]string{"BACON_CURRENT_COMBAT_PLAYER_ID": "8"},
+	})
+
+	// Partner hero combat copy appears with CONTROLLER=17 (combat-specific controller)
+	p.Handle(parser.GameEvent{
+		Type: parser.EventEntityUpdate, EntityID: 700, CardID: "BG32_HERO_002",
+		Tags: map[string]string{
+			"CONTROLLER": "17", "CARDTYPE": "HERO", "PLAYER_ID": "8",
+			"HEALTH": "30", "ZONE": "PLAY",
+		},
+	})
+
+	// Partner's combat minions (same CONTROLLER=17 as partner hero copy)
+	p.Handle(parser.GameEvent{
+		Type: parser.EventEntityUpdate, EntityID: 703, CardID: "BGS_119",
+		EntityName: "Crackling Cyclone",
+		Tags: map[string]string{
+			"CONTROLLER": "17", "CARDTYPE": "MINION",
+			"ATK": "220", "HEALTH": "177", "ZONE": "PLAY",
+		},
+	})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventEntityUpdate, EntityID: 704, CardID: "BG32_111",
+		EntityName: "Mirror Monster",
+		Tags: map[string]string{
+			"CONTROLLER": "17", "CARDTYPE": "MINION",
+			"ATK": "150", "HEALTH": "132", "ZONE": "PLAY",
+		},
+	})
+
+	// Combat ends — local player's combat starts
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 20, PlayerID: 7,
+		EntityName: "LocalPlayer#1234",
+		Tags: map[string]string{"BACON_CURRENT_COMBAT_PLAYER_ID": "7"},
+	})
+
+	s := m.State()
+	if s.PartnerBoard == nil {
+		t.Fatal("expected PartnerBoard != nil after partner combat")
+	}
+	if len(s.PartnerBoard.Minions) != 2 {
+		t.Errorf("expected 2 partner minions, got %d", len(s.PartnerBoard.Minions))
+	}
+	if s.PartnerBoard.Minions[0].Attack != 220 {
+		t.Errorf("expected first minion ATK=220, got %d", s.PartnerBoard.Minions[0].Attack)
+	}
+}
+
 func TestDuosDntEnchantmentWithBotController(t *testing.T) {
 	m, p := newProc()
 	setupDuosGame(p)
