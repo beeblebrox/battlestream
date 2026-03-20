@@ -2143,3 +2143,35 @@ func TestDuosDetectionViaDuoPassable(t *testing.T) {
 	}
 }
 
+func TestStaleGameTimeout(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+	// Advance to recruit phase
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 20, PlayerID: 7,
+		EntityName: "Moch#1358",
+		Tags: map[string]string{"TURN": "1"},
+	})
+
+	// Game is active
+	if m.Phase() != PhaseRecruit {
+		t.Fatalf("expected RECRUIT, got %s", m.Phase())
+	}
+
+	// Simulate 4 minutes of no events
+	p.lastEventTime = time.Now().Add(-4 * time.Minute)
+	p.CheckStaleness()
+
+	if m.Phase() != PhaseGameOver {
+		t.Errorf("expected GAME_OVER after staleness timeout, got %s", m.Phase())
+	}
+}
+
+func TestStaleGameNoopWhenIdle(t *testing.T) {
+	_, p := newProc()
+	// No game started — CheckStaleness should be a no-op
+	p.lastEventTime = time.Now().Add(-10 * time.Minute)
+	p.CheckStaleness()
+	// No panic or state change
+}
+

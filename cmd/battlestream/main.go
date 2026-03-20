@@ -232,6 +232,7 @@ func startDaemon(ctx context.Context, cfg *config.Config, profile *config.Profil
 				}
 
 			case <-ticker.C:
+				proc.CheckStaleness()
 				if fw != nil {
 					s := machine.State()
 					if err := fw.WriteCurrentState(s); err != nil {

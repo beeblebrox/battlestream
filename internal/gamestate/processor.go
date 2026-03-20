@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"time"
 
 	"battlestream.fixates.io/internal/parser"
 )
@@ -103,6 +104,9 @@ type Processor struct {
 	pendingHeroAttackerID int
 	bgTurnsStarted        int // counts how many BG turns have started (skip recording for turn 1)
 
+	// Staleness tracking
+	lastEventTime time.Time
+
 	// Available tribes detected from BACON_SUBSET_* tags.
 	seenTribes        map[string]bool
 	entityTribeReg    map[int]string  // entityID → tribe provisionally registered via TAG_CHANGE
@@ -129,6 +133,8 @@ func NewProcessor(m *Machine) *Processor {
 
 // Handle processes a single GameEvent and updates the game state.
 func (p *Processor) Handle(e parser.GameEvent) {
+	p.lastEventTime = time.Now()
+
 	switch e.Type {
 	case parser.EventGameStart:
 		p.flushPendingStatChanges()
@@ -215,6 +221,24 @@ func (p *Processor) Handle(e parser.GameEvent) {
 
 	case parser.EventEntityUpdate:
 		p.handleEntityUpdate(e)
+	}
+}
+
+const staleGameTimeout = 3 * time.Minute
+
+// CheckStaleness marks an active game as over if no events have been received
+// for staleGameTimeout. Called periodically from the daemon.
+func (p *Processor) CheckStaleness() {
+	phase := p.machine.Phase()
+	if phase == PhaseIdle || phase == PhaseGameOver {
+		return
+	}
+	if p.lastEventTime.IsZero() {
+		return
+	}
+	if time.Since(p.lastEventTime) > staleGameTimeout {
+		slog.Warn("game stale, forcing game over", "lastEvent", p.lastEventTime)
+		p.machine.GameEnd(0, time.Now())
 	}
 }
 
