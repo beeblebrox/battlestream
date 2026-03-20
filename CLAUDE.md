@@ -77,13 +77,26 @@ Covers all 13 HDT BgCounters. Four tracking mechanisms:
 
 Mappings live in `internal/gamestate/categories.go`. Reference implementations in `reference/Hearthstone-Deck-Tracker/` and `reference/HearthDb/`.
 
+**Duos Dnt enchantment fix:** In duos, Dnt enchantments (e.g. `BG_ShopBuff`) may have `CONTROLLER=<botID>` but are `ATTACHED` to the local hero. The `isLocalDntTarget()` helper accepts these regardless of CONTROLLER.
+
 ## Duos Support
 
-Duos mode detected via `BACON_DUO_TEAMMATE_PLAYER_ID` in CREATE_GAME Player block. Partner hero identified by `PLAYER_ID` tag in FULL_ENTITY (not CONTROLLER, which is a shared bot ID). Health/armor are shared (team pool).
+Multi-signal duos detection (checked in order):
+1. `BACON_DUO_TEAMMATE_PLAYER_ID` in CREATE_GAME Player block (preferred — identifies partner immediately)
+2. `BACON_DUOS_PUNISH_LEAVERS` in GameEntity block tags (new — `EventGameEntityTags`)
+3. `BACON_DUO_PASSABLE` TAG_CHANGE on card entities (fallback)
 
-**Available from Power.log:** Partner hero name/CardID, tavern tier, triples, armor, damage. Shown in TUI hero panel.
+Partner hero identified by `PLAYER_ID` tag in FULL_ENTITY (not CONTROLLER, which is a shared bot ID). Health/armor are shared (team pool).
 
-**Not available (requires memory reading):** Partner board minions, buff sources, ability counters, gold. All non-local entities share `CONTROLLER=<botID>`, making partner entities indistinguishable from opponents.
+**Deferred partner resolution:** When duos is detected without `BACON_DUO_TEAMMATE_PLAYER_ID`, the partner is resolved later via `BACON_CURRENT_COMBAT_PLAYER_ID`. The `resolvePartner()` method scans hero entities for matching PLAYER_ID.
+
+**Partner board (last seen):** Captured from combat copy entities during partner's combat. When `BACON_CURRENT_COMBAT_PLAYER_ID` matches the partner, the processor tracks the partner hero copy's CONTROLLER and collects MINION entities with the same controller. Stored in `PartnerBoard` (Minions, Turn, Stale). Shown in both TUIs.
+
+**Available from Power.log:** Partner hero name/CardID, tavern tier, triples, armor, damage, board (last seen from combat copies). Shown in TUI hero panel and partner board panel.
+
+**Not available (requires memory reading):** Partner buff sources, ability counters, gold. Live partner board (only combat snapshots available).
+
+**Stale game timeout:** Games with no events for 3 minutes are forced to GAME_OVER (placement=0). `CheckStaleness()` is called from the daemon's periodic ticker.
 
 **Reconnect handling:** Mid-game reconnects emit a new CREATE_GAME. Player entity tags (TURN, RESOURCES) and hero FULL_ENTITY tags (DAMAGE, ARMOR, PLAYER_TECH_LEVEL, PLAYER_TRIPLES) are captured to restore state.
 
