@@ -1445,19 +1445,24 @@ func (p *Processor) handleEnchantmentEntity(e parser.GameEvent, info *entityInfo
 		hpBuff = info.ScriptData1 // Nomi Sticker uses NUM_1 for both
 	}
 
-	// Check if the target is a local player's board minion.
+	// Determine if this enchantment is relevant to the local player.
 	targetCtrl := p.entityController[info.AttachedTo]
 	enchCtrl := p.entityController[e.EntityID]
-	isLocalMinion := targetCtrl == p.localPlayerID
-	isDntLocal := p.isLocalDntTarget(e.EntityID)
-	if !isLocalMinion && !isDntLocal {
-		isLocalEnch := enchCtrl == p.localPlayerID
-		if !isLocalEnch {
-			return
-		}
-		if category == CatGeneral {
-			return
-		}
+
+	isRelevant := false
+	if targetCtrl == p.localPlayerID {
+		// Enchantment on a local minion — always track.
+		isRelevant = true
+	} else if p.isLocalDntTarget(e.EntityID) {
+		// Dnt enchantment attached to local/bot player entity — track.
+		isRelevant = true
+	} else if enchCtrl == p.localPlayerID && category != CatGeneral {
+		// Enchantment owned by local player on non-local target (e.g., aura effects).
+		// Only track if it has a specific (non-general) category.
+		isRelevant = true
+	}
+	if !isRelevant {
+		return
 	}
 
 	ench := Enchantment{
