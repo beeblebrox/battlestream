@@ -49,6 +49,9 @@ config.yaml
 # Air live reload
 tmp/
 
+# Git worktrees
+.worktrees/
+
 # Reference repos (cloned for analysis, not part of this project)
 reference/HSBG_LogParser/
 reference/hearthstone-parser/
