@@ -485,7 +485,11 @@ func (m *Model) renderHeroPanel(w int) string {
 		maxHP = 30
 	}
 	effectiveHP := p.Health - p.Damage
-	b.WriteString(styleLabel.Render("Health  ") + renderHealthBar(effectiveHP, maxHP, 16) + "\n")
+	healthLabel := "Health  "
+	if m.game.IsDuos {
+		healthLabel = "HP Team "
+	}
+	b.WriteString(styleLabel.Render(healthLabel) + renderHealthBar(effectiveHP, maxHP, 16) + "\n")
 	armor := "—"
 	if p.Armor > 0 {
 		armor = fmt.Sprintf("%d", p.Armor)

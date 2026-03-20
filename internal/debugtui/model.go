@@ -991,8 +991,12 @@ func (m *Model) viewStep() string {
 		partner := step.State.Partner
 		if partner != nil {
 			pInfoStr.WriteString(fmt.Sprintf("Name: %s\n", partner.Name))
-			pInfoStr.WriteString(fmt.Sprintf("Hero: %s\n", partner.HeroCardID))
-			pInfoStr.WriteString(fmt.Sprintf("Health: %d  Tier: %d  Triples: %d", partner.EffectiveHealth(), partner.TavernTier, partner.TripleCount))
+			heroName := gamestate.CardName(partner.HeroCardID)
+			if heroName == "" {
+				heroName = partner.HeroCardID
+			}
+			pInfoStr.WriteString(fmt.Sprintf("Hero: %s\n", heroName))
+			pInfoStr.WriteString(fmt.Sprintf("Tier: %d  Triples: %d", partner.TavernTier, partner.TripleCount))
 		} else {
 			pInfoStr.WriteString(styleDim.Render("(no partner data)"))
 		}
