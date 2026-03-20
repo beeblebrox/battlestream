@@ -2175,3 +2175,64 @@ func TestStaleGameNoopWhenIdle(t *testing.T) {
 	// No panic or state change
 }
 
+// parseLogFile runs a Power.log through the parser and processor, returning final state.
+func parseLogFile(t *testing.T, path string) BGGameState {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Skipf("test fixture not available: %v", err)
+	}
+	defer f.Close()
+
+	ch := make(chan parser.GameEvent, 256)
+	p := parser.New(ch)
+	m := New()
+	proc := NewProcessor(m)
+
+	done := make(chan struct{})
+	go func() {
+		for e := range ch {
+			proc.Handle(e)
+		}
+		close(done)
+	}()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		p.Feed(scanner.Text())
+	}
+	p.Flush()
+	close(ch)
+	<-done
+	return m.State()
+}
+
+func TestIntegrationDuosPunishLeavers(t *testing.T) {
+	s := parseLogFile(t, "testdata/duos_punish_leavers.txt")
+
+	if !s.IsDuos {
+		t.Error("expected IsDuos=true")
+	}
+	if s.Player.Name == "" {
+		t.Error("expected non-empty player name")
+	}
+	// PUNISH_LEAVERS log may not have BACON_DUO_TEAMMATE_PLAYER_ID,
+	// but should still detect duos mode.
+	t.Logf("Player: %s, IsDuos: %v, Partner: %+v", s.Player.Name, s.IsDuos, s.Partner)
+}
+
+func TestIntegrationDuosWithTeammateID(t *testing.T) {
+	s := parseLogFile(t, "testdata/duos_with_teammate_id.txt")
+
+	if !s.IsDuos {
+		t.Error("expected IsDuos=true")
+	}
+	if s.Partner == nil {
+		t.Fatal("expected Partner != nil")
+	}
+	if s.Partner.HeroCardID == "" {
+		t.Error("expected non-empty partner HeroCardID")
+	}
+	t.Logf("Player: %s, Partner: %s (hero: %s)", s.Player.Name, s.Partner.Name, s.Partner.HeroCardID)
+}
+
