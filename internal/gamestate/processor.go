@@ -23,6 +23,7 @@ type entityInfo struct {
 	ScriptData1 int
 	ScriptData2 int
 	Subsets     int // count of BACON_SUBSET_* tags seen (for multi-tribe detection)
+	PlayerID    int // PLAYER_ID tag value (for hero entities in duos)
 }
 
 // maxPendingStatChanges caps the pending stat-change buffer to prevent unbounded
@@ -311,6 +312,14 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 				p.isDuos = true
 				p.machine.SetDuosMode(true)
 				slog.Info("Duos detected from BACON_DUO_PASSABLE")
+			}
+
+		case "BACON_CURRENT_COMBAT_PLAYER_ID":
+			if p.isLocalPlayerEntity(e) {
+				combatPlayerID, _ := strconv.Atoi(value)
+				if combatPlayerID > 0 && combatPlayerID != p.localPlayerID && p.isDuos && p.partnerPlayerID == 0 {
+					p.resolvePartner(combatPlayerID)
+				}
 			}
 
 		case "BACON_DUO_TEAMMATE_PLAYER_ID":
@@ -707,6 +716,9 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 	if sd2, ok := e.Tags["TAG_SCRIPT_DATA_NUM_2"]; ok {
 		info.ScriptData2 = parseInt(sd2)
 	}
+	if pid, ok := e.Tags["PLAYER_ID"]; ok {
+		info.PlayerID = parseInt(pid)
+	}
 
 	// Detect available tribes from BACON_SUBSET_* tags in FULL_ENTITY blocks.
 	// Only count entities with exactly ONE BACON_SUBSET tag (single-tribe minions).
@@ -932,6 +944,41 @@ func (p *Processor) isPartnerHero(e parser.GameEvent, controllerID int) bool {
 		return false
 	}
 	return p.heroEntities[e.EntityID]
+}
+
+// resolvePartner retroactively identifies the partner from a PlayerID discovered
+// via BACON_CURRENT_COMBAT_PLAYER_ID. Scans heroEntities for a hero with matching
+// PLAYER_ID and sets partner state accordingly.
+func (p *Processor) resolvePartner(playerID int) {
+	p.partnerPlayerID = playerID
+	slog.Info("deferred partner resolution", "partnerPlayerID", playerID)
+
+	// Scan hero entities for one with matching PLAYER_ID.
+	for heroID := range p.heroEntities {
+		info := p.entityProps[heroID]
+		if info == nil {
+			continue
+		}
+		if info.PlayerID == playerID {
+			p.partnerHeroID = heroID
+			if info.CardID != "" && !strings.HasPrefix(info.CardID, "TB_BaconShop_HERO_PH") {
+				p.machine.UpdatePartnerHeroCardID(info.CardID)
+			}
+			if info.Name != "" {
+				p.partnerPlayerName = info.Name
+				p.machine.UpdatePartnerName(info.Name)
+			}
+			if info.Health > 0 {
+				p.machine.UpdatePartnerTag("HEALTH", strconv.Itoa(info.Health))
+			}
+			if info.Armor > 0 {
+				p.machine.UpdatePartnerTag("ARMOR", strconv.Itoa(info.Armor))
+			}
+			slog.Info("partner hero resolved retroactively",
+				"heroID", heroID, "cardID", info.CardID, "name", info.Name)
+			break
+		}
+	}
 }
 
 // isLocalHero checks whether the entity in the event is the local player's

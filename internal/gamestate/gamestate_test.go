@@ -1890,6 +1890,51 @@ func TestDuosPartnerHealthTracking(t *testing.T) {
 	}
 }
 
+func TestDeferredPartnerResolution(t *testing.T) {
+	m, p := newProc()
+	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventGameEntityTags,
+		Tags: map[string]string{"BACON_DUOS_PUNISH_LEAVERS": "1"},
+	})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventPlayerDef, EntityID: 14, PlayerID: 5,
+		Tags: map[string]string{"hi": "144115193835963207", "lo": "30722021", "PLAYER_ID": "5", "HERO_ENTITY": "33"},
+	})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventPlayerDef, EntityID: 15, PlayerID: 13,
+		Tags: map[string]string{"hi": "0", "lo": "0", "PLAYER_ID": "13"},
+	})
+	// Player names
+	p.Handle(parser.GameEvent{Type: parser.EventPlayerName, PlayerID: 5, EntityName: "Moch#1358"})
+
+	// Partner hero appears with PLAYER_ID=6 via FULL_ENTITY
+	p.Handle(parser.GameEvent{
+		Type: parser.EventEntityUpdate, EntityID: 146, CardID: "BG32_HERO_002",
+		EntityName: "Buttons",
+		Tags: map[string]string{"CONTROLLER": "13", "CARDTYPE": "HERO", "PLAYER_ID": "6", "HEALTH": "30", "ZONE": "PLAY"},
+	})
+
+	// BACON_CURRENT_COMBAT_PLAYER_ID fires with partner's combat
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 14, PlayerID: 5,
+		EntityName: "Moch#1358",
+		Tags: map[string]string{"BACON_CURRENT_COMBAT_PLAYER_ID": "6"},
+	})
+
+	// Partner should now be resolved
+	if p.partnerPlayerID != 6 {
+		t.Errorf("expected partnerPlayerID=6, got %d", p.partnerPlayerID)
+	}
+	s := m.State()
+	if s.Partner == nil {
+		t.Fatal("expected Partner != nil")
+	}
+	if s.Partner.HeroCardID != "BG32_HERO_002" {
+		t.Errorf("expected partner hero BG32_HERO_002, got %q", s.Partner.HeroCardID)
+	}
+}
+
 func TestDuosDetectionViaPunishLeavers(t *testing.T) {
 	m, p := newProc()
 	// Game start
