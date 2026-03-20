@@ -853,7 +853,7 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 				Attack:   info.Attack,
 				Health:   info.Health,
 			}
-			if mn.Name == "" && mn.CardID != "" {
+			if (mn.Name == "" || isBareNumber(mn.Name)) && mn.CardID != "" {
 				mn.Name = CardName(mn.CardID)
 			}
 			p.partnerCombatMinions = append(p.partnerCombatMinions, mn)
@@ -993,7 +993,7 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 		Attack:   info.Attack,
 		Health:   info.Health,
 	}
-	if mn.Name == "" && mn.CardID != "" {
+	if (mn.Name == "" || isBareNumber(mn.Name)) && mn.CardID != "" {
 		mn.Name = CardName(mn.CardID)
 	}
 	if controllerID == p.localPlayerID {
@@ -1150,7 +1150,7 @@ func (p *Processor) collectPartnerCombatRetro() {
 				Attack:   info.Attack,
 				Health:   info.Health,
 			}
-			if mn.Name == "" && mn.CardID != "" {
+			if (mn.Name == "" || isBareNumber(mn.Name)) && mn.CardID != "" {
 				mn.Name = CardName(mn.CardID)
 			}
 			p.partnerCombatMinions = append(p.partnerCombatMinions, mn)
@@ -1384,7 +1384,7 @@ func (p *Processor) tryAddMinionFromRegistry(entityID, controllerID int) {
 		Attack:   info.Attack,
 		Health:   info.Health,
 	}
-	if mn.Name == "" && mn.CardID != "" {
+	if (mn.Name == "" || isBareNumber(mn.Name)) && mn.CardID != "" {
 		mn.Name = CardName(mn.CardID)
 	}
 	p.machine.UpsertMinion(mn)
