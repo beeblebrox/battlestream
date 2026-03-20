@@ -128,15 +128,17 @@ type Model struct {
 	height int
 
 	// Scrollable panels for board and buff/mods content.
-	boardVP viewport.Model
-	modsVP  viewport.Model
+	boardVP        viewport.Model
+	modsVP         viewport.Model
+	partnerBoardVP viewport.Model
 
 	// Panel positions (updated each View frame) for mouse routing.
 	row2StartY int
 
 	// Per-panel scrollbar column X and viewport Y/height.
-	boardScrollX, boardVPY, boardVPH int
-	modsScrollX, modsVPY, modsVPH   int
+	boardScrollX, boardVPY, boardVPH       int
+	modsScrollX, modsVPY, modsVPH         int
+	partnerScrollX, partnerVPY, partnerVPH int
 
 	// Drag-scrubbing state.
 	scrubbing   bool
@@ -358,7 +360,11 @@ func (m *Model) View() string {
 
 	// Height budget: terminal minus row1, session bar (3), help (1), row2 border (2), row2 title (1).
 	sessionH := 3
-	available := m.height - m.row2StartY - sessionH - 1 - 3
+	partnerRowH := 0
+	if m.game != nil && m.game.IsDuos {
+		partnerRowH = 8 // border(2) + title(1) + partner board viewport(5)
+	}
+	available := m.height - m.row2StartY - sessionH - 1 - 3 - partnerRowH
 	if available < 4 {
 		available = 4
 	}
@@ -396,6 +402,38 @@ func (m *Model) View() string {
 
 	row2 := lipgloss.JoinHorizontal(lipgloss.Top, boardPanel, modsPanel)
 
+	// ── Row 3 (Duos): Partner board ─────────────────────────────
+	var rowPartner string
+	if m.game != nil && m.game.IsDuos {
+		fullW := m.width - 8
+		partnerVPW := fullW - 5
+		if partnerVPW < 10 {
+			partnerVPW = 10
+		}
+		partnerH := 5 // compact height for partner board
+		m.partnerBoardVP.Width = partnerVPW
+		m.partnerBoardVP.Height = partnerH
+		m.partnerBoardVP.MouseWheelEnabled = true
+		m.partnerBoardVP.SetContent(m.partnerBoardItems())
+
+		title := "PARTNER BOARD"
+		if m.game.PartnerBoard != nil && len(m.game.PartnerBoard) > 0 {
+			if m.game.PartnerBoardStale {
+				title = fmt.Sprintf("PARTNER BOARD (Turn %d — last seen)", m.game.PartnerBoardTurn)
+			} else {
+				title = fmt.Sprintf("PARTNER BOARD (Turn %d)", m.game.PartnerBoardTurn)
+			}
+		}
+
+		m.partnerVPY = m.row2StartY + lipgloss.Height(row2) + 2
+		m.partnerVPH = partnerH
+		m.partnerScrollX = 2 + partnerVPW
+		partnerVPView := lipgloss.JoinHorizontal(lipgloss.Top,
+			m.partnerBoardVP.View(), tuiScrollbar(m.partnerBoardVP, partnerH))
+		rowPartner = styleBorder.Width(fullW).Render(
+			styleTitle.Render(title) + "\n" + partnerVPView)
+	}
+
 	// ── Session stats ─────────────────────────────────────────
 	rowSession := m.renderSessionBar(m.width - 4)
 
@@ -406,7 +444,12 @@ func (m *Model) View() string {
 	}
 	help := styleHelp.Render(helpText)
 
-	return lipgloss.JoinVertical(lipgloss.Left, row1, row2, rowSession, help)
+	rows := []string{row1, row2}
+	if rowPartner != "" {
+		rows = append(rows, rowPartner)
+	}
+	rows = append(rows, rowSession, help)
+	return lipgloss.JoinVertical(lipgloss.Left, rows...)
 }
 
 // ============================================================
@@ -536,6 +579,18 @@ func (m *Model) boardItems() string {
 		for _, mn := range m.game.Board {
 			b.WriteString(renderMinion(mn) + "\n")
 		}
+	}
+	return b.String()
+}
+
+// partnerBoardItems returns the partner board content for the viewport.
+func (m *Model) partnerBoardItems() string {
+	if m.game == nil || m.game.PartnerBoard == nil || len(m.game.PartnerBoard) == 0 {
+		return styleDim.Render("(awaiting first combat)")
+	}
+	var b strings.Builder
+	for _, mn := range m.game.PartnerBoard {
+		b.WriteString(renderMinion(mn) + "\n")
 	}
 	return b.String()
 }
