@@ -1009,7 +1009,18 @@ func (m *Model) viewStep() string {
 			} else if pb.Turn > 0 {
 				title = fmt.Sprintf("PARTNER (Board: Turn %d)", pb.Turn)
 			}
-			for _, mn := range pb.Minions {
+			// Cap the number of displayed minions to fit the content budget.
+			// Reserve 1 line for partner info + 1 line for "...+N more" overflow,
+			// leaving maxContentH-2 for minions.
+			maxMinions := maxContentH - 2
+			if maxMinions < 1 {
+				maxMinions = 1
+			}
+			shown := pb.Minions
+			if len(shown) > maxMinions {
+				shown = shown[:maxMinions]
+			}
+			for _, mn := range shown {
 				name := mn.Name
 				if name == "" {
 					name = gamestate.CardName(mn.CardID)
@@ -1018,6 +1029,9 @@ func (m *Model) viewStep() string {
 					name = mn.CardID
 				}
 				pInfoStr.WriteString(fmt.Sprintf("  %-22s %d/%d\n", name, mn.Attack, mn.Health))
+			}
+			if len(pb.Minions) > maxMinions {
+				pInfoStr.WriteString(styleDim.Render(fmt.Sprintf("  ... +%d more", len(pb.Minions)-maxMinions)) + "\n")
 			}
 			if len(pb.Minions) == 0 {
 				pInfoStr.WriteString(styleDim.Render("  (empty board)") + "\n")

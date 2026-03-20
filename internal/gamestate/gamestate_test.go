@@ -2000,30 +2000,38 @@ func TestPartnerBoardCaptureFromCombat(t *testing.T) {
 		Tags: map[string]string{"BACON_CURRENT_COMBAT_PLAYER_ID": "8"},
 	})
 
-	// Partner hero combat copy appears with CONTROLLER=17 (combat-specific controller)
+	// Partner hero combat copy appears with CONTROLLER=7 (localPlayerID).
+	// In duos, the partner's combat copies use CONTROLLER=localPlayerID,
+	// while the opponent's copies use CONTROLLER=botID.
+	// PLAYER_ID arrives via a separate TAG_CHANGE after FULL_ENTITY.
 	p.Handle(parser.GameEvent{
 		Type: parser.EventEntityUpdate, EntityID: 700, CardID: "BG32_HERO_002",
 		Tags: map[string]string{
-			"CONTROLLER": "17", "CARDTYPE": "HERO", "PLAYER_ID": "8",
+			"CONTROLLER": "7", "CARDTYPE": "HERO",
 			"HEALTH": "30", "ZONE": "PLAY",
 		},
 	})
+	// PLAYER_ID assigned via TAG_CHANGE after FULL_ENTITY
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 700,
+		Tags: map[string]string{"PLAYER_ID": "8"},
+	})
 
-	// Partner's combat minions (same CONTROLLER=17 as partner hero copy)
+	// Partner's combat minions (same CONTROLLER=7 as localPlayerID)
 	p.Handle(parser.GameEvent{
 		Type: parser.EventEntityUpdate, EntityID: 703, CardID: "BGS_119",
 		EntityName: "Crackling Cyclone",
 		Tags: map[string]string{
-			"CONTROLLER": "17", "CARDTYPE": "MINION",
-			"ATK": "220", "HEALTH": "177", "ZONE": "PLAY",
+			"CONTROLLER": "7", "CARDTYPE": "MINION",
+			"ATK": "220", "HEALTH": "177", "ZONE": "PLAY", "ZONE_POSITION": "1",
 		},
 	})
 	p.Handle(parser.GameEvent{
 		Type: parser.EventEntityUpdate, EntityID: 704, CardID: "BG32_111",
 		EntityName: "Mirror Monster",
 		Tags: map[string]string{
-			"CONTROLLER": "17", "CARDTYPE": "MINION",
-			"ATK": "150", "HEALTH": "132", "ZONE": "PLAY",
+			"CONTROLLER": "7", "CARDTYPE": "MINION",
+			"ATK": "150", "HEALTH": "132", "ZONE": "PLAY", "ZONE_POSITION": "2",
 		},
 	})
 
@@ -2043,6 +2051,82 @@ func TestPartnerBoardCaptureFromCombat(t *testing.T) {
 	}
 	if s.PartnerBoard.Minions[0].Attack != 220 {
 		t.Errorf("expected first minion ATK=220, got %d", s.PartnerBoard.Minions[0].Attack)
+	}
+}
+
+func TestPartnerBoardCaptureRetroactive(t *testing.T) {
+	m, p := newProc()
+	setupDuosGame(p)
+
+	// Set up partner hero (for partner identification)
+	p.Handle(parser.GameEvent{
+		Type: parser.EventEntityUpdate, EntityID: 146, CardID: "BG32_HERO_002",
+		EntityName: "Buttons",
+		Tags: map[string]string{"CONTROLLER": "15", "CARDTYPE": "HERO", "PLAYER_ID": "8", "HEALTH": "30", "ZONE": "PLAY"},
+	})
+
+	// Advance to turn 3
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 20, PlayerID: 7,
+		EntityName: "LocalPlayer#1234",
+		Tags: map[string]string{"TURN": "3"},
+	})
+
+	// Local combat starts first: BACON_CURRENT_COMBAT_PLAYER_ID = 7
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 20, PlayerID: 7,
+		EntityName: "LocalPlayer#1234",
+		Tags: map[string]string{"BACON_CURRENT_COMBAT_PLAYER_ID": "7"},
+	})
+
+	// Partner hero combat copy created BEFORE partner combat flag
+	// (CONTROLLER=7=localPlayerID, not botID)
+	p.Handle(parser.GameEvent{
+		Type: parser.EventEntityUpdate, EntityID: 695, CardID: "BG32_HERO_002",
+		Tags: map[string]string{
+			"CONTROLLER": "7", "CARDTYPE": "HERO",
+			"HEALTH": "30", "ZONE": "PLAY",
+		},
+	})
+	// PLAYER_ID arrives via TAG_CHANGE
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 695,
+		Tags: map[string]string{"PLAYER_ID": "8"},
+	})
+
+	// Partner minion created BEFORE partner combat flag
+	p.Handle(parser.GameEvent{
+		Type: parser.EventEntityUpdate, EntityID: 698, CardID: "BGS_119",
+		EntityName: "Crackling Cyclone",
+		Tags: map[string]string{
+			"CONTROLLER": "7", "CARDTYPE": "MINION",
+			"ATK": "10", "HEALTH": "5", "ZONE": "PLAY", "ZONE_POSITION": "1",
+		},
+	})
+
+	// NOW partner combat flag fires
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 20, PlayerID: 7,
+		EntityName: "LocalPlayer#1234",
+		Tags: map[string]string{"BACON_CURRENT_COMBAT_PLAYER_ID": "8"},
+	})
+
+	// Combat ends
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 20, PlayerID: 7,
+		EntityName: "LocalPlayer#1234",
+		Tags: map[string]string{"BACON_CURRENT_COMBAT_PLAYER_ID": "0"},
+	})
+
+	s := m.State()
+	if s.PartnerBoard == nil {
+		t.Fatal("expected PartnerBoard != nil after retroactive partner combat capture")
+	}
+	if len(s.PartnerBoard.Minions) != 1 {
+		t.Errorf("expected 1 partner minion (retroactive), got %d", len(s.PartnerBoard.Minions))
+	}
+	if len(s.PartnerBoard.Minions) > 0 && s.PartnerBoard.Minions[0].Attack != 10 {
+		t.Errorf("expected first minion ATK=10, got %d", s.PartnerBoard.Minions[0].Attack)
 	}
 }
 

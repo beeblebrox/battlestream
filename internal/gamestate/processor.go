@@ -12,19 +12,20 @@ import (
 
 // entityInfo stores known properties of an entity for board tracking.
 type entityInfo struct {
-	CardID      string
-	Name        string
-	CardType    string
-	Attack      int
-	Health      int
-	Armor       int // cached for retroactive hero identification
-	Zone        string
-	CreatorID   int
-	AttachedTo  int
-	ScriptData1 int
-	ScriptData2 int
-	Subsets     int // count of BACON_SUBSET_* tags seen (for multi-tribe detection)
-	PlayerID    int // PLAYER_ID tag value (for hero entities in duos)
+	CardID       string
+	Name         string
+	CardType     string
+	Attack       int
+	Health       int
+	Armor        int // cached for retroactive hero identification
+	Zone         string
+	ZonePosition int // ZONE_POSITION tag (>0 for initial board minions)
+	CreatorID    int
+	AttachedTo   int
+	ScriptData1  int
+	ScriptData2  int
+	Subsets      int // count of BACON_SUBSET_* tags seen (for multi-tribe detection)
+	PlayerID     int // PLAYER_ID tag value (for hero entities in duos)
 }
 
 // maxPendingStatChanges caps the pending stat-change buffer to prevent unbounded
@@ -79,6 +80,8 @@ type Processor struct {
 	partnerCombatActive   bool          // true while partner's combat is in progress
 	partnerCombatHeroCtrl int           // CONTROLLER of partner's hero copy in combat
 	partnerCombatMinions  []MinionState // collected partner minions during combat
+	combatPhaseActive     bool          // true during the combat phase (BACON_CURRENT_COMBAT_PLAYER_ID > 0)
+	combatPhaseEntityIDs  []int         // entity IDs created during current combat phase (for retroactive scan)
 
 	// Entity registry — maps entity IDs to their controller PlayerIDs.
 	entityController map[int]int
@@ -150,6 +153,8 @@ func (p *Processor) Handle(e parser.GameEvent) {
 		p.partnerCombatActive = false
 		p.partnerCombatHeroCtrl = 0
 		p.partnerCombatMinions = nil
+		p.combatPhaseActive = false
+		p.combatPhaseEntityIDs = nil
 		p.entityController = make(map[int]int)
 		p.heroEntities = make(map[int]bool)
 		p.entityProps = make(map[int]*entityInfo)
@@ -355,6 +360,15 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 					p.finalizePartnerCombat()
 				}
 
+				// Track combat phase for entity collection.
+				if combatPlayerID > 0 && !p.combatPhaseActive {
+					p.combatPhaseActive = true
+					p.combatPhaseEntityIDs = nil
+				} else if combatPlayerID == 0 {
+					p.combatPhaseActive = false
+					p.combatPhaseEntityIDs = nil
+				}
+
 				// Deferred partner resolution
 				if combatPlayerID > 0 && combatPlayerID != p.localPlayerID && p.isDuos && p.partnerPlayerID == 0 {
 					p.resolvePartner(combatPlayerID)
@@ -365,6 +379,11 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 					p.partnerCombatActive = true
 					p.partnerCombatHeroCtrl = 0
 					p.partnerCombatMinions = nil
+					// Retroactively collect partner combat copies that were
+					// created before this flag fired. In duos the partner's
+					// hero copy (PLAYER_ID=partnerPlayerID, CONTROLLER=localPlayerID)
+					// and its minions often appear before BACON_CURRENT_COMBAT_PLAYER_ID.
+					p.collectPartnerCombatRetro()
 				}
 			}
 
@@ -384,6 +403,17 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 							p.machine.UpdatePartnerName(info.Name)
 						}
 					}
+				}
+			}
+
+		case "PLAYER_ID":
+			// Update entity registry with PLAYER_ID from TAG_CHANGE.
+			// In duos combat, hero copies receive PLAYER_ID via TAG_CHANGE
+			// after FULL_ENTITY creation. Only update existing entries to
+			// avoid creating spurious registry entries.
+			if e.EntityID > 0 {
+				if info := p.entityProps[e.EntityID]; info != nil {
+					info.PlayerID = parseInt(value)
 				}
 			}
 
@@ -616,12 +646,15 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 		case "BACON_BLOODGEMBUFFATKVALUE", "BACON_BLOODGEMBUFFHEALTHVALUE",
 			"BACON_ELEMENTAL_BUFFATKVALUE", "BACON_ELEMENTAL_BUFFHEALTHVALUE",
 			"TAVERN_SPELL_ATTACK_INCREASE", "TAVERN_SPELL_HEALTH_INCREASE":
-			if p.isLocalPlayerEntity(e) || p.isLocalHero(e, controllerID) {
+			// Only accept player entities and heroes — not enchantments like
+			// Bacon_TagTransferPlayerE which mirror player tags with stale values
+			// and would overwrite the real buff source counters.
+			if p.isPlayerOrHeroEntity(e, controllerID) {
 				p.updateBuffSourceFromPlayerTag(tag, value)
 			}
 
 		case "BACON_FREE_REFRESH_COUNT":
-			if p.isLocalPlayerEntity(e) || p.isLocalHero(e, controllerID) {
+			if p.isPlayerOrHeroEntity(e, controllerID) {
 				raw, _ := strconv.Atoi(value)
 				if raw > 0 {
 					p.machine.SetAbilityCounter(CatFreeRefresh, raw, fmt.Sprintf("%d", raw))
@@ -629,7 +662,7 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 			}
 
 		case "BACON_PLAYER_EXTRA_GOLD_NEXT_TURN":
-			if p.isLocalPlayerEntity(e) || p.isLocalHero(e, controllerID) {
+			if p.isPlayerOrHeroEntity(e, controllerID) {
 				raw, _ := strconv.Atoi(value)
 				if raw < 0 {
 					raw = 0
@@ -652,7 +685,7 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 			// SpellsPlayedForNagasCounter (HDT) — total spells played this game for
 			// Thaumaturgist/ArcaneCannoneer/ShowyCyclist/Groundbreaker synergy.
 			// Only show when one of those minions is on the board (mirrors HDT ShouldShow).
-			if p.isLocalPlayerEntity(e) || p.isLocalHero(e, controllerID) {
+			if p.isPlayerOrHeroEntity(e, controllerID) {
 				raw, _ := strconv.Atoi(value)
 				snap := p.machine.State()
 				if HasNagaSynergyMinion(snap.Board) {
@@ -711,6 +744,11 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 		return
 	}
 
+	// Track entity IDs during combat phase for retroactive partner board scan.
+	if p.combatPhaseActive && p.isDuos {
+		p.combatPhaseEntityIDs = append(p.combatPhaseEntityIDs, e.EntityID)
+	}
+
 	// Register the controller from the CONTROLLER tag in the block.
 	controllerID := e.PlayerID
 	if ctrl, ok := e.Tags["CONTROLLER"]; ok {
@@ -762,6 +800,9 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 	if sd2, ok := e.Tags["TAG_SCRIPT_DATA_NUM_2"]; ok {
 		info.ScriptData2 = parseInt(sd2)
 	}
+	if zp, ok := e.Tags["ZONE_POSITION"]; ok {
+		info.ZonePosition = parseInt(zp)
+	}
 	if pid, ok := e.Tags["PLAYER_ID"]; ok {
 		info.PlayerID = parseInt(pid)
 	}
@@ -778,13 +819,17 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 	}
 
 	// Track partner combat copies during partner's combat phase.
-	if p.partnerCombatActive && controllerID > 0 {
-		if cardType == "HERO" && info.PlayerID == p.partnerPlayerID {
-			// This is the partner's hero copy in combat — track its controller
-			// so we can identify which minions belong to the partner's side.
+	// In duos, the partner's combat copies have CONTROLLER=localPlayerID,
+	// while the opponent's copies have CONTROLLER=botID. The partner hero
+	// copy receives PLAYER_ID=partnerPlayerID via a subsequent TAG_CHANGE.
+	// Only collect minions with ZONE_POSITION > 0 (initial board setup),
+	// not mid-combat spawns (deathrattles, etc.) which lack a zone position.
+	zonePos := parseInt(e.Tags["ZONE_POSITION"])
+	if p.partnerCombatActive && controllerID > 0 && controllerID == p.localPlayerID {
+		if cardType == "HERO" {
+			// Partner hero copy — CONTROLLER matches localPlayerID during combat.
 			p.partnerCombatHeroCtrl = controllerID
-		} else if cardType == "MINION" && p.partnerCombatHeroCtrl > 0 &&
-			controllerID == p.partnerCombatHeroCtrl &&
+		} else if cardType == "MINION" && zonePos > 0 &&
 			info.Attack > 0 && info.Health > 0 && info.Zone == "PLAY" {
 			mn := MinionState{
 				EntityID: e.EntityID,
@@ -1027,9 +1072,73 @@ func (p *Processor) finalizePartnerCombat() {
 	p.partnerCombatHeroCtrl = 0
 }
 
+// collectPartnerCombatRetro scans recently created combat entities for partner
+// combat copies that were created before BACON_CURRENT_COMBAT_PLAYER_ID fired.
+// In duos, the partner's hero copy (CONTROLLER=localPlayerID, PLAYER_ID=partnerPlayerID)
+// and its minions are sometimes emitted before the combat flag.
+// Only entities tracked in combatPhaseEntityIDs are considered, avoiding confusion
+// with the local player's real board minions.
+func (p *Processor) collectPartnerCombatRetro() {
+	if p.partnerPlayerID == 0 || p.localPlayerID == 0 {
+		return
+	}
+	// Find the partner's hero copy among combat-phase entities.
+	var heroCtrl int
+	for _, eid := range p.combatPhaseEntityIDs {
+		info := p.entityProps[eid]
+		if info == nil {
+			continue
+		}
+		if info.CardType == "HERO" && info.PlayerID == p.partnerPlayerID && info.Zone == "PLAY" {
+			ctrl := p.entityController[eid]
+			if ctrl == p.localPlayerID {
+				heroCtrl = ctrl
+				p.partnerCombatHeroCtrl = ctrl
+				slog.Debug("partner hero found retroactively", "entityID", eid, "ctrl", ctrl)
+				break
+			}
+		}
+	}
+	if heroCtrl == 0 {
+		return
+	}
+	// Collect minions with the same controller from combat-phase entities.
+	// Only include minions with ZonePosition > 0 (initial board setup minions).
+	for _, eid := range p.combatPhaseEntityIDs {
+		info := p.entityProps[eid]
+		if info == nil {
+			continue
+		}
+		if info.CardType == "MINION" && info.Zone == "PLAY" &&
+			info.ZonePosition > 0 &&
+			info.Attack > 0 && info.Health > 0 &&
+			p.entityController[eid] == heroCtrl {
+			mn := MinionState{
+				EntityID: eid,
+				CardID:   info.CardID,
+				Name:     info.Name,
+				Attack:   info.Attack,
+				Health:   info.Health,
+			}
+			if mn.Name == "" && mn.CardID != "" {
+				mn.Name = CardName(mn.CardID)
+			}
+			p.partnerCombatMinions = append(p.partnerCombatMinions, mn)
+		}
+	}
+	if len(p.partnerCombatMinions) > 0 {
+		slog.Debug("partner minions collected retroactively", "count", len(p.partnerCombatMinions))
+	}
+}
+
 // isLocalDntTarget returns true if the enchantment entity is attached to the local
 // hero or local player entity. Used in duos where Dnt enchantments may have
 // CONTROLLER=botID but are attached to local entities.
+//
+// In Duos the bot player entity (hi=0 in CREATE_GAME) holds Dnt enchantments for
+// the local player — they are ATTACHED to the bot entity rather than the local
+// player entity. Power.log only exposes entities visible to the local player, so
+// bot-attached Dnt enchantments are always local.
 func (p *Processor) isLocalDntTarget(entityID int) bool {
 	info := p.entityProps[entityID]
 	if info == nil {
@@ -1039,8 +1148,18 @@ func (p *Processor) isLocalDntTarget(entityID int) bool {
 		if info.AttachedTo == p.localHeroID {
 			return true
 		}
-		if pid, ok := p.playerEntityIDs[info.AttachedTo]; ok && pid == p.localPlayerID {
-			return true
+		if pid, ok := p.playerEntityIDs[info.AttachedTo]; ok {
+			if pid == p.localPlayerID {
+				return true
+			}
+			// In Duos, the bot player entity holds Dnt enchantments for the
+			// local player. A bot entity is a player entity whose PlayerID is
+			// NOT in realPlayerIDs (i.e. it had hi=0 in CREATE_GAME).
+			if p.isDuos {
+				if _, isReal := p.realPlayerIDs[pid]; !isReal {
+					return true
+				}
+			}
 		}
 	}
 	return false
@@ -1096,6 +1215,22 @@ func (p *Processor) isLocalHero(e parser.GameEvent, controllerID int) bool {
 	}
 	// Before the hero entity is identified, fall back to the HERO-type registry.
 	return p.heroEntities[e.EntityID]
+}
+
+// isPlayerOrHeroEntity returns true if the event belongs to the local player
+// entity or hero, but NOT enchantments. Used for buff source / ability counter
+// tags that should only be accepted from player entities and heroes.
+// Enchantments like Bacon_TagTransferPlayerE mirror player tags (e.g.
+// TAVERN_SPELL_ATTACK_INCREASE) with stale values — accepting them would
+// overwrite the real counters.
+func (p *Processor) isPlayerOrHeroEntity(e parser.GameEvent, controllerID int) bool {
+	// Reject known enchantment entities.
+	if e.EntityID > 0 {
+		if info := p.entityProps[e.EntityID]; info != nil && info.CardType == "ENCHANTMENT" {
+			return false
+		}
+	}
+	return p.isLocalPlayerEntity(e) || p.isLocalHero(e, controllerID)
 }
 
 // updateMinionStat updates a minion's stat on the board and in the entity
@@ -1288,7 +1423,8 @@ func (p *Processor) handleEnchantmentEntity(e parser.GameEvent, info *entityInfo
 	targetCtrl := p.entityController[info.AttachedTo]
 	enchCtrl := p.entityController[e.EntityID]
 	isLocalMinion := targetCtrl == p.localPlayerID
-	if !isLocalMinion {
+	isDntLocal := p.isLocalDntTarget(e.EntityID)
+	if !isLocalMinion && !isDntLocal {
 		isLocalEnch := enchCtrl == p.localPlayerID
 		if !isLocalEnch {
 			return

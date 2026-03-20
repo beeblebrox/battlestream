@@ -14,14 +14,15 @@
 ╰────────────────────────────────────────────────────────╯╰────────────────────────────────────────────────────────╯  
 ╭────────────────────────────────────────────────────────╮╭────────────────────────────────────────────────────────╮  
 │ BUFF SOURCES                                           ││ CHANGES                                                │  
-│ Shop Buff      +116/+86                            █   ││ Phase: COMBAT -> GAME_OVER                         █   │  
+│ Shop Buff      +130/+94                            █   ││ Phase: COMBAT -> GAME_OVER                         █   │  
 │ Rightmost      +28/+28                             │   ││ + Wildfire Elemental (233/181)                     │   │  
-│                                                    ▼   ││ + Unleashed Mana Surge (85/64)                     ▼   │  
+│ Beetles        +33/+17                             ▼   ││ + Unleashed Mana Surge (85/64)                     ▼   │  
 ╰────────────────────────────────────────────────────────╯╰────────────────────────────────────────────────────────╯  
 ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ PARTNER                                                                                                            │
+│ PARTNER (Board: Turn 11)                                                                                           │
 │   Hero: Lord Jaraxxus  Tier: 3  Triples: 2                                                                         │
-│   (awaiting first combat)                                                                                          │
+│   Soul Rewinder          4/1                                                                                       │
+│   ... +5 more                                                                                                      │
 │                                                                                                                    │
 ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
@@ -34,7 +35,6 @@
 │ eric.List`1[System.String] EffectIndex=16 Target=0 SubOption=-1 TriggerKeyword=TAG_NOT_SET                     │   │
 │ D 22:51:35.5977094 GameState.DebugPrintPower() - BLOCK_END                                                     │   │
 │ D 22:51:35.5977094 GameState.DebugPrintPower() - BLOCK_START BlockType=TRIGGER Entity=[entityName=BaconShop8Pla│   │
-│ erEnchant id=71 zone=PLAY zonePos=0 cardId=TB_BaconShop_8P_PlayerE player=8] EffectCardId=System.Collections.Ge│   │
-│ eric.List`1[System.String] EffectIndex=23 Target=0 SubOption=-1 TriggerKeyword=TAG_NOT_SET                     ▼   │
+│ erEnchant id=71 zone=PLAY zonePos=0 cardId=TB_BaconShop_8P_PlayerE player=8] EffectCardId=System.Collections.Ge▼   │
 ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
   h/l:step  [/]:turn  {/}:phase  g/G:start/end  t:jump  j/k:raw log  J/K:panels  f:filter  L:source  q:quit  d:partner
