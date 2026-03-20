@@ -393,3 +393,27 @@ func TestFullEntityIDFormat(t *testing.T) {
 		t.Errorf("expected CardID TB_BaconShop_HERO_PH, got %q", events[0].CardID)
 	}
 }
+
+func TestCreateGameCapturesGameEntityTags(t *testing.T) {
+	events := feed(
+		"D 20:04:12.2333830 GameState.DebugPrintPower() - CREATE_GAME",
+		"D 20:04:12.2333830 GameState.DebugPrintPower() -     GameEntity EntityID=13",
+		"D 20:04:12.2333830 GameState.DebugPrintPower() -         tag=CARDTYPE value=GAME",
+		"D 20:04:12.2333830 GameState.DebugPrintPower() -         tag=BACON_DUOS_PUNISH_LEAVERS value=1",
+		"D 20:04:12.2333830 GameState.DebugPrintPower() -     Player EntityID=14 PlayerID=5 GameAccountId=[hi=144115193835963207 lo=30722021]",
+	)
+
+	// Find EventGameEntityTags
+	var found bool
+	for _, e := range events {
+		if e.Type == EventGameEntityTags {
+			if e.Tags["BACON_DUOS_PUNISH_LEAVERS"] != "1" {
+				t.Errorf("expected BACON_DUOS_PUNISH_LEAVERS=1, got %q", e.Tags["BACON_DUOS_PUNISH_LEAVERS"])
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("no EventGameEntityTags emitted")
+	}
+}

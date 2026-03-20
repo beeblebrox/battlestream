@@ -25,6 +25,10 @@ type Parser struct {
 	blockStack []blockContext
 	refDate    time.Time // reference date for timestamps (default: time.Now())
 	lastTS     time.Time // last emitted timestamp for midnight wrap detection
+
+	// CREATE_GAME GameEntity block capture
+	inCreateGameEntity    bool
+	createGameEntityTags  map[string]string
 }
 
 // New creates a Parser that sends events to out.
@@ -52,6 +56,9 @@ var (
 
 	// D 21:11:50.1234567 GameState.DebugPrintPower() - CREATE_GAME
 	reCreateGame = regexp.MustCompile(`CREATE_GAME`)
+
+	// GameEntity EntityID=13  (inside CREATE_GAME block)
+	reGameEntity = regexp.MustCompile(`GameEntity\s+EntityID=(\d+)`)
 
 	// Player EntityID=20 PlayerID=7 GameAccountId=[hi=144115193835963207 lo=30722021]
 	rePlayerDef = regexp.MustCompile(`Player\s+EntityID=(\d+)\s+PlayerID=(\d+)\s+GameAccountId=\[hi=(\d+)\s+lo=(\d+)\]`)
@@ -115,6 +122,24 @@ func (p *Parser) Feed(line string) {
 	ts := p.extractTimestamp(line)
 	stripped := stripTimestamp(line)
 
+	// Capture GameEntity block tags during CREATE_GAME.
+	if p.inCreateGameEntity {
+		if m := reBlockTag.FindStringSubmatch(stripped); m != nil {
+			p.createGameEntityTags[m[1]] = m[2]
+			return
+		}
+		// Non-tag line ends the GameEntity block — emit accumulated tags.
+		if len(p.createGameEntityTags) > 0 {
+			p.emit(GameEvent{
+				Type: EventGameEntityTags,
+				Timestamp: ts,
+				Tags: p.createGameEntityTags,
+			})
+		}
+		p.inCreateGameEntity = false
+		p.createGameEntityTags = nil
+	}
+
 	// If we're inside a FULL_ENTITY / SHOW_ENTITY block, check for
 	// continuation tag lines before processing any other patterns.
 	if p.inBlock {
@@ -157,11 +182,18 @@ func (p *Parser) Feed(line string) {
 		p.inBlock = false
 		p.pending = GameEvent{}
 		p.blockStack = p.blockStack[:0]
+		p.inCreateGameEntity = false
+		p.createGameEntityTags = nil
 		p.emit(GameEvent{
 			Type:      EventGameStart,
 			Timestamp: ts,
 			Tags:      map[string]string{},
 		})
+
+	case reGameEntity.MatchString(stripped):
+		// GameEntity block inside CREATE_GAME — capture subsequent tag lines.
+		p.inCreateGameEntity = true
+		p.createGameEntityTags = make(map[string]string)
 
 	case rePlayerDef.MatchString(stripped):
 		m := rePlayerDef.FindStringSubmatch(stripped)

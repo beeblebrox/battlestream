@@ -12,8 +12,9 @@ const (
 	EventTurnStart    EventType = "TURN_START"
 	EventEntityUpdate EventType = "ENTITY_UPDATE"
 	EventTagChange    EventType = "TAG_CHANGE"
-	EventPlayerDef    EventType = "PLAYER_DEF"  // Player entity definition from CREATE_GAME
-	EventPlayerName   EventType = "PLAYER_NAME" // PlayerID → PlayerName mapping
+	EventPlayerDef        EventType = "PLAYER_DEF"          // Player entity definition from CREATE_GAME
+	EventPlayerName       EventType = "PLAYER_NAME"         // PlayerID → PlayerName mapping
+	EventGameEntityTags   EventType = "GAME_ENTITY_TAGS"    // Tags from GameEntity block in CREATE_GAME
 )
 
 // GameEvent is a single parsed event from the Power.log stream.
