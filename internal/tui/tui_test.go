@@ -225,3 +225,17 @@ func stripANSI(s string) string {
 	}
 	return out.String()
 }
+
+func TestRenderTavernTierAnomalyTier7(t *testing.T) {
+	result := renderTavernTier(7)
+	if result == "" {
+		t.Fatal("renderTavernTier(7) returned empty string")
+	}
+	if !strings.Contains(result, "7") {
+		t.Errorf("expected tier 7 to contain '7', got %q", result)
+	}
+	// Should have 7 filled stars and 0 empty stars.
+	if strings.Contains(result, "☆") {
+		t.Errorf("tier 7 should have no empty stars, got %q", result)
+	}
+}
