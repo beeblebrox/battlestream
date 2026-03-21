@@ -2641,3 +2641,44 @@ func TestCombatBeetleDoesNotLeakToLocal(t *testing.T) {
 	}
 }
 
+func TestDuosBotAttachedOpponentDntDoesNotLeakToLocal(t *testing.T) {
+	m, p := newProc()
+	setupDuosGame(p) // local=PlayerID 7 (EntityID 20), bot=PlayerID 15 (EntityID 22)
+
+	// Opponent's beetle Dnt enchantment: CONTROLLER=15 (bot), ATTACHED=22 (bot entity).
+	// In duos, opponent combat copy Dnt enchantments are attached to the bot entity.
+	// These must NOT be treated as local.
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventEntityUpdate,
+		EntityID: 22684,
+		CardID:   "BG31_808pe",
+		Tags: map[string]string{
+			"CONTROLLER":            "15",
+			"CARDTYPE":              "ENCHANTMENT",
+			"ATTACHED":              "22",
+			"ZONE":                  "PLAY",
+			"TAG_SCRIPT_DATA_NUM_1": "26",
+			"TAG_SCRIPT_DATA_NUM_2": "13",
+		},
+	})
+
+	// TAG_CHANGE updating the beetle Dnt values (combat progression).
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventTagChange,
+		EntityID: 22684,
+		Tags:     map[string]string{"TAG_SCRIPT_DATA_NUM_1": "30"},
+	})
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventTagChange,
+		EntityID: 22684,
+		Tags:     map[string]string{"TAG_SCRIPT_DATA_NUM_2": "15"},
+	})
+
+	state := m.State()
+	for _, bs := range state.BuffSources {
+		if bs.Category == "BEETLE" {
+			t.Errorf("opponent beetle Dnt leaked to local via bot entity: ATK=%d HP=%d", bs.Attack, bs.Health)
+		}
+	}
+}
+
