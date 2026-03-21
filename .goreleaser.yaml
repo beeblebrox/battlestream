@@ -1,0 +1,79 @@
+version: 2
+
+project_name: battlestream
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: battlestream
+    main: ./cmd/battlestream
+    binary: battlestream
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+universal_binaries:
+  - id: battlestream-universal
+    ids:
+      - battlestream
+    name_template: battlestream
+    replace: false
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+      {{- if eq .Arch "all" }}_universal{{ end }}
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+sboms:
+  - artifacts: archive
+
+signs:
+  - cmd: cosign
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - --output-signature=${signature}
+      - --output-certificate=${certificate}
+      - ${artifact}
+    artifacts: checksum
+    output: true
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - Merge pull request
+
+release:
+  github:
+    owner: beeblebrox
+    name: battlestream
+  prerelease: auto
