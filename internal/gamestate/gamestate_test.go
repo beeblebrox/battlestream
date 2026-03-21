@@ -2889,3 +2889,36 @@ func TestDuosBeetleDntMixedContributions(t *testing.T) {
 		}
 	}
 }
+
+func TestSoloBeetleDntUnchanged(t *testing.T) {
+	m, p := newProc()
+	setupGame(p) // solo game, local=PlayerID 7
+
+	// Beetle Dnt enchantment.
+	p.Handle(parser.GameEvent{
+		Type: parser.EventEntityUpdate, EntityID: 700, CardID: "BG31_808pe",
+		Tags: map[string]string{
+			"CONTROLLER": "7", "CARDTYPE": "ENCHANTMENT",
+			"ATTACHED": "20", "ZONE": "PLAY",
+			"TAG_SCRIPT_DATA_NUM_1": "10", "TAG_SCRIPT_DATA_NUM_2": "8",
+		},
+	})
+
+	// TAG_CHANGE update.
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 700,
+		Tags: map[string]string{"TAG_SCRIPT_DATA_NUM_1": "14"},
+	})
+
+	state := m.State()
+	for _, bs := range state.BuffSources {
+		if bs.Category == "BEETLE" {
+			// 14+1=15 ATK, 8+1=9 HP
+			if bs.Attack != 15 || bs.Health != 9 {
+				t.Errorf("solo beetle: got +%d/+%d, want +15/+9", bs.Attack, bs.Health)
+			}
+			return
+		}
+	}
+	t.Error("expected beetle buff source in solo game")
+}
