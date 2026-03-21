@@ -2716,3 +2716,99 @@ func TestDuosLocalPlayerDntStillTracked(t *testing.T) {
 		t.Error("local player beetle Dnt not tracked after fix")
 	}
 }
+
+func TestDuosBeetleDntSplitByPartnerCombat(t *testing.T) {
+	m, p := newProc()
+	setupDuosGame(p) // local=PlayerID 7, partner=PlayerID 8, bot=PlayerID 15
+
+	// Set up local hero entity 33 (needed for hero entity tracking).
+	p.Handle(parser.GameEvent{
+		Type: parser.EventEntityUpdate, EntityID: 33, CardID: "TB_BaconShop_HERO_49",
+		Tags: map[string]string{"CONTROLLER": "7", "CARDTYPE": "HERO", "HEALTH": "40", "ZONE": "PLAY"},
+	})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 20, PlayerID: 7,
+		EntityName: "LocalPlayer#1234",
+		Tags: map[string]string{"HERO_ENTITY": "33"},
+	})
+
+	// SHOW_ENTITY: beetle Dnt combat copy arrives (before combat starts).
+	// SD1=20, SD2=16 — this is the team total from prior rounds.
+	p.Handle(parser.GameEvent{
+		Type: parser.EventEntityUpdate, EntityID: 500, CardID: "BG31_808pe",
+		Tags: map[string]string{
+			"CONTROLLER": "7", "CARDTYPE": "ENCHANTMENT",
+			"ATTACHED": "20", "ZONE": "PLAY",
+			"TAG_SCRIPT_DATA_NUM_1": "20", "TAG_SCRIPT_DATA_NUM_2": "16",
+		},
+	})
+
+	// Local combat starts (no beetle changes during local combat).
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 20, PlayerID: 7,
+		EntityName: "LocalPlayer#1234",
+		Tags: map[string]string{"BACON_CURRENT_COMBAT_PLAYER_ID": "7"},
+	})
+
+	// Partner combat starts.
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 20, PlayerID: 7,
+		EntityName: "LocalPlayer#1234",
+		Tags: map[string]string{"BACON_CURRENT_COMBAT_PLAYER_ID": "8"},
+	})
+
+	// Beetle SD updates during partner combat (partner's beetles dying).
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 500,
+		Tags: map[string]string{"TAG_SCRIPT_DATA_NUM_1": "24"},
+	})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 500,
+		Tags: map[string]string{"TAG_SCRIPT_DATA_NUM_2": "20"},
+	})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 500,
+		Tags: map[string]string{"TAG_SCRIPT_DATA_NUM_1": "26"},
+	})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 500,
+		Tags: map[string]string{"TAG_SCRIPT_DATA_NUM_2": "22"},
+	})
+
+	// Combat ends.
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 20, PlayerID: 7,
+		EntityName: "LocalPlayer#1234",
+		Tags: map[string]string{"BACON_CURRENT_COMBAT_PLAYER_ID": "0"},
+	})
+
+	state := m.State()
+
+	// Local should have the pre-partner-combat value: 20+1=21 ATK, 16+1=17 HP.
+	localFound := false
+	for _, bs := range state.BuffSources {
+		if bs.Category == "BEETLE" {
+			localFound = true
+			if bs.Attack != 21 || bs.Health != 17 {
+				t.Errorf("local beetle: got +%d/+%d, want +21/+17", bs.Attack, bs.Health)
+			}
+		}
+	}
+	if !localFound {
+		t.Error("expected local beetle buff source")
+	}
+
+	// Partner should have the delta: (26-20)=6 ATK, (22-16)=6 HP.
+	partnerFound := false
+	for _, bs := range state.PartnerBuffSources {
+		if bs.Category == "BEETLE" {
+			partnerFound = true
+			if bs.Attack != 6 || bs.Health != 6 {
+				t.Errorf("partner beetle: got +%d/+%d, want +6/+6", bs.Attack, bs.Health)
+			}
+		}
+	}
+	if !partnerFound {
+		t.Error("expected partner beetle buff source")
+	}
+}
