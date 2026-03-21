@@ -1164,14 +1164,13 @@ func (p *Processor) collectPartnerCombatRetro() {
 	}
 }
 
-// isLocalDntTarget returns true if the enchantment entity is attached to the local
-// hero or local player entity. Used in duos where Dnt enchantments may have
-// CONTROLLER=botID but are attached to local entities.
+// isLocalDntTarget returns true if entityID is a Dnt enchantment attached to a
+// local player entity — i.e., the local player entity or the local hero.
 //
-// In Duos the bot player entity (hi=0 in CREATE_GAME) holds Dnt enchantments for
-// the local player — they are ATTACHED to the bot entity rather than the local
-// player entity. Power.log only exposes entities visible to the local player, so
-// bot-attached Dnt enchantments are always local.
+// In Duos, local player Dnt enchantments always have CONTROLLER == localPlayerID
+// and ATTACHED == local player entity. Opponent combat copy Dnt enchantments have
+// CONTROLLER == botPlayerID and ATTACHED == bot entity. We must NOT treat
+// bot-attached enchantments as local — that was the source of buff leakage.
 func (p *Processor) isLocalDntTarget(entityID int) bool {
 	info := p.entityProps[entityID]
 	if info == nil {
@@ -1184,14 +1183,6 @@ func (p *Processor) isLocalDntTarget(entityID int) bool {
 		if pid, ok := p.playerEntityIDs[info.AttachedTo]; ok {
 			if pid == p.localPlayerID {
 				return true
-			}
-			// In Duos, the bot player entity holds Dnt enchantments for the
-			// local player. A bot entity is a player entity whose PlayerID is
-			// NOT in realPlayerIDs (i.e. it had hi=0 in CREATE_GAME).
-			if p.isDuos {
-				if _, isReal := p.realPlayerIDs[pid]; !isReal {
-					return true
-				}
 			}
 		}
 	}
