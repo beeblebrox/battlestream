@@ -96,7 +96,8 @@ type Processor struct {
 	pendingStatChanges []pendingStatChange
 
 	// Buff tracking for local player.
-	localBuffs buffTracker
+	localBuffs   buffTracker
+	partnerBuffs buffTracker // tracks partner buff sources from combat enchantments
 
 	// Win/loss streak tracking.
 	// In BG, the winning side's hero attacks the losing hero at end of combat.
@@ -131,6 +132,7 @@ func NewProcessor(m *Machine) *Processor {
 		heroEntities:     make(map[int]bool),
 		entityProps:      make(map[int]*entityInfo),
 		localBuffs:       newBuffTracker(),
+		partnerBuffs:     newBuffTracker(),
 		playerEntityIDs:  make(map[int]int),
 		realPlayerIDs:    make(map[int]int),
 	}
@@ -162,6 +164,7 @@ func (p *Processor) Handle(e parser.GameEvent) {
 		p.heroEntities = make(map[int]bool)
 		p.entityProps = make(map[int]*entityInfo)
 		p.localBuffs = newBuffTracker()
+		p.partnerBuffs = newBuffTracker()
 		p.localCombatResult = 0
 		p.pendingHeroAttackerID = 0
 		p.bgTurnsStarted = 0
@@ -1467,6 +1470,7 @@ func (p *Processor) handleEnchantmentEntity(e parser.GameEvent, info *entityInfo
 	enchCtrl := p.entityController[e.EntityID]
 
 	isRelevant := false
+	isPartnerEnch := p.isDuos && enchCtrl == p.partnerPlayerID
 	if targetCtrl == p.localPlayerID {
 		// Enchantment on a local minion — always track.
 		isRelevant = true
@@ -1476,6 +1480,9 @@ func (p *Processor) handleEnchantmentEntity(e parser.GameEvent, info *entityInfo
 	} else if enchCtrl == p.localPlayerID && category != CatGeneral {
 		// Enchantment owned by local player on non-local target (e.g., aura effects).
 		// Only track if it has a specific (non-general) category.
+		isRelevant = true
+	} else if isPartnerEnch && category != CatGeneral {
+		// Partner enchantment with a specific category — track for partner buff display.
 		isRelevant = true
 	}
 	if !isRelevant {
@@ -1495,8 +1502,11 @@ func (p *Processor) handleEnchantmentEntity(e parser.GameEvent, info *entityInfo
 	p.machine.AddEnchantment(ench)
 
 	// Process initial SD values from FULL_ENTITY/SHOW_ENTITY as counter updates.
+	// Allow local player, local Dnt targets, and partner through — handleDntTagChange
+	// routes to the correct tracker internally.
 	if info.ScriptData1 != 0 || info.ScriptData2 != 0 {
-		if enchCtrl == p.localPlayerID || (enchCtrl != 0 && p.isLocalDntTarget(e.EntityID)) {
+		isLocalOrDnt := enchCtrl == p.localPlayerID || (enchCtrl != 0 && p.isLocalDntTarget(e.EntityID))
+		if isLocalOrDnt || isPartnerEnch {
 			if info.ScriptData1 != 0 {
 				p.handleDntTagChange(e.EntityID, "TAG_SCRIPT_DATA_NUM_1", info.ScriptData1)
 			}
@@ -1514,11 +1524,20 @@ func (p *Processor) handleDntTagChange(entityID int, tag string, value int) {
 	if info == nil {
 		return
 	}
-	// Only process enchantments controlled by local player or attached to local entities.
-	// Reject controller=0 (unknown) to prevent opponent/partner buff leakage.
+	// Only process enchantments controlled by local player, partner, or attached to local entities.
+	// Reject controller=0 (unknown) to prevent opponent buff leakage.
 	ctrl := p.entityController[entityID]
-	if ctrl == 0 || (ctrl != p.localPlayerID && !p.isLocalDntTarget(entityID)) {
+	isLocal := ctrl == p.localPlayerID || p.isLocalDntTarget(entityID)
+	isPartner := p.isDuos && ctrl == p.partnerPlayerID
+	if ctrl == 0 || (!isLocal && !isPartner) {
 		return
+	}
+
+	bt := &p.localBuffs
+	setBS := p.machine.SetBuffSource
+	if isPartner {
+		bt = &p.partnerBuffs
+		setBS = p.machine.SetPartnerBuffSource
 	}
 
 	cardID := info.CardID
@@ -1526,27 +1545,27 @@ func (p *Processor) handleDntTagChange(entityID int, tag string, value int) {
 
 	switch cardID {
 	case "BG_ShopBuff":
-		p.handleGenericShopBuffDnt(entityID, isSD1, value, CatShopBuff)
+		p.handleGenericShopBuffDnt(bt, setBS, entityID, isSD1, value, CatShopBuff)
 	case "BG_ShopBuff_Elemental":
-		p.handleShopBuffDnt(entityID, isSD1, value)
+		p.handleShopBuffDnt(bt, setBS, entityID, isSD1, value)
 	case "BG30_MagicItem_544pe":
-		p.handleNomiStickerDnt(entityID, isSD1, value)
+		p.handleNomiStickerDnt(bt, setBS, entityID, isSD1, value)
 	case "BG34_855pe":
-		p.handleNomiAllDnt(entityID, isSD1, value)
+		p.handleNomiAllDnt(bt, setBS, entityID, isSD1, value)
 	case "BG31_808pe":
-		p.handleAbsoluteDnt(CatBeetle, isSD1, value, 1, 1)
+		p.handleAbsoluteDnt(bt, setBS, CatBeetle, isSD1, value, 1, 1)
 	case "BG34_854pe":
-		p.handleAbsoluteDnt(CatRightmost, isSD1, value, 0, 0)
+		p.handleAbsoluteDnt(bt, setBS, CatRightmost, isSD1, value, 0, 0)
 	case "BG34_402pe":
-		p.handleAbsoluteDnt(CatWhelp, isSD1, value, 0, 0)
+		p.handleAbsoluteDnt(bt, setBS, CatWhelp, isSD1, value, 0, 0)
 	case "BG25_011pe":
 		if isSD1 {
-			p.machine.SetBuffSource(CatUndead, value, 0)
+			setBS(CatUndead, value, 0)
 		}
 	case "BG34_170e":
-		p.handleAbsoluteDnt(CatVolumizer, isSD1, value, 0, 0)
+		p.handleAbsoluteDnt(bt, setBS, CatVolumizer, isSD1, value, 0, 0)
 	case "BG34_689e2":
-		p.handleAbsoluteDnt(CatBloodgemBarrage, isSD1, value, 0, 0)
+		p.handleAbsoluteDnt(bt, setBS, CatBloodgemBarrage, isSD1, value, 0, 0)
 	default:
 		if cardID != "" && value != 0 {
 			slog.Debug("untracked Dnt enchantment", "cardID", cardID, "tag", tag, "value", value, "entityID", entityID)
@@ -1555,8 +1574,7 @@ func (p *Processor) handleDntTagChange(entityID int, tag string, value int) {
 }
 
 // handleAbsoluteDnt sets a buff source from an absolute Dnt value plus base offset.
-func (p *Processor) handleAbsoluteDnt(category string, isSD1 bool, value, baseAtk, baseHp int) {
-	bt := &p.localBuffs
+func (p *Processor) handleAbsoluteDnt(bt *buffTracker, setBS func(string, int, int), category string, isSD1 bool, value, baseAtk, baseHp int) {
 	state := bt.buffSourceState[category]
 	if isSD1 {
 		state[0] = baseAtk + value
@@ -1564,12 +1582,11 @@ func (p *Processor) handleAbsoluteDnt(category string, isSD1 bool, value, baseAt
 		state[1] = baseHp + value
 	}
 	bt.buffSourceState[category] = state
-	p.machine.SetBuffSource(category, state[0], state[1])
+	setBS(category, state[0], state[1])
 }
 
 // handleGenericShopBuffDnt handles BG_ShopBuff (generic shop buff) with differential accumulation.
-func (p *Processor) handleGenericShopBuffDnt(entityID int, isSD1 bool, value int, category string) {
-	bt := &p.localBuffs
+func (p *Processor) handleGenericShopBuffDnt(bt *buffTracker, setBS func(string, int, int), entityID int, isSD1 bool, value int, category string) {
 	prev := bt.shopBuffPrev[entityID]
 	var delta int
 	if isSD1 {
@@ -1588,12 +1605,11 @@ func (p *Processor) handleGenericShopBuffDnt(entityID int, isSD1 bool, value int
 		state[1] += delta
 	}
 	bt.buffSourceState[category] = state
-	p.machine.SetBuffSource(category, state[0], state[1])
+	setBS(category, state[0], state[1])
 }
 
 // handleShopBuffDnt handles BG_ShopBuff_Elemental with differential accumulation.
-func (p *Processor) handleShopBuffDnt(entityID int, isSD1 bool, value int) {
-	bt := &p.localBuffs
+func (p *Processor) handleShopBuffDnt(bt *buffTracker, setBS func(string, int, int), entityID int, isSD1 bool, value int) {
 	prev := bt.shopBuffPrev[entityID]
 	var delta int
 	if isSD1 {
@@ -1610,13 +1626,12 @@ func (p *Processor) handleShopBuffDnt(entityID int, isSD1 bool, value int) {
 	} else {
 		bt.nomiCounter[1] += delta
 	}
-	p.machine.SetBuffSource(CatNomi, bt.nomiCounter[0], bt.nomiCounter[1])
+	setBS(CatNomi, bt.nomiCounter[0], bt.nomiCounter[1])
 }
 
 // handleNomiAllDnt handles BG34_855pe (Timewarped Nomi / Kitchen Dream) with differential
 // accumulation. Same pattern as regular Nomi but tracked under CatNomiAll.
-func (p *Processor) handleNomiAllDnt(entityID int, isSD1 bool, value int) {
-	bt := &p.localBuffs
+func (p *Processor) handleNomiAllDnt(bt *buffTracker, setBS func(string, int, int), entityID int, isSD1 bool, value int) {
 	prev := bt.shopBuffPrev[entityID]
 	var delta int
 	if isSD1 {
@@ -1633,12 +1648,11 @@ func (p *Processor) handleNomiAllDnt(entityID int, isSD1 bool, value int) {
 	} else {
 		bt.nomiAllCounter[1] += delta
 	}
-	p.machine.SetBuffSource(CatNomiAll, bt.nomiAllCounter[0], bt.nomiAllCounter[1])
+	setBS(CatNomiAll, bt.nomiAllCounter[0], bt.nomiAllCounter[1])
 }
 
 // handleNomiStickerDnt handles BG30_MagicItem_544pe where SD1 applies to BOTH atk and hp.
-func (p *Processor) handleNomiStickerDnt(entityID int, isSD1 bool, value int) {
-	bt := &p.localBuffs
+func (p *Processor) handleNomiStickerDnt(bt *buffTracker, setBS func(string, int, int), entityID int, isSD1 bool, value int) {
 	prev := bt.shopBuffPrev[entityID]
 	if isSD1 {
 		delta := value - prev[0]
@@ -1650,7 +1664,7 @@ func (p *Processor) handleNomiStickerDnt(entityID int, isSD1 bool, value int) {
 		prev[1] = value
 		bt.shopBuffPrev[entityID] = prev
 	}
-	p.machine.SetBuffSource(CatNomi, bt.nomiCounter[0], bt.nomiCounter[1])
+	setBS(CatNomi, bt.nomiCounter[0], bt.nomiCounter[1])
 }
 
 // updateBuffSourceFromPlayerTag handles player-level buff tags like

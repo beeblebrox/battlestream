@@ -2562,6 +2562,52 @@ func TestIntegrationDuosWithTeammateID(t *testing.T) {
 	t.Logf("Player: %s, Partner: %s (hero: %s)", s.Player.Name, s.Partner.Name, s.Partner.HeroCardID)
 }
 
+func TestPartnerBeetleBuffRoutedToPartnerSources(t *testing.T) {
+	m, p := newProc()
+	setupGame(p) // local player ID=7
+
+	// Enable duos with partner ID=15 (the dummy player from setupGame).
+	p.isDuos = true
+	p.partnerPlayerID = 15
+
+	// Partner beetle Dnt enchantment (controller=15).
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventEntityUpdate,
+		EntityID: 500,
+		CardID:   "BG31_808pe",
+		Tags: map[string]string{
+			"CONTROLLER":            "15",
+			"CARDTYPE":              "ENCHANTMENT",
+			"ATTACHED":              "8888",
+			"TAG_SCRIPT_DATA_NUM_1": "5",
+			"TAG_SCRIPT_DATA_NUM_2": "3",
+		},
+	})
+
+	state := m.State()
+
+	// Local should have no beetle buffs.
+	for _, bs := range state.BuffSources {
+		if bs.Category == "BEETLE" {
+			t.Errorf("partner beetle leaked to local: ATK=%d HP=%d", bs.Attack, bs.Health)
+		}
+	}
+
+	// Partner should have beetle buffs.
+	found := false
+	for _, bs := range state.PartnerBuffSources {
+		if bs.Category == "BEETLE" {
+			found = true
+			if bs.Attack != 6 || bs.Health != 4 { // 5+1 base, 3+1 base
+				t.Errorf("wrong partner beetle values: ATK=%d HP=%d, want 6/4", bs.Attack, bs.Health)
+			}
+		}
+	}
+	if !found {
+		t.Error("expected partner beetle buff source but found none")
+	}
+}
+
 func TestCombatBeetleDoesNotLeakToLocal(t *testing.T) {
 	m, p := newProc()
 	setupGame(p) // local player ID=7
