@@ -2812,3 +2812,80 @@ func TestDuosBeetleDntSplitByPartnerCombat(t *testing.T) {
 		t.Error("expected partner beetle buff source")
 	}
 }
+
+func TestDuosBeetleDntMixedContributions(t *testing.T) {
+	m, p := newProc()
+	setupDuosGame(p) // local=7, partner=8
+
+	// SHOW_ENTITY: beetle Dnt combat copy with SD1=10, SD2=8 (prior total).
+	p.Handle(parser.GameEvent{
+		Type: parser.EventEntityUpdate, EntityID: 600, CardID: "BG31_808pe",
+		Tags: map[string]string{
+			"CONTROLLER": "7", "CARDTYPE": "ENCHANTMENT",
+			"ATTACHED": "20", "ZONE": "PLAY",
+			"TAG_SCRIPT_DATA_NUM_1": "10", "TAG_SCRIPT_DATA_NUM_2": "8",
+		},
+	})
+
+	// Local combat starts.
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 20, PlayerID: 7,
+		EntityName: "LocalPlayer#1234",
+		Tags: map[string]string{"BACON_CURRENT_COMBAT_PLAYER_ID": "7"},
+	})
+
+	// Beetle SD increments during local combat (local beetles dying).
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 600,
+		Tags: map[string]string{"TAG_SCRIPT_DATA_NUM_1": "14"},
+	})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 600,
+		Tags: map[string]string{"TAG_SCRIPT_DATA_NUM_2": "10"},
+	})
+
+	// Partner combat starts.
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 20, PlayerID: 7,
+		EntityName: "LocalPlayer#1234",
+		Tags: map[string]string{"BACON_CURRENT_COMBAT_PLAYER_ID": "8"},
+	})
+
+	// Beetle SD increments during partner combat (partner beetles dying).
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 600,
+		Tags: map[string]string{"TAG_SCRIPT_DATA_NUM_1": "20"},
+	})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 600,
+		Tags: map[string]string{"TAG_SCRIPT_DATA_NUM_2": "16"},
+	})
+
+	// Combat ends.
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 20, PlayerID: 7,
+		EntityName: "LocalPlayer#1234",
+		Tags: map[string]string{"BACON_CURRENT_COMBAT_PLAYER_ID": "0"},
+	})
+
+	state := m.State()
+
+	// Local: initial 10 + local delta 4 = 14 raw, +1 base = 15 ATK.
+	//        initial 8 + local delta 2 = 10 raw, +1 base = 11 HP.
+	for _, bs := range state.BuffSources {
+		if bs.Category == "BEETLE" {
+			if bs.Attack != 15 || bs.Health != 11 {
+				t.Errorf("local beetle: got +%d/+%d, want +15/+11", bs.Attack, bs.Health)
+			}
+		}
+	}
+
+	// Partner: delta during partner combat = (20-14)=6 ATK, (16-10)=6 HP.
+	for _, bs := range state.PartnerBuffSources {
+		if bs.Category == "BEETLE" {
+			if bs.Attack != 6 || bs.Health != 6 {
+				t.Errorf("partner beetle: got +%d/+%d, want +6/+6", bs.Attack, bs.Health)
+			}
+		}
+	}
+}
