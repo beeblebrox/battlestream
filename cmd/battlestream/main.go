@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	grpcserver "battlestream.fixates.io/internal/api/grpc"
 	"battlestream.fixates.io/internal/api/rest"
@@ -26,6 +27,7 @@ import (
 	"battlestream.fixates.io/internal/parser"
 	"battlestream.fixates.io/internal/store"
 	"battlestream.fixates.io/internal/tui"
+	"battlestream.fixates.io/internal/update"
 	"battlestream.fixates.io/internal/watcher"
 )
 
@@ -59,10 +61,47 @@ persists aggregate stats, and exposes them via gRPC, REST, WebSocket, and file o
 		cmdReparse(),
 		cmdDBReset(),
 		cmdVersion(),
+		cmdUpdate(),
 	)
+
+	// Background update check (non-blocking).
+	updateCh := startUpdateCheck()
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
+	}
+
+	printUpdateNotification(updateCh)
+}
+
+func startUpdateCheck() <-chan *update.CheckResult {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	stateDir := filepath.Join(home, ".battlestream")
+	if !update.ShouldCheck(stateDir) {
+		return nil
+	}
+	ch := make(chan *update.CheckResult, 1)
+	go func() {
+		res, _ := update.CheckForUpdate(stateDir, version)
+		ch <- res
+	}()
+	return ch
+}
+
+func printUpdateNotification(ch <-chan *update.CheckResult) {
+	if ch == nil {
+		return
+	}
+	select {
+	case r := <-ch:
+		if r != nil && term.IsTerminal(int(os.Stderr.Fd())) {
+			fmt.Fprintf(os.Stderr, "\nUpdate available: %s -> %s\n", version, r.NewVersion)
+			fmt.Fprintf(os.Stderr, "Run \"battlestream update\" to upgrade.\n\n")
+		}
+	default:
 	}
 }
 
