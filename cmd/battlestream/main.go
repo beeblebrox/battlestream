@@ -42,6 +42,8 @@ func main() {
 		Short: "Hearthstone Battlegrounds stat tracker and overlay backend",
 		Long: `battlestream monitors Hearthstone Battlegrounds games via log parsing,
 persists aggregate stats, and exposes them via gRPC, REST, WebSocket, and file output.`,
+		SilenceUsage:  true,
+		SilenceErrors: true,
 	}
 
 	root.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ~/.battlestream/config.yaml)")
