@@ -2682,3 +2682,37 @@ func TestDuosBotAttachedOpponentDntDoesNotLeakToLocal(t *testing.T) {
 	}
 }
 
+func TestDuosLocalPlayerDntStillTracked(t *testing.T) {
+	m, p := newProc()
+	setupDuosGame(p) // local=PlayerID 7 (EntityID 20), bot=PlayerID 15 (EntityID 22)
+
+	// Local player's beetle Dnt: CONTROLLER=7 (local), ATTACHED=20 (local player entity).
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventEntityUpdate,
+		EntityID: 500,
+		CardID:   "BG31_808pe",
+		Tags: map[string]string{
+			"CONTROLLER":            "7",
+			"CARDTYPE":              "ENCHANTMENT",
+			"ATTACHED":              "20",
+			"ZONE":                  "PLAY",
+			"TAG_SCRIPT_DATA_NUM_1": "5",
+			"TAG_SCRIPT_DATA_NUM_2": "3",
+		},
+	})
+
+	state := m.State()
+	found := false
+	for _, bs := range state.BuffSources {
+		if bs.Category == "BEETLE" {
+			found = true
+			// Beetle: value + base offset (1 ATK, 1 HP) = 5+1=6 ATK, 3+1=4 HP
+			if bs.Attack != 6 || bs.Health != 4 {
+				t.Errorf("wrong beetle values: ATK=%d HP=%d, want 6/4", bs.Attack, bs.Health)
+			}
+		}
+	}
+	if !found {
+		t.Error("local player beetle Dnt not tracked after fix")
+	}
+}
