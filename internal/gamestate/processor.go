@@ -1561,7 +1561,11 @@ func (p *Processor) handleDntTagChange(entityID int, tag string, value int) {
 		p.handleAbsoluteDnt(bt, setBS, CatWhelp, isSD1, value, 0, 0)
 	case "BG25_011pe":
 		if isSD1 {
-			setBS(CatUndead, value, 0)
+			if p.isDuos {
+				p.handleAbsoluteDntDuos(CatUndead, true, value, 0, 0)
+			} else {
+				setBS(CatUndead, value, 0)
+			}
 		}
 	case "BG34_170e":
 		p.handleAbsoluteDnt(bt, setBS, CatVolumizer, isSD1, value, 0, 0)
@@ -1576,6 +1580,10 @@ func (p *Processor) handleDntTagChange(entityID int, tag string, value int) {
 
 // handleAbsoluteDnt sets a buff source from an absolute Dnt value plus base offset.
 func (p *Processor) handleAbsoluteDnt(bt *buffTracker, setBS func(string, int, int), category string, isSD1 bool, value, baseAtk, baseHp int) {
+	if p.isDuos {
+		p.handleAbsoluteDntDuos(category, isSD1, value, baseAtk, baseHp)
+		return
+	}
 	state := bt.buffSourceState[category]
 	if isSD1 {
 		state[0] = baseAtk + value
@@ -1584,6 +1592,49 @@ func (p *Processor) handleAbsoluteDnt(bt *buffTracker, setBS func(string, int, i
 	}
 	bt.buffSourceState[category] = state
 	setBS(category, state[0], state[1])
+}
+
+// handleAbsoluteDntDuos splits an absolute Dnt value into local vs partner
+// contributions in duos. Uses partnerCombatActive to attribute deltas:
+// increments during partner combat go to partner, all others go to local.
+func (p *Processor) handleAbsoluteDntDuos(category string, isSD1 bool, value, baseAtk, baseHp int) {
+	idx := 0
+	if !isSD1 {
+		idx = 1
+	}
+
+	prev := p.dntTeamTotal[category]
+	delta := value - prev[idx]
+	if delta < 0 {
+		// New combat copy with lower value than accumulated — treat as reset.
+		delta = 0
+	}
+
+	// Update team total.
+	prev[idx] = value
+	p.dntTeamTotal[category] = prev
+
+	// Attribute delta to partner if their combat is active.
+	if p.partnerCombatActive && delta > 0 {
+		accum := p.dntPartnerAccum[category]
+		accum[idx] += delta
+		p.dntPartnerAccum[category] = accum
+	}
+
+	// Compute display values.
+	teamTotal := p.dntTeamTotal[category]
+	partnerAccum := p.dntPartnerAccum[category]
+
+	localAtk := baseAtk + teamTotal[0] - partnerAccum[0]
+	localHp := baseHp + teamTotal[1] - partnerAccum[1]
+
+	p.localBuffs.buffSourceState[category] = [2]int{localAtk, localHp}
+	p.machine.SetBuffSource(category, localAtk, localHp)
+
+	if partnerAccum[0] > 0 || partnerAccum[1] > 0 {
+		p.partnerBuffs.buffSourceState[category] = [2]int{partnerAccum[0], partnerAccum[1]}
+		p.machine.SetPartnerBuffSource(category, partnerAccum[0], partnerAccum[1])
+	}
 }
 
 // handleGenericShopBuffDnt handles BG_ShopBuff (generic shop buff) with differential accumulation.
