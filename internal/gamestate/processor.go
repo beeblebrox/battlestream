@@ -1561,7 +1561,7 @@ func (p *Processor) handleDntTagChange(entityID int, tag string, value int) {
 		p.handleAbsoluteDnt(bt, setBS, CatWhelp, isSD1, value, 0, 0)
 	case "BG25_011pe":
 		if isSD1 {
-			if p.isDuos {
+			if p.isDuos && !isPartner {
 				p.handleAbsoluteDntDuos(CatUndead, true, value, 0, 0)
 			} else {
 				setBS(CatUndead, value, 0)
@@ -1580,7 +1580,9 @@ func (p *Processor) handleDntTagChange(entityID int, tag string, value int) {
 
 // handleAbsoluteDnt sets a buff source from an absolute Dnt value plus base offset.
 func (p *Processor) handleAbsoluteDnt(bt *buffTracker, setBS func(string, int, int), category string, isSD1 bool, value, baseAtk, baseHp int) {
-	if p.isDuos {
+	// In duos, local-controlled Dnt values are team totals that need splitting
+	// by combat phase. Explicitly partner-controlled Dnt goes directly to partner.
+	if p.isDuos && bt == &p.localBuffs {
 		p.handleAbsoluteDntDuos(category, isSD1, value, baseAtk, baseHp)
 		return
 	}
