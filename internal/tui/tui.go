@@ -155,6 +155,12 @@ type Model struct {
 	// Layout split ratios (0.0 to 1.0).
 	vSplit float64 // vertical: fraction of width for left column (default 0.5)
 	hSplit float64 // horizontal: fraction of available height for main row vs partner (default 0.7)
+
+	// Divider drag state.
+	draggingV bool // dragging vertical divider
+	draggingH bool // dragging horizontal divider
+	dividerX  int  // X position of vertical divider (computed in View)
+	dividerY  int  // Y position of horizontal divider (computed in View)
 }
 
 // New creates a Model that will connect to the daemon at grpcAddr.
@@ -450,6 +456,9 @@ func (m *Model) View() string {
 
 	row2 := lipgloss.JoinHorizontal(lipgloss.Top, boardPanel, modsPanel)
 
+	// Store divider positions for drag detection.
+	m.dividerX = colW + 4 // X column where the vertical divider sits
+
 	// ── Row 3 (Duos): Partner board | Partner buff sources ──────
 	var rowPartner string
 	if m.game != nil && m.game.IsDuos {
@@ -496,6 +505,7 @@ func (m *Model) View() string {
 			styleTitle.Render(partnerModsTitle) + "\n" + partnerModsVPView)
 
 		rowPartner = lipgloss.JoinHorizontal(lipgloss.Top, partnerBoardPanel, partnerModsPanel)
+		m.dividerY = m.row2StartY + lipgloss.Height(row2) // Y row of horizontal divider
 	}
 
 	// ── Session stats ─────────────────────────────────────────
@@ -828,6 +838,19 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	switch msg.Action {
 	case tea.MouseActionPress:
 		if msg.Button == tea.MouseButtonLeft {
+			// Check vertical divider.
+			if msg.X >= m.dividerX-1 && msg.X <= m.dividerX+1 &&
+				msg.Y >= m.row2StartY {
+				m.draggingV = true
+				return m, nil
+			}
+			// Check horizontal divider (Duos only).
+			if m.game != nil && m.game.IsDuos &&
+				msg.Y >= m.dividerY-1 && msg.Y <= m.dividerY+1 {
+				m.draggingH = true
+				return m, nil
+			}
+			// Scrollbar detection.
 			panel, trackY, trackH := m.identifyScrollbar(msg.X, msg.Y)
 			if panel >= 0 {
 				m.scrubbing = true
@@ -838,10 +861,41 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case tea.MouseActionMotion:
+		if m.draggingV && msg.Button == tea.MouseButtonLeft {
+			totalInner := m.width - 8
+			newLeft := msg.X - 4
+			ratio := float64(newLeft) / float64(totalInner)
+			if ratio < 0.2 {
+				ratio = 0.2
+			}
+			if ratio > 0.8 {
+				ratio = 0.8
+			}
+			m.vSplit = ratio
+			return m, nil
+		}
+		if m.draggingH && msg.Button == tea.MouseButtonLeft {
+			totalAvailable := m.height - m.row2StartY - 3 - 1 - 3
+			newMain := msg.Y - m.row2StartY
+			ratio := float64(newMain) / float64(totalAvailable)
+			if ratio < 0.2 {
+				ratio = 0.2
+			}
+			if ratio > 0.8 {
+				ratio = 0.8
+			}
+			m.hSplit = ratio
+			return m, nil
+		}
 		if m.scrubbing && msg.Button == tea.MouseButtonLeft {
 			m.scrubAt(msg.Y)
 		}
 	case tea.MouseActionRelease:
+		if m.draggingV || m.draggingH {
+			m.draggingV = false
+			m.draggingH = false
+			return m, nil
+		}
 		m.scrubbing = false
 	}
 	return m, nil
