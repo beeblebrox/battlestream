@@ -43,9 +43,11 @@ type BGGameState struct {
 	Placement     int
 
 	// Duos fields
-	IsDuos       bool          `json:"is_duos,omitempty"`
-	Partner      *PlayerState  `json:"partner,omitempty"`
-	PartnerBoard *PartnerBoard `json:"partner_board,omitempty"`
+	IsDuos                 bool             `json:"is_duos,omitempty"`
+	Partner                *PlayerState     `json:"partner,omitempty"`
+	PartnerBoard           *PartnerBoard    `json:"partner_board,omitempty"`
+	PartnerBuffSources     []BuffSource     `json:"partner_buff_sources,omitempty"`
+	PartnerAbilityCounters []AbilityCounter `json:"partner_ability_counters,omitempty"`
 }
 
 // PartnerBoard holds the last-seen partner board snapshot from combat copies.
@@ -202,6 +204,8 @@ func (m *Machine) State() BGGameState {
 	s.Modifications = append([]StatMod(nil), m.state.Modifications...)
 	s.BuffSources = append([]BuffSource(nil), m.state.BuffSources...)
 	s.AbilityCounters = append([]AbilityCounter(nil), m.state.AbilityCounters...)
+	s.PartnerBuffSources = append([]BuffSource(nil), m.state.PartnerBuffSources...)
+	s.PartnerAbilityCounters = append([]AbilityCounter(nil), m.state.PartnerAbilityCounters...)
 	s.Enchantments = append([]Enchantment(nil), m.state.Enchantments...)
 	s.AvailableTribes = append([]string(nil), m.state.AvailableTribes...)
 	// Deep copy partner
@@ -543,6 +547,38 @@ func (m *Machine) SetAbilityCounter(category string, value int, display string) 
 	})
 }
 
+// SetPartnerBuffSource upserts a partner buff source by category.
+func (m *Machine) SetPartnerBuffSource(category string, atk, hp int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, bs := range m.state.PartnerBuffSources {
+		if bs.Category == category {
+			m.state.PartnerBuffSources[i].Attack = atk
+			m.state.PartnerBuffSources[i].Health = hp
+			return
+		}
+	}
+	m.state.PartnerBuffSources = append(m.state.PartnerBuffSources, BuffSource{
+		Category: category, Attack: atk, Health: hp,
+	})
+}
+
+// SetPartnerAbilityCounter upserts a partner ability counter by category.
+func (m *Machine) SetPartnerAbilityCounter(category string, value int, display string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, ac := range m.state.PartnerAbilityCounters {
+		if ac.Category == category {
+			m.state.PartnerAbilityCounters[i].Value = value
+			m.state.PartnerAbilityCounters[i].Display = display
+			return
+		}
+	}
+	m.state.PartnerAbilityCounters = append(m.state.PartnerAbilityCounters, AbilityCounter{
+		Category: category, Value: value, Display: display,
+	})
+}
+
 // RemoveAbilityCounter removes the ability counter for the given category (no-op if absent).
 func (m *Machine) RemoveAbilityCounter(category string) {
 	m.mu.Lock()
@@ -756,6 +792,8 @@ func (m *Machine) deepCopyState() BGGameState {
 	s.Modifications = append([]StatMod(nil), m.state.Modifications...)
 	s.BuffSources = append([]BuffSource(nil), m.state.BuffSources...)
 	s.AbilityCounters = append([]AbilityCounter(nil), m.state.AbilityCounters...)
+	s.PartnerBuffSources = append([]BuffSource(nil), m.state.PartnerBuffSources...)
+	s.PartnerAbilityCounters = append([]AbilityCounter(nil), m.state.PartnerAbilityCounters...)
 	s.Enchantments = append([]Enchantment(nil), m.state.Enchantments...)
 	s.AvailableTribes = append([]string(nil), m.state.AvailableTribes...)
 	if m.state.Partner != nil {

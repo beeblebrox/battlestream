@@ -319,6 +319,12 @@ func gameStateToProto(s gamestate.BGGameState) *bspb.GameState {
 		gs.PartnerBoardTurn = int32(s.PartnerBoard.Turn)
 		gs.PartnerBoardStale = s.PartnerBoard.Stale
 	}
+	for _, bs := range s.PartnerBuffSources {
+		gs.PartnerBuffSources = append(gs.PartnerBuffSources, buffSourceToProto(bs))
+	}
+	for _, ac := range s.PartnerAbilityCounters {
+		gs.PartnerAbilityCounters = append(gs.PartnerAbilityCounters, abilityCounterToProto(ac))
+	}
 	return gs
 }
 

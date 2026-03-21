@@ -87,7 +87,8 @@ message GameState {
   bool is_duos = 17;
   PlayerStats partner = 18;
   repeated MinionState partner_board = 19;
-  reserved 20, 21;
+  repeated BuffSource partner_buff_sources = 20;
+  repeated AbilityCounter partner_ability_counters = 21;
   string anomaly_card_id = 22;
   string anomaly_name = 23;
   string anomaly_description = 24;
