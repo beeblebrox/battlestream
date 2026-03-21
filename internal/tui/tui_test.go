@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	bspb "battlestream.fixates.io/internal/api/grpc/gen/battlestream/v1"
@@ -224,6 +225,26 @@ func stripANSI(s string) string {
 		i++
 	}
 	return out.String()
+}
+
+func TestCombinedModelForwardsKeysToLive(t *testing.T) {
+	m := &Model{
+		connState:      stateConnected,
+		game:           &bspb.GameState{Phase: "RECRUIT"},
+		showLastResult: true,
+	}
+
+	// Simulate "l" key directly on the live model.
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	if m.showLastResult {
+		t.Error("expected showLastResult to toggle to false after 'l' key")
+	}
+
+	// Toggle back.
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	if !m.showLastResult {
+		t.Error("expected showLastResult to toggle back to true after second 'l' key")
+	}
 }
 
 func TestRenderTavernTierAnomalyTier7(t *testing.T) {

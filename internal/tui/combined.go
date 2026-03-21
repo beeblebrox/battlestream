@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"log/slog"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -115,6 +116,8 @@ func (c *CombinedModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return c, tea.Quit
+		default:
+			slog.Debug("combined: forwarding key to live model", "key", msg.String(), "mode", c.mode)
 		}
 
 	case tea.WindowSizeMsg:
