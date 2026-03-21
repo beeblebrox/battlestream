@@ -131,18 +131,20 @@ type Model struct {
 	boardVP        viewport.Model
 	modsVP         viewport.Model
 	partnerBoardVP viewport.Model
+	partnerModsVP  viewport.Model
 
 	// Panel positions (updated each View frame) for mouse routing.
 	row2StartY int
 
 	// Per-panel scrollbar column X and viewport Y/height.
-	boardScrollX, boardVPY, boardVPH       int
-	modsScrollX, modsVPY, modsVPH         int
-	partnerScrollX, partnerVPY, partnerVPH int
+	boardScrollX, boardVPY, boardVPH                   int
+	modsScrollX, modsVPY, modsVPH                     int
+	partnerScrollX, partnerVPY, partnerVPH             int
+	partnerModsScrollX, partnerModsVPY, partnerModsVPH int
 
 	// Drag-scrubbing state.
 	scrubbing   bool
-	scrubPanel  int // 0=board, 1=mods, 2=partner
+	scrubPanel  int // 0=board, 1=mods, 2=partnerBoard, 3=partnerMods
 	scrubTrackY int
 	scrubTrackH int
 
@@ -402,16 +404,13 @@ func (m *Model) View() string {
 
 	row2 := lipgloss.JoinHorizontal(lipgloss.Top, boardPanel, modsPanel)
 
-	// ── Row 3 (Duos): Partner board ─────────────────────────────
+	// ── Row 3 (Duos): Partner board | Partner buff sources ──────
 	var rowPartner string
 	if m.game != nil && m.game.IsDuos {
-		fullW := m.width - 8
-		partnerVPW := fullW - 5
-		if partnerVPW < 10 {
-			partnerVPW = 10
-		}
-		partnerH := 5 // compact height for partner board
-		m.partnerBoardVP.Width = partnerVPW
+		partnerH := 5
+
+		// Partner board (left column).
+		m.partnerBoardVP.Width = vpContentW
 		m.partnerBoardVP.Height = partnerH
 		m.partnerBoardVP.MouseWheelEnabled = true
 		m.partnerBoardVP.SetContent(m.partnerBoardItems())
@@ -419,19 +418,40 @@ func (m *Model) View() string {
 		title := "PARTNER BOARD"
 		if len(m.game.PartnerBoard) > 0 {
 			if m.game.PartnerBoardStale {
-				title = fmt.Sprintf("PARTNER BOARD (Turn %d — last seen)", m.game.PartnerBoardTurn)
+				title = fmt.Sprintf("PARTNER BOARD (T%d — last seen)", m.game.PartnerBoardTurn)
 			} else {
-				title = fmt.Sprintf("PARTNER BOARD (Turn %d)", m.game.PartnerBoardTurn)
+				title = fmt.Sprintf("PARTNER BOARD (T%d)", m.game.PartnerBoardTurn)
 			}
 		}
 
 		m.partnerVPY = m.row2StartY + lipgloss.Height(row2) + 2
 		m.partnerVPH = partnerH
-		m.partnerScrollX = 2 + partnerVPW
-		partnerVPView := lipgloss.JoinHorizontal(lipgloss.Top,
+		m.partnerScrollX = 2 + vpContentW
+		partnerBoardVPView := lipgloss.JoinHorizontal(lipgloss.Top,
 			m.partnerBoardVP.View(), tuiScrollbar(m.partnerBoardVP, partnerH))
-		rowPartner = styleBorder.Width(fullW).Render(
-			styleTitle.Render(title) + "\n" + partnerVPView)
+		partnerBoardPanel := styleBorder.Width(colW).Render(
+			styleTitle.Render(title) + "\n" + partnerBoardVPView)
+
+		// Partner buffs (right column).
+		m.partnerModsVP.Width = vpContentW
+		m.partnerModsVP.Height = partnerH
+		m.partnerModsVP.MouseWheelEnabled = true
+		m.partnerModsVP.SetContent(m.partnerModsItems())
+
+		partnerModsTitle := "PARTNER BUFFS"
+		if len(m.game.PartnerBuffSources) > 0 && m.game.PartnerBoardStale {
+			partnerModsTitle = "PARTNER BUFFS (last seen)"
+		}
+
+		m.partnerModsVPY = m.partnerVPY
+		m.partnerModsVPH = partnerH
+		m.partnerModsScrollX = (colW + 4) + 2 + vpContentW
+		partnerModsVPView := lipgloss.JoinHorizontal(lipgloss.Top,
+			m.partnerModsVP.View(), tuiScrollbar(m.partnerModsVP, partnerH))
+		partnerModsPanel := styleBorder.Width(colW).Render(
+			styleTitle.Render(partnerModsTitle) + "\n" + partnerModsVPView)
+
+		rowPartner = lipgloss.JoinHorizontal(lipgloss.Top, partnerBoardPanel, partnerModsPanel)
 	}
 
 	// ── Session stats ─────────────────────────────────────────
@@ -595,6 +615,50 @@ func (m *Model) partnerBoardItems() string {
 	return b.String()
 }
 
+// partnerModsItems returns the partner buff sources content for the viewport.
+func (m *Model) partnerModsItems() string {
+	var b strings.Builder
+	if m.game == nil || len(m.game.PartnerBuffSources) == 0 {
+		return styleDim.Render("(awaiting combat data)")
+	}
+
+	sources := make([]*bspb.BuffSource, len(m.game.PartnerBuffSources))
+	copy(sources, m.game.PartnerBuffSources)
+	for i := 0; i < len(sources); i++ {
+		for j := i + 1; j < len(sources); j++ {
+			totalI := abs32(sources[i].Attack) + abs32(sources[i].Health)
+			totalJ := abs32(sources[j].Attack) + abs32(sources[j].Health)
+			if totalJ > totalI {
+				sources[i], sources[j] = sources[j], sources[i]
+			}
+		}
+	}
+
+	for _, bs := range sources {
+		if bs.Attack == 0 && bs.Health == 0 {
+			continue
+		}
+		name := buffCategoryDisplayName(bs.Category)
+		color := buffCategoryColor(bs.Category)
+		style := lipgloss.NewStyle().Foreground(color)
+		line := fmt.Sprintf("%-14s +%d/+%d", name, bs.Attack, bs.Health)
+		b.WriteString(style.Render(line) + "\n")
+	}
+
+	if len(m.game.PartnerAbilityCounters) > 0 {
+		b.WriteString("\n" + styleTitle.Render("ABILITIES") + "\n")
+		for _, ac := range m.game.PartnerAbilityCounters {
+			name := buffCategoryDisplayName(ac.Category)
+			color := buffCategoryColor(ac.Category)
+			style := lipgloss.NewStyle().Foreground(color)
+			line := fmt.Sprintf("%-14s %s", name, ac.Display)
+			b.WriteString(style.Render(line) + "\n")
+		}
+	}
+
+	return b.String()
+}
+
 // modsItems returns the scrollable buff-sources content (no outer title).
 func (m *Model) modsItems() string {
 	var b strings.Builder
@@ -704,7 +768,11 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		// Check partner pane first (below main panels).
 		if m.game != nil && m.game.IsDuos &&
 			msg.Y >= m.partnerVPY && msg.Y < m.partnerVPY+m.partnerVPH {
-			m.partnerBoardVP, cmd = m.partnerBoardVP.Update(msg)
+			if msg.X >= m.width/2 {
+				m.partnerModsVP, cmd = m.partnerModsVP.Update(msg)
+			} else {
+				m.partnerBoardVP, cmd = m.partnerBoardVP.Update(msg)
+			}
 		} else if msg.X >= m.width/2 {
 			m.modsVP, cmd = m.modsVP.Update(msg)
 		} else {
@@ -744,6 +812,9 @@ func (m *Model) identifyScrollbar(x, y int) (panel, trackY, trackH int) {
 	case m.game != nil && m.game.IsDuos &&
 		x == m.partnerScrollX && y >= m.partnerVPY && y < m.partnerVPY+m.partnerVPH:
 		return 2, m.partnerVPY, m.partnerVPH
+	case m.game != nil && m.game.IsDuos &&
+		x == m.partnerModsScrollX && y >= m.partnerModsVPY && y < m.partnerModsVPY+m.partnerModsVPH:
+		return 3, m.partnerModsVPY, m.partnerModsVPH
 	}
 	return -1, 0, 0
 }
@@ -756,6 +827,8 @@ func (m *Model) scrubAt(y int) {
 		tuiScrollbarJump(&m.modsVP, y, m.scrubTrackY, m.scrubTrackH)
 	case 2:
 		tuiScrollbarJump(&m.partnerBoardVP, y, m.scrubTrackY, m.scrubTrackH)
+	case 3:
+		tuiScrollbarJump(&m.partnerModsVP, y, m.scrubTrackY, m.scrubTrackH)
 	}
 }
 
