@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	bspb "battlestream.fixates.io/internal/api/grpc/gen/battlestream/v1"
+	"battlestream.fixates.io/internal/config"
 	"battlestream.fixates.io/internal/gamestate"
 )
 
@@ -161,10 +162,21 @@ type Model struct {
 	draggingH bool // dragging horizontal divider
 	dividerX  int  // X position of vertical divider (computed in View)
 	dividerY  int  // Y position of horizontal divider (computed in View)
+
+	// Config reference for persisting layout preferences.
+	cfg *config.Config
 }
 
 // New creates a Model that will connect to the daemon at grpcAddr.
-func New(grpcAddr string) *Model {
+func New(grpcAddr string, cfg *config.Config) *Model {
+	vSplit := 0.5
+	hSplit := 0.7
+	if cfg != nil && cfg.TUI.VerticalSplit > 0 {
+		vSplit = cfg.TUI.VerticalSplit
+	}
+	if cfg != nil && cfg.TUI.HorizontalSplit > 0 {
+		hSplit = cfg.TUI.HorizontalSplit
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
@@ -176,8 +188,9 @@ func New(grpcAddr string) *Model {
 		connState:      stateConnecting,
 		spinner:        sp,
 		showLastResult: true,
-		vSplit:         0.5,
-		hSplit:         0.7,
+		vSplit:         vSplit,
+		hSplit:         hSplit,
+		cfg:            cfg,
 	}
 }
 
@@ -894,6 +907,11 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		if m.draggingV || m.draggingH {
 			m.draggingV = false
 			m.draggingH = false
+			if m.cfg != nil {
+				m.cfg.TUI.VerticalSplit = m.vSplit
+				m.cfg.TUI.HorizontalSplit = m.hSplit
+				go m.cfg.SaveTUI() //nolint:errcheck // fire-and-forget
+			}
 			return m, nil
 		}
 		m.scrubbing = false

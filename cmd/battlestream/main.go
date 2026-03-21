@@ -385,7 +385,7 @@ func cmdRun() *cobra.Command {
 			}
 
 			// Run the combined TUI (live + replay).
-			combined := tui.NewCombined(cfg.API.GRPCAddr, svc.store, logFiles)
+			combined := tui.NewCombined(cfg.API.GRPCAddr, svc.store, logFiles, cfg)
 			if svc.logConfigFixed {
 				combined.SetStartupNotice("Hearthstone log.config was updated. You must restart Hearthstone for logging to work.")
 			}
@@ -420,7 +420,7 @@ func cmdTUI() *cobra.Command {
 				fmt.Println(out)
 				return nil
 			}
-			return tui.New(cfg.API.GRPCAddr).Run()
+			return tui.New(cfg.API.GRPCAddr, cfg).Run()
 		},
 	}
 

@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"battlestream.fixates.io/internal/config"
 	"battlestream.fixates.io/internal/debugtui"
 	"battlestream.fixates.io/internal/store"
 )
@@ -38,10 +39,10 @@ type CombinedModel struct {
 }
 
 // NewCombined creates a CombinedModel that starts in live mode.
-func NewCombined(grpcAddr string, st *store.Store, logFiles []string) *CombinedModel {
+func NewCombined(grpcAddr string, st *store.Store, logFiles []string, cfg *config.Config) *CombinedModel {
 	return &CombinedModel{
 		mode:     modeLive,
-		live:     New(grpcAddr),
+		live:     New(grpcAddr, cfg),
 		grpcAddr: grpcAddr,
 		logFiles: logFiles,
 		store:    st,

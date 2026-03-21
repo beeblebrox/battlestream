@@ -18,6 +18,13 @@ type Config struct {
 	Profiles      map[string]*ProfileConfig `yaml:"profiles,omitempty" mapstructure:"profiles"`
 	API           APIConfig                 `yaml:"api" mapstructure:"api"`
 	Logging       LoggingConfig             `yaml:"logging" mapstructure:"logging"`
+	TUI           TUIConfig                 `yaml:"tui,omitempty" mapstructure:"tui"`
+}
+
+// TUIConfig holds TUI layout preferences.
+type TUIConfig struct {
+	VerticalSplit   float64 `yaml:"vertical_split,omitempty" mapstructure:"vertical_split"`
+	HorizontalSplit float64 `yaml:"horizontal_split,omitempty" mapstructure:"horizontal_split"`
 }
 
 // ProfileConfig groups the settings that differ between Hearthstone installs.
@@ -251,4 +258,20 @@ func expandHome(path string) string {
 		return path
 	}
 	return filepath.Join(home, path[1:])
+}
+
+// SaveTUI persists just the TUI section to the config file.
+func (c *Config) SaveTUI() error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("user home dir: %w", err)
+	}
+	path := filepath.Join(home, ".battlestream", "config.yaml")
+
+	v := viper.New()
+	v.SetConfigFile(path)
+	_ = v.ReadInConfig()
+	v.Set("tui.vertical_split", c.TUI.VerticalSplit)
+	v.Set("tui.horizontal_split", c.TUI.HorizontalSplit)
+	return v.WriteConfig()
 }
