@@ -142,7 +142,7 @@ type Model struct {
 
 	// Drag-scrubbing state.
 	scrubbing   bool
-	scrubPanel  int // 0=board, 1=mods
+	scrubPanel  int // 0=board, 1=mods, 2=partner
 	scrubTrackY int
 	scrubTrackH int
 
@@ -701,7 +701,11 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	// Wheel: route to whichever panel the cursor is over.
 	if tea.MouseEvent(msg).IsWheel() {
 		var cmd tea.Cmd
-		if msg.X >= m.width/2 {
+		// Check partner pane first (below main panels).
+		if m.game != nil && m.game.IsDuos &&
+			msg.Y >= m.partnerVPY && msg.Y < m.partnerVPY+m.partnerVPH {
+			m.partnerBoardVP, cmd = m.partnerBoardVP.Update(msg)
+		} else if msg.X >= m.width/2 {
 			m.modsVP, cmd = m.modsVP.Update(msg)
 		} else {
 			m.boardVP, cmd = m.boardVP.Update(msg)
@@ -737,6 +741,9 @@ func (m *Model) identifyScrollbar(x, y int) (panel, trackY, trackH int) {
 		return 0, m.boardVPY, m.boardVPH
 	case x == m.modsScrollX && y >= m.modsVPY && y < m.modsVPY+m.modsVPH:
 		return 1, m.modsVPY, m.modsVPH
+	case m.game != nil && m.game.IsDuos &&
+		x == m.partnerScrollX && y >= m.partnerVPY && y < m.partnerVPY+m.partnerVPH:
+		return 2, m.partnerVPY, m.partnerVPH
 	}
 	return -1, 0, 0
 }
@@ -747,6 +754,8 @@ func (m *Model) scrubAt(y int) {
 		tuiScrollbarJump(&m.boardVP, y, m.scrubTrackY, m.scrubTrackH)
 	case 1:
 		tuiScrollbarJump(&m.modsVP, y, m.scrubTrackY, m.scrubTrackH)
+	case 2:
+		tuiScrollbarJump(&m.partnerBoardVP, y, m.scrubTrackY, m.scrubTrackH)
 	}
 }
 
