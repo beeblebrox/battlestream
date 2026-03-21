@@ -151,6 +151,10 @@ type Model struct {
 	// Toggle states.
 	showAnomalyDesc bool // toggle anomaly description display
 	showLastResult  bool // toggle last combat result display
+
+	// Layout split ratios (0.0 to 1.0).
+	vSplit float64 // vertical: fraction of width for left column (default 0.5)
+	hSplit float64 // horizontal: fraction of available height for main row vs partner (default 0.7)
 }
 
 // New creates a Model that will connect to the daemon at grpcAddr.
@@ -166,6 +170,8 @@ func New(grpcAddr string) *Model {
 		connState:      stateConnecting,
 		spinner:        sp,
 		showLastResult: true,
+		vSplit:         0.5,
+		hSplit:         0.7,
 	}
 }
 
@@ -343,37 +349,77 @@ func (m *Model) View() string {
 		return ""
 	}
 
-	// Column widths: two equal halves minus borders/padding.
+	// Column widths from vertical split ratio.
 	// styleBorder has Padding(0,1) so inner content area = colW - 4 (2 border + 2 padding).
 	// vpContentW is the viewport width; the scrollbar takes 1 char, so vpContentW + 1 must
 	// fit inside the inner area: vpContentW = colW - 5.
-	colW := m.width/2 - 4
-	vpContentW := colW - 5
+	vSplit := m.vSplit
+	if vSplit <= 0 {
+		vSplit = 0.5
+	}
+	hSplit := m.hSplit
+	if hSplit <= 0 {
+		hSplit = 0.7
+	}
+	totalInner := m.width - 8 // total inner width minus borders/padding for both panels
+	leftInner := int(vSplit * float64(totalInner))
+	rightInner := totalInner - leftInner
+
+	// Enforce minimums (10 chars content + 5 for scrollbar/padding).
+	const minPanelW = 15
+	if leftInner < minPanelW {
+		leftInner = minPanelW
+		rightInner = totalInner - leftInner
+	}
+	if rightInner < minPanelW {
+		rightInner = minPanelW
+		leftInner = totalInner - rightInner
+	}
+
+	colW := leftInner // left column width (used for border.Width)
+	rightColW := rightInner
+	vpContentW := leftInner - 5
+	rightVPW := rightInner - 5
 	if vpContentW < 10 {
 		vpContentW = 10
+	}
+	if rightVPW < 10 {
+		rightVPW = 10
 	}
 
 	// ── Row 1: game header | hero stats ──────────────────────
 	row1 := lipgloss.JoinHorizontal(lipgloss.Top,
 		m.renderGamePanel(colW),
-		m.renderHeroPanel(colW),
+		m.renderHeroPanel(rightColW),
 	)
 	m.row2StartY = lipgloss.Height(row1)
 
 	// Height budget: terminal minus row1, session bar (3), help (1), row2 border (2), row2 title (1).
 	sessionH := 3
-	partnerRowH := 0
-	if m.game != nil && m.game.IsDuos {
-		partnerRowH = 8 // border(2) + title(1) + partner board viewport(5)
+	totalAvailable := m.height - m.row2StartY - sessionH - 1 - 3
+	if totalAvailable < 8 {
+		totalAvailable = 8
 	}
-	available := m.height - m.row2StartY - sessionH - 1 - 3 - partnerRowH
-	if available < 4 {
-		available = 4
+	var available, partnerH int
+	if m.game != nil && m.game.IsDuos {
+		available = int(hSplit * float64(totalAvailable))
+		partnerH = totalAvailable - available - 3 // 3 for partner border/title
+		const minH = 4
+		if available < minH {
+			available = minH
+			partnerH = totalAvailable - available - 3
+		}
+		if partnerH < minH {
+			partnerH = minH
+			available = totalAvailable - partnerH - 3
+		}
+	} else {
+		available = totalAvailable
 	}
 
 	// Scrollbar column X positions (absolute terminal coordinates).
-	m.boardScrollX = 2 + vpContentW                  // left panel: border+pad + vp
-	m.modsScrollX = (colW + 4) + 2 + vpContentW      // right panel: left total + border+pad + vp
+	m.boardScrollX = 2 + vpContentW                     // left panel: border+pad + vp
+	m.modsScrollX = (colW + 4) + 2 + rightVPW           // right panel: left total + border+pad + vp
 
 	// ── Row 2: board (viewport) | buff sources (viewport) ────
 	boardTitle := "YOUR BOARD"
@@ -391,7 +437,7 @@ func (m *Model) View() string {
 	boardPanel := styleBorder.Width(colW).Render(
 		styleTitle.Render(boardTitle) + "\n" + boardVPView)
 
-	m.modsVP.Width = vpContentW
+	m.modsVP.Width = rightVPW
 	m.modsVP.Height = available
 	m.modsVP.MouseWheelEnabled = true
 	m.modsVP.SetContent(m.modsItems())
@@ -399,7 +445,7 @@ func (m *Model) View() string {
 	m.modsVPH = available
 	modsVPView := lipgloss.JoinHorizontal(lipgloss.Top,
 		m.modsVP.View(), tuiScrollbar(m.modsVP, available))
-	modsPanel := styleBorder.Width(colW).Render(
+	modsPanel := styleBorder.Width(rightColW).Render(
 		styleTitle.Render("BUFF SOURCES") + "\n" + modsVPView)
 
 	row2 := lipgloss.JoinHorizontal(lipgloss.Top, boardPanel, modsPanel)
@@ -407,8 +453,6 @@ func (m *Model) View() string {
 	// ── Row 3 (Duos): Partner board | Partner buff sources ──────
 	var rowPartner string
 	if m.game != nil && m.game.IsDuos {
-		partnerH := 5
-
 		// Partner board (left column).
 		m.partnerBoardVP.Width = vpContentW
 		m.partnerBoardVP.Height = partnerH
@@ -433,7 +477,7 @@ func (m *Model) View() string {
 			styleTitle.Render(title) + "\n" + partnerBoardVPView)
 
 		// Partner buffs (right column).
-		m.partnerModsVP.Width = vpContentW
+		m.partnerModsVP.Width = rightVPW
 		m.partnerModsVP.Height = partnerH
 		m.partnerModsVP.MouseWheelEnabled = true
 		m.partnerModsVP.SetContent(m.partnerModsItems())
@@ -445,10 +489,10 @@ func (m *Model) View() string {
 
 		m.partnerModsVPY = m.partnerVPY
 		m.partnerModsVPH = partnerH
-		m.partnerModsScrollX = (colW + 4) + 2 + vpContentW
+		m.partnerModsScrollX = (colW + 4) + 2 + rightVPW
 		partnerModsVPView := lipgloss.JoinHorizontal(lipgloss.Top,
 			m.partnerModsVP.View(), tuiScrollbar(m.partnerModsVP, partnerH))
-		partnerModsPanel := styleBorder.Width(colW).Render(
+		partnerModsPanel := styleBorder.Width(rightColW).Render(
 			styleTitle.Render(partnerModsTitle) + "\n" + partnerModsVPView)
 
 		rowPartner = lipgloss.JoinHorizontal(lipgloss.Top, partnerBoardPanel, partnerModsPanel)
