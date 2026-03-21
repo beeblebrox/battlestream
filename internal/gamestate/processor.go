@@ -85,6 +85,12 @@ type Processor struct {
 	combatPhaseActive     bool          // true during the combat phase (BACON_CURRENT_COMBAT_PLAYER_ID > 0)
 	combatPhaseEntityIDs  []int         // entity IDs created during current combat phase (for retroactive scan)
 
+	// Duos absolute Dnt split tracking — separates local vs partner contributions.
+	// dntTeamTotal tracks the last-seen raw SD value per category (no base offset).
+	// dntPartnerAccum tracks the accumulated partner delta per category.
+	dntTeamTotal    map[string][2]int // category → [sd1, sd2] raw values
+	dntPartnerAccum map[string][2]int // category → [sd1, sd2] partner deltas
+
 	// Entity registry — maps entity IDs to their controller PlayerIDs.
 	entityController map[int]int
 	// heroEntities tracks entity IDs known to be HERO card types.
@@ -133,6 +139,8 @@ func NewProcessor(m *Machine) *Processor {
 		entityProps:      make(map[int]*entityInfo),
 		localBuffs:       newBuffTracker(),
 		partnerBuffs:     newBuffTracker(),
+		dntTeamTotal:    make(map[string][2]int),
+		dntPartnerAccum: make(map[string][2]int),
 		playerEntityIDs:  make(map[int]int),
 		realPlayerIDs:    make(map[int]int),
 	}
@@ -165,6 +173,8 @@ func (p *Processor) Handle(e parser.GameEvent) {
 		p.entityProps = make(map[int]*entityInfo)
 		p.localBuffs = newBuffTracker()
 		p.partnerBuffs = newBuffTracker()
+		p.dntTeamTotal = make(map[string][2]int)
+		p.dntPartnerAccum = make(map[string][2]int)
 		p.localCombatResult = 0
 		p.pendingHeroAttackerID = 0
 		p.bgTurnsStarted = 0
