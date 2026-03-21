@@ -77,3 +77,25 @@ release:
     owner: beeblebrox
     name: battlestream
   prerelease: auto
+
+brews:
+  - repository:
+      owner: beeblebrox
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: https://github.com/beeblebrox/battlestream
+    description: Hearthstone Battlegrounds stat tracker
+    license: MIT
+    install: |
+      bin.install "battlestream"
+    test: |
+      system "#{bin}/battlestream", "version"
+
+scoops:
+  - repository:
+      owner: beeblebrox
+      name: scoop-bucket
+      token: "{{ .Env.SCOOP_BUCKET_TOKEN }}"
+    homepage: https://github.com/beeblebrox/battlestream
+    description: Hearthstone Battlegrounds stat tracker
+    license: MIT
