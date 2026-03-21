@@ -1496,7 +1496,7 @@ func (p *Processor) handleEnchantmentEntity(e parser.GameEvent, info *entityInfo
 
 	// Process initial SD values from FULL_ENTITY/SHOW_ENTITY as counter updates.
 	if info.ScriptData1 != 0 || info.ScriptData2 != 0 {
-		if enchCtrl == p.localPlayerID || p.isLocalDntTarget(e.EntityID) {
+		if enchCtrl == p.localPlayerID || (enchCtrl != 0 && p.isLocalDntTarget(e.EntityID)) {
 			if info.ScriptData1 != 0 {
 				p.handleDntTagChange(e.EntityID, "TAG_SCRIPT_DATA_NUM_1", info.ScriptData1)
 			}
@@ -1515,8 +1515,9 @@ func (p *Processor) handleDntTagChange(entityID int, tag string, value int) {
 		return
 	}
 	// Only process enchantments controlled by local player or attached to local entities.
+	// Reject controller=0 (unknown) to prevent opponent/partner buff leakage.
 	ctrl := p.entityController[entityID]
-	if ctrl != p.localPlayerID && !p.isLocalDntTarget(entityID) {
+	if ctrl == 0 || (ctrl != p.localPlayerID && !p.isLocalDntTarget(entityID)) {
 		return
 	}
 

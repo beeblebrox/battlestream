@@ -2562,3 +2562,36 @@ func TestIntegrationDuosWithTeammateID(t *testing.T) {
 	t.Logf("Player: %s, Partner: %s (hero: %s)", s.Player.Name, s.Partner.Name, s.Partner.HeroCardID)
 }
 
+func TestCombatBeetleDoesNotLeakToLocal(t *testing.T) {
+	m, p := newProc()
+	setupGame(p) // local player ID=7
+
+	// Opponent beetle Dnt enchantment created (controller=15, not local).
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventEntityUpdate,
+		EntityID: 9999,
+		CardID:   "BG31_808pe",
+		Tags: map[string]string{
+			"CONTROLLER":            "15",
+			"CARDTYPE":              "ENCHANTMENT",
+			"ATTACHED":              "8888",
+			"TAG_SCRIPT_DATA_NUM_1": "5",
+			"TAG_SCRIPT_DATA_NUM_2": "3",
+		},
+	})
+
+	// TAG_CHANGE on the same entity with SD values (simulates late arrival).
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventTagChange,
+		EntityID: 9999,
+		Tags:     map[string]string{"TAG_SCRIPT_DATA_NUM_1": "10"},
+	})
+
+	state := m.State()
+	for _, bs := range state.BuffSources {
+		if bs.Category == "BEETLE" {
+			t.Errorf("opponent beetle buff leaked to local: ATK=%d HP=%d", bs.Attack, bs.Health)
+		}
+	}
+}
+
