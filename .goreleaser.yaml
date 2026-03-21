@@ -26,6 +26,10 @@ builds:
     ignore:
       - goos: windows
         goarch: arm64
+    hooks:
+      post:
+        - cmd: scripts/sign-windows.sh {{ .Path }} {{ .Os }}
+          output: true
 
 universal_binaries:
   - id: battlestream-universal
@@ -63,6 +67,17 @@ signs:
       - ${artifact}
     artifacts: checksum
     output: true
+
+notarize:
+  - macos:
+      - enabled: '{{ isEnvSet "MACOS_SIGN_P12" }}'
+        sign:
+          certificate: "{{ .Env.MACOS_SIGN_P12 }}"
+          password: "{{ .Env.MACOS_SIGN_PASSWORD }}"
+        notarize:
+          issuer_id: "{{ .Env.MACOS_NOTARY_ISSUER_ID }}"
+          key_id: "{{ .Env.MACOS_NOTARY_KEY_ID }}"
+          key: "{{ .Env.MACOS_NOTARY_KEY }}"
 
 changelog:
   sort: asc
