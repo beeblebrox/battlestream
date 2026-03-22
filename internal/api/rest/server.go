@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 
 	grpcserver "battlestream.fixates.io/internal/api/grpc"
 	"battlestream.fixates.io/internal/gamestate"
+	"battlestream.fixates.io/internal/stats"
+	"battlestream.fixates.io/internal/store"
 )
 
 var upgrader = websocket.Upgrader{
@@ -112,21 +115,88 @@ func (s *Server) handleGetCurrentGame(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetAggregate(w http.ResponseWriter, r *http.Request) {
-	agg, err := s.grpc.GetStore().GetAggregate()
+	mode := r.URL.Query().Get("mode")
+	metas, err := s.grpc.GetStore().ListGames(0, 0)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	s.writeJSON(w, agg)
+	filtered := filterMetasByMode(metas, mode)
+	results := make([]stats.GameResult, len(filtered))
+	for i, m := range filtered {
+		results[i] = stats.GameResult{
+			Placement: m.Placement,
+			EndTime:   time.Unix(m.EndTime, 0),
+			IsDuos:    m.IsDuos,
+		}
+	}
+	s.writeJSON(w, stats.Compute(results))
 }
 
 func (s *Server) handleListGames(w http.ResponseWriter, r *http.Request) {
-	games, err := s.grpc.GetStore().ListGames(50, 0)
+	mode := r.URL.Query().Get("mode")
+	limit := 50
+	offset := 0
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			limit = n
+		}
+	}
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+
+	allGames, err := s.grpc.GetStore().ListGames(0, 0)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	s.writeJSON(w, games)
+	filtered := filterMetasByMode(allGames, mode)
+	total := len(filtered)
+
+	// Apply pagination.
+	if offset > len(filtered) {
+		filtered = nil
+	} else {
+		filtered = filtered[offset:]
+		if limit > 0 && limit < len(filtered) {
+			filtered = filtered[:limit]
+		}
+	}
+	if filtered == nil {
+		filtered = []store.GameMeta{}
+	}
+
+	s.writeJSON(w, struct {
+		Games []store.GameMeta `json:"games"`
+		Total int              `json:"total"`
+	}{Games: filtered, Total: total})
+}
+
+// filterMetasByMode filters game metas by mode: "solo", "duos", or "all"/empty.
+func filterMetasByMode(metas []store.GameMeta, mode string) []store.GameMeta {
+	switch mode {
+	case "solo":
+		out := make([]store.GameMeta, 0, len(metas))
+		for _, m := range metas {
+			if !m.IsDuos {
+				out = append(out, m)
+			}
+		}
+		return out
+	case "duos":
+		out := make([]store.GameMeta, 0, len(metas))
+		for _, m := range metas {
+			if m.IsDuos {
+				out = append(out, m)
+			}
+		}
+		return out
+	default:
+		return metas
+	}
 }
 
 func (s *Server) handleGetGame(w http.ResponseWriter, r *http.Request) {

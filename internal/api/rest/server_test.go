@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"battlestream.fixates.io/internal/gamestate"
+	"battlestream.fixates.io/internal/store"
 )
 
 func TestGameStateToJSON_AllFields(t *testing.T) {
@@ -135,5 +136,39 @@ func TestGameStateToJSON_AllFields(t *testing.T) {
 	}
 	if len(ob) != 1 {
 		t.Errorf("expected 1 opponent_board minion, got %d", len(ob))
+	}
+}
+
+func TestFilterMetasByMode(t *testing.T) {
+	metas := []store.GameMeta{
+		{GameID: "solo-1", Placement: 1, IsDuos: false},
+		{GameID: "duos-1", Placement: 2, IsDuos: true},
+		{GameID: "solo-2", Placement: 3, IsDuos: false},
+		{GameID: "duos-2", Placement: 4, IsDuos: true},
+	}
+
+	tests := []struct {
+		name     string
+		mode     string
+		wantIDs  []string
+	}{
+		{"empty returns all", "", []string{"solo-1", "duos-1", "solo-2", "duos-2"}},
+		{"all returns all", "all", []string{"solo-1", "duos-1", "solo-2", "duos-2"}},
+		{"solo filters duos", "solo", []string{"solo-1", "solo-2"}},
+		{"duos filters solo", "duos", []string{"duos-1", "duos-2"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := filterMetasByMode(metas, tt.mode)
+			if len(got) != len(tt.wantIDs) {
+				t.Fatalf("filterMetasByMode(%q) returned %d metas, want %d", tt.mode, len(got), len(tt.wantIDs))
+			}
+			for i, m := range got {
+				if m.GameID != tt.wantIDs[i] {
+					t.Errorf("filterMetasByMode(%q)[%d].GameID = %q, want %q", tt.mode, i, m.GameID, tt.wantIDs[i])
+				}
+			}
+		})
 	}
 }
