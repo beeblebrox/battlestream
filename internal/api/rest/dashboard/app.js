@@ -43,6 +43,10 @@ const API = {
   getTurns(id) {
     return this.fetchJSON(`/v1/game/${encodeURIComponent(id)}/turns`);
   },
+
+  getCardNames() {
+    return this.fetchJSON('/v1/cardnames');
+  },
 };
 
 // ============================================================================
@@ -55,6 +59,7 @@ const State = {
   games: [],
   fullGames: new Map(),
   turnData: new Map(),
+  cardNames: {},            // cardID -> display name (loaded once from /v1/cardnames)
   selectedGameID: null,
   selectedTurn: null,
   partners: new Set(),
@@ -173,6 +178,10 @@ function initModeToggle() {
         pf.classList.add('hidden');
       }
 
+      // Always return to overview when changing mode
+      State.selectedGameID = null;
+      State.selectedTurn = null;
+      showLevel(1);
       refreshDashboard();
     });
   });
@@ -191,8 +200,9 @@ function buildPartnerFilter(fullGames) {
 
   State.partners.clear();
   for (const g of fullGames) {
-    if (g.partner && g.partner.name) {
-      State.partners.add(g.partner.name);
+    if (g.partner) {
+      const partnerLabel = g.partner.name || heroName(g.partner.hero_card_id) || null;
+      if (partnerLabel) State.partners.add(partnerLabel);
     }
   }
 
@@ -274,11 +284,17 @@ function reRenderFiltered(fullGames) {
   renderRichCharts(filtered);
 }
 
+function getPartnerLabel(g) {
+  if (!g.partner) return null;
+  return g.partner.name || heroName(g.partner.hero_card_id) || null;
+}
+
 function filterGamesByPartner(games) {
   if (State.excludedPartners.size === 0) return games;
   return games.filter((g) => {
-    if (!g.partner || !g.partner.name) return true;
-    return !State.excludedPartners.has(g.partner.name);
+    const label = getPartnerLabel(g);
+    if (!label) return true;
+    return !State.excludedPartners.has(label);
   });
 }
 
@@ -492,8 +508,25 @@ function renderWinRateTrend(metas) {
 
 function heroName(heroCardId) {
   if (!heroCardId) return 'Unknown';
-  // Strip BG_ prefix and common suffixes for readability
-  return heroCardId.replace(/^BG_/, '').replace(/_SKIN.*$/, '').replace(/_G$/, '').replace(/_/, ' ');
+  const names = State.cardNames;
+
+  // Direct lookup
+  if (names[heroCardId]) return names[heroCardId];
+
+  // Strip _SKIN_* suffix and look up base card
+  const skinMatch = heroCardId.match(/^(.+?)(_SKIN_\w+)$/);
+  if (skinMatch) {
+    const baseName = names[skinMatch[1]];
+    if (baseName) return `${baseName} (${skinMatch[2].replace(/_SKIN_/, 'Skin ')})`;
+  }
+
+  // Strip _G (golden) suffix
+  const goldenMatch = heroCardId.match(/^(.+?)_G$/);
+  if (goldenMatch && names[goldenMatch[1]]) {
+    return names[goldenMatch[1]];
+  }
+
+  return heroCardId;
 }
 
 function renderHeroPerf(games) {
@@ -902,9 +935,11 @@ function renderGameHeader(game) {
   const heroLabel = heroName(game.player?.hero_card_id);
   const modeBadge = game.is_duos ? '<span style="color:#4fc3f7;margin-left:0.5rem;">[Duos]</span>' : '<span style="color:#aaa;margin-left:0.5rem;">[Solo]</span>';
   const anomaly = game.anomaly_name ? `<span style="color:#ff9800;margin-left:0.5rem;">${game.anomaly_name}</span>` : '';
-  const partner = game.partner?.name ? `<span style="color:#4fc3f7;margin-left:0.5rem;">w/ ${game.partner.name}</span>` : '';
+  const partnerLabel = getPartnerLabel(game);
+  const partner = partnerLabel ? `<span style="color:#4fc3f7;margin-left:0.5rem;">w/ ${partnerLabel}</span>` : '';
 
   el.innerHTML = `
+    <button onclick="navigateTo(1)" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:0.4rem 0.8rem;cursor:pointer;font-size:0.85rem;">&#8592; Back</button>
     <h2>${heroLabel}</h2>
     <span class="placement ${pClass}">#${p}</span>
     <span style="color:var(--text-muted);font-size:0.85rem;">${start} &middot; ${dur}</span>
@@ -1104,6 +1139,7 @@ function renderTurnDetail(snapshot) {
   const gold = p.current_gold != null ? `${p.current_gold}/${p.max_gold || '?'}` : '';
 
   header.innerHTML = `
+    <button onclick="navigateTo(2)" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:0.4rem 0.8rem;cursor:pointer;font-size:0.85rem;">&#8592; Back</button>
     <h2>Turn ${snapshot.turn}</h2>
     <span style="color:#7c4dff;">Tier ${tier}</span>
     ${gold ? `<span style="color:#ffc107;">Gold: ${gold}</span>` : ''}
@@ -1420,8 +1456,13 @@ function linearRegression(points) {
 // Init
 // ============================================================================
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   initModeToggle();
   showLevel(1);
+  try {
+    State.cardNames = await API.getCardNames();
+  } catch (err) {
+    console.error('Failed to load card names:', err);
+  }
   refreshDashboard();
 });

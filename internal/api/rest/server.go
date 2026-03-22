@@ -53,6 +53,7 @@ func (s *Server) Serve(ctx context.Context, addr string) error {
 	mux.HandleFunc("GET /v1/stats/games/{game_id}/modifications", s.withAuth(s.handleGetModifications))
 	mux.HandleFunc("GET /v1/game/{game_id}/turns", s.withAuth(s.handleGetTurnSnapshots))
 	mux.HandleFunc("GET /v1/player/{name}", s.withAuth(s.handleGetPlayer))
+	mux.HandleFunc("GET /v1/cardnames", s.withAuth(s.handleGetCardNames))
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
@@ -223,6 +224,10 @@ func filterMetasByMode(metas []store.GameMeta, mode string) []store.GameMeta {
 	default:
 		return metas
 	}
+}
+
+func (s *Server) handleGetCardNames(w http.ResponseWriter, r *http.Request) {
+	s.writeJSON(w, gamestate.CardNames())
 }
 
 func (s *Server) handleGetGame(w http.ResponseWriter, r *http.Request) {

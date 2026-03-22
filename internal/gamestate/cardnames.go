@@ -3191,6 +3191,11 @@ func CardName(cardID string) string {
 	return cardID
 }
 
+// CardNames returns the full card name map (for API export).
+func CardNames() map[string]string {
+	return cardNames
+}
+
 // anomalyDescriptions maps anomaly card IDs to their effect text.
 var anomalyDescriptions = map[string]string{
 	"BG27_Anomaly_000": "Start at 10 Gold.",
