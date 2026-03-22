@@ -155,14 +155,21 @@ type Model struct {
 	showLastResult  bool // toggle last combat result display
 
 	// Layout split ratios (0.0 to 1.0).
-	vSplit float64 // vertical: fraction of width for left column (default 0.5)
-	hSplit float64 // horizontal: fraction of available height for main row vs partner (default 0.7)
+	vSplit     float64 // vertical: fraction of width for left column (default 0.5)
+	leftHSplit  float64 // horizontal: fraction of available height for left column main vs partner (default 0.7)
+	rightHSplit float64 // horizontal: fraction of available height for right column main vs partner (default 0.7)
 
 	// Divider drag state.
-	draggingV bool // dragging vertical divider
-	draggingH bool // dragging horizontal divider
-	dividerX  int  // X position of vertical divider (computed in View)
-	dividerY  int  // Y position of horizontal divider (computed in View)
+	draggingV  bool // dragging vertical divider
+	draggingHL bool // dragging left column horizontal divider
+	draggingHR bool // dragging right column horizontal divider
+	dividerX      int // X position of vertical divider (computed in View)
+	leftDividerY  int // Y position of left column horizontal divider (computed in View)
+	rightDividerY int // Y position of right column horizontal divider (computed in View)
+
+	// Per-column viewport start Y (where viewports begin, set in View).
+	leftVPStartY  int
+	rightVPStartY int
 
 	// Config reference for persisting layout preferences.
 	cfg *config.Config
@@ -175,12 +182,20 @@ type Model struct {
 // New creates a Model that will connect to the daemon at grpcAddr.
 func New(grpcAddr string, cfg *config.Config) *Model {
 	vSplit := 0.5
-	hSplit := 0.7
 	if cfg != nil && cfg.TUI.VerticalSplit > 0 {
 		vSplit = cfg.TUI.VerticalSplit
 	}
-	if cfg != nil && cfg.TUI.HorizontalSplit > 0 {
-		hSplit = cfg.TUI.HorizontalSplit
+	leftHS := 0.7
+	rightHS := 0.7
+	if cfg != nil && cfg.TUI.LeftHSplit > 0 {
+		leftHS = cfg.TUI.LeftHSplit
+	} else if cfg != nil && cfg.TUI.HorizontalSplit > 0 {
+		leftHS = cfg.TUI.HorizontalSplit // backward compat
+	}
+	if cfg != nil && cfg.TUI.RightHSplit > 0 {
+		rightHS = cfg.TUI.RightHSplit
+	} else if cfg != nil && cfg.TUI.HorizontalSplit > 0 {
+		rightHS = cfg.TUI.HorizontalSplit // backward compat
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	sp := spinner.New()
@@ -194,7 +209,8 @@ func New(grpcAddr string, cfg *config.Config) *Model {
 		spinner:        sp,
 		showLastResult: true,
 		vSplit:         vSplit,
-		hSplit:         hSplit,
+		leftHSplit:     leftHS,
+		rightHSplit:    rightHS,
 		cfg:            cfg,
 	}
 }
@@ -374,14 +390,14 @@ func (m *Model) View() string {
 	}
 
 	// Column widths from vertical split ratio.
-	// styleBorder has Padding(0,1) so inner content area = colW - 4 (2 border + 2 padding).
-	// vpContentW is the viewport width; the scrollbar takes 1 char, so vpContentW + 1 must
-	// fit inside the inner area: vpContentW = colW - 5.
+	// styleBorder has Padding(0,1); lipgloss Width(w) INCLUDES padding, border adds 2 to outer.
+	// So outer display width = w + 2. Two panels: total outer = leftW + rightW + 4.
+	// vpContentW: content area = w - 2 (padding), scrollbar takes 1, so vpContentW = w - 3.
 	vSplit := m.vSplit
 	if vSplit <= 0 {
 		vSplit = 0.5
 	}
-	totalInner := m.width - 8 // total inner width minus borders/padding for both panels
+	totalInner := m.width - 4 // total inner width minus borders for both panels
 	leftInner := int(vSplit * float64(totalInner))
 	rightInner := totalInner - leftInner
 
@@ -398,8 +414,8 @@ func (m *Model) View() string {
 
 	colW := leftInner // left column width (used for border.Width)
 	rightColW := rightInner
-	vpContentW := leftInner - 5
-	rightVPW := rightInner - 5
+	vpContentW := leftInner - 3
+	rightVPW := rightInner - 3
 	if vpContentW < 10 {
 		vpContentW = 10
 	}
@@ -414,7 +430,7 @@ func (m *Model) View() string {
 	heroPanelH := lipgloss.Height(heroPanel)
 
 	// Store divider X position for drag detection.
-	m.dividerX = colW + 4
+	m.dividerX = colW + 2
 
 	// Use the taller header to compute row2StartY (for vertical divider detection).
 	// row2StartY: Y where viewport panels begin (max of left/right header heights).
@@ -437,17 +453,21 @@ func (m *Model) View() string {
 		rightAvailable = 8
 	}
 
-	hSplit := m.hSplit
-	if hSplit <= 0 {
-		hSplit = 0.7
+	leftHSplit := m.leftHSplit
+	if leftHSplit <= 0 {
+		leftHSplit = 0.7
+	}
+	rightHSplit := m.rightHSplit
+	if rightHSplit <= 0 {
+		rightHSplit = 0.7
 	}
 
 	var leftMainH, leftPartnerH, rightMainH, rightPartnerH int
 	if m.game != nil && m.game.IsDuos {
 		partnerBorderH := 3 // border overhead for partner panel
-		leftMainH = int(hSplit * float64(leftAvailable - partnerBorderH))
+		leftMainH = int(leftHSplit * float64(leftAvailable - partnerBorderH))
 		leftPartnerH = leftAvailable - leftMainH - partnerBorderH
-		rightMainH = int(hSplit * float64(rightAvailable - partnerBorderH))
+		rightMainH = int(rightHSplit * float64(rightAvailable - partnerBorderH))
 		rightPartnerH = rightAvailable - rightMainH - partnerBorderH
 		const minH = 4
 		if leftMainH < minH {
@@ -473,7 +493,11 @@ func (m *Model) View() string {
 
 	// Scrollbar column X positions (absolute terminal coordinates).
 	m.boardScrollX = 2 + vpContentW
-	m.modsScrollX = (colW + 4) + 2 + rightVPW
+	m.modsScrollX = (colW + 2) + 2 + rightVPW
+
+	// Store per-column viewport start Y for drag calculations.
+	m.leftVPStartY = gamePanelH
+	m.rightVPStartY = heroPanelH
 
 	// ── Board panel (left column) ──
 	boardTitle := "YOUR BOARD"
@@ -545,7 +569,7 @@ func (m *Model) View() string {
 
 		m.partnerModsVPY = heroPanelH + lipgloss.Height(modsPanel) + 2
 		m.partnerModsVPH = rightPartnerH
-		m.partnerModsScrollX = (colW + 4) + 2 + rightVPW
+		m.partnerModsScrollX = (colW + 2) + 2 + rightVPW
 		partnerModsVPView := lipgloss.JoinHorizontal(lipgloss.Top,
 			m.partnerModsVP.View(), tuiScrollbar(m.partnerModsVP, rightPartnerH))
 		partnerModsPanel := styleBorder.Width(rightColW).Render(
@@ -554,13 +578,9 @@ func (m *Model) View() string {
 		leftPanels = append(leftPanels, partnerBoardPanel)
 		rightPanels = append(rightPanels, partnerModsPanel)
 
-		// Horizontal divider Y: use max of left/right main panel bottoms.
-		leftDivY := gamePanelH + lipgloss.Height(boardPanel)
-		rightDivY := heroPanelH + lipgloss.Height(modsPanel)
-		m.dividerY = leftDivY
-		if rightDivY > leftDivY {
-			m.dividerY = rightDivY
-		}
+		// Per-column horizontal divider Y positions.
+		m.leftDividerY = gamePanelH + lipgloss.Height(boardPanel)
+		m.rightDividerY = heroPanelH + lipgloss.Height(modsPanel)
 	}
 
 	leftCol := lipgloss.JoinVertical(lipgloss.Left, leftPanels...)
@@ -568,7 +588,7 @@ func (m *Model) View() string {
 	columns := lipgloss.JoinHorizontal(lipgloss.Top, leftCol, rightCol)
 
 	// ── Session stats ──
-	rowSession := m.renderSessionBar(m.width - 4)
+	rowSession := m.renderSessionBar(m.width - 2)
 
 	// ── Help bar ──
 	helpText := "  [r] Refresh game  [R] Refresh stats  [d] Anomaly desc  [l] Last result  [q] Quit  scroll: mouse wheel"
@@ -901,11 +921,16 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 				m.draggingV = true
 				return m, nil
 			}
-			// Check horizontal divider (Duos only).
-			if m.game != nil && m.game.IsDuos &&
-				y >= m.dividerY-1 && y <= m.dividerY+1 {
-				m.draggingH = true
-				return m, nil
+			// Check horizontal divider (Duos only) — per-column.
+			if m.game != nil && m.game.IsDuos {
+				if x < m.dividerX && y >= m.leftDividerY-1 && y <= m.leftDividerY+1 {
+					m.draggingHL = true
+					return m, nil
+				}
+				if x >= m.dividerX && y >= m.rightDividerY-1 && y <= m.rightDividerY+1 {
+					m.draggingHR = true
+					return m, nil
+				}
 			}
 			// Scrollbar detection.
 			panel, trackY, trackH := m.identifyScrollbar(x, y)
@@ -919,8 +944,8 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 	case tea.MouseActionMotion:
 		if m.draggingV && msg.Button == tea.MouseButtonLeft {
-			totalInner := m.width - 8
-			newLeft := x - 4
+			totalInner := m.width - 4
+			newLeft := x - 2
 			ratio := float64(newLeft) / float64(totalInner)
 			if ratio < 0.2 {
 				ratio = 0.2
@@ -931,9 +956,9 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			m.vSplit = ratio
 			return m, nil
 		}
-		if m.draggingH && msg.Button == tea.MouseButtonLeft {
-			totalAvailable := m.height - m.row2StartY - 3 - 1 - 3
-			newMain := y - m.row2StartY
+		if m.draggingHL && msg.Button == tea.MouseButtonLeft {
+			totalAvailable := m.height - m.leftVPStartY - 3 - 1 - 3
+			newMain := y - m.leftVPStartY
 			ratio := float64(newMain) / float64(totalAvailable)
 			if ratio < 0.2 {
 				ratio = 0.2
@@ -941,19 +966,34 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			if ratio > 0.8 {
 				ratio = 0.8
 			}
-			m.hSplit = ratio
+			m.leftHSplit = ratio
+			return m, nil
+		}
+		if m.draggingHR && msg.Button == tea.MouseButtonLeft {
+			totalAvailable := m.height - m.rightVPStartY - 3 - 1 - 3
+			newMain := y - m.rightVPStartY
+			ratio := float64(newMain) / float64(totalAvailable)
+			if ratio < 0.2 {
+				ratio = 0.2
+			}
+			if ratio > 0.8 {
+				ratio = 0.8
+			}
+			m.rightHSplit = ratio
 			return m, nil
 		}
 		if m.scrubbing && msg.Button == tea.MouseButtonLeft {
 			m.scrubAt(y)
 		}
 	case tea.MouseActionRelease:
-		if m.draggingV || m.draggingH {
+		if m.draggingV || m.draggingHL || m.draggingHR {
 			m.draggingV = false
-			m.draggingH = false
+			m.draggingHL = false
+			m.draggingHR = false
 			if m.cfg != nil {
 				m.cfg.TUI.VerticalSplit = m.vSplit
-				m.cfg.TUI.HorizontalSplit = m.hSplit
+				m.cfg.TUI.LeftHSplit = m.leftHSplit
+				m.cfg.TUI.RightHSplit = m.rightHSplit
 				go m.cfg.SaveTUI() //nolint:errcheck // fire-and-forget
 			}
 			return m, nil

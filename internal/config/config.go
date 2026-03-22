@@ -26,6 +26,8 @@ type Config struct {
 type TUIConfig struct {
 	VerticalSplit   float64 `yaml:"vertical_split,omitempty" mapstructure:"vertical_split"`
 	HorizontalSplit float64 `yaml:"horizontal_split,omitempty" mapstructure:"horizontal_split"`
+	LeftHSplit      float64 `yaml:"left_hsplit,omitempty" mapstructure:"left_hsplit"`
+	RightHSplit     float64 `yaml:"right_hsplit,omitempty" mapstructure:"right_hsplit"`
 }
 
 // ProfileConfig groups the settings that differ between Hearthstone installs.
@@ -274,5 +276,7 @@ func (c *Config) SaveTUI() error {
 	_ = v.ReadInConfig()
 	v.Set("tui.vertical_split", c.TUI.VerticalSplit)
 	v.Set("tui.horizontal_split", c.TUI.HorizontalSplit)
+	v.Set("tui.left_hsplit", c.TUI.LeftHSplit)
+	v.Set("tui.right_hsplit", c.TUI.RightHSplit)
 	return v.WriteConfig()
 }
