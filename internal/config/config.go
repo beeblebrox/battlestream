@@ -1,3 +1,4 @@
+// Package config manages battlestream configuration via Viper.
 package config
 
 import (
