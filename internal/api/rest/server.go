@@ -50,6 +50,7 @@ func (s *Server) Serve(ctx context.Context, addr string) error {
 	mux.HandleFunc("GET /v1/stats/aggregate", s.withAuth(s.handleGetAggregate))
 	mux.HandleFunc("GET /v1/stats/games", s.withAuth(s.handleListGames))
 	mux.HandleFunc("GET /v1/stats/games/{game_id}/modifications", s.withAuth(s.handleGetModifications))
+	mux.HandleFunc("GET /v1/game/{game_id}/turns", s.withAuth(s.handleGetTurnSnapshots))
 	mux.HandleFunc("GET /v1/player/{name}", s.withAuth(s.handleGetPlayer))
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -173,6 +174,23 @@ func (s *Server) handleListGames(w http.ResponseWriter, r *http.Request) {
 		Games []store.GameMeta `json:"games"`
 		Total int              `json:"total"`
 	}{Games: filtered, Total: total})
+}
+
+func (s *Server) handleGetTurnSnapshots(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("game_id")
+	if id == "" {
+		http.Error(w, "game_id required", http.StatusBadRequest)
+		return
+	}
+	snapshots, err := s.grpc.GetStore().GetTurnSnapshots(id)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if snapshots == nil {
+		snapshots = []gamestate.TurnSnapshot{}
+	}
+	s.writeJSON(w, snapshots)
 }
 
 // filterMetasByMode filters game metas by mode: "solo", "duos", or "all"/empty.
