@@ -293,34 +293,63 @@ type gameStateJSON struct {
 	Turn            int                          `json:"turn"`
 	TavernTier      int                          `json:"tavern_tier"`
 	Player          gamestate.PlayerState        `json:"player"`
+	Opponent        *gamestate.PlayerState       `json:"opponent,omitempty"`
 	Board           []gamestate.MinionState      `json:"board"`
+	OpponentBoard   []gamestate.MinionState      `json:"opponent_board,omitempty"`
 	Modifications   []gamestate.StatMod          `json:"modifications"`
 	BuffSources     []gamestate.BuffSource       `json:"buff_sources,omitempty"`
 	AbilityCounters []gamestate.AbilityCounter   `json:"ability_counters,omitempty"`
 	Enchantments    []gamestate.Enchantment      `json:"enchantments,omitempty"`
+	AvailableTribes []string                     `json:"available_tribes,omitempty"`
+	AnomalyCardID      string                    `json:"anomaly_card_id,omitempty"`
+	AnomalyName        string                    `json:"anomaly_name,omitempty"`
+	AnomalyDescription string                    `json:"anomaly_description,omitempty"`
 	StartTimeUnix   int64                        `json:"start_time_unix"`
+	EndTimeUnix     int64                        `json:"end_time_unix,omitempty"`
 	Placement       int                          `json:"placement"`
-	IsDuos  bool                   `json:"is_duos,omitempty"`
-	Partner *gamestate.PlayerState `json:"partner,omitempty"`
+	IsDuos                 bool                       `json:"is_duos,omitempty"`
+	Partner                *gamestate.PlayerState     `json:"partner,omitempty"`
+	PartnerBoard           []gamestate.MinionState    `json:"partner_board,omitempty"`
+	PartnerBoardTurn       int                        `json:"partner_board_turn,omitempty"`
+	PartnerBoardStale      bool                       `json:"partner_board_stale"`
+	PartnerBuffSources     []gamestate.BuffSource     `json:"partner_buff_sources,omitempty"`
+	PartnerAbilityCounters []gamestate.AbilityCounter `json:"partner_ability_counters,omitempty"`
 }
 
 func gameStateToJSON(s gamestate.BGGameState) gameStateJSON {
-	return gameStateJSON{
-		GameID:                 s.GameID,
-		Phase:                  string(s.Phase),
-		Turn:                   s.Turn,
-		TavernTier:             s.TavernTier,
-		Player:                 s.Player,
-		Board:                  s.Board,
-		Modifications:          s.Modifications,
-		BuffSources:            s.BuffSources,
-		AbilityCounters:        s.AbilityCounters,
-		Enchantments:           s.Enchantments,
-		StartTimeUnix:          s.StartTime.Unix(),
-		Placement:              s.Placement,
-		IsDuos:  s.IsDuos,
-		Partner: s.Partner,
+	j := gameStateJSON{
+		GameID:             s.GameID,
+		Phase:              string(s.Phase),
+		Turn:               s.Turn,
+		TavernTier:         s.TavernTier,
+		Player:             s.Player,
+		Opponent:           s.Opponent,
+		Board:              s.Board,
+		OpponentBoard:      s.OpponentBoard,
+		Modifications:      s.Modifications,
+		BuffSources:        s.BuffSources,
+		AbilityCounters:    s.AbilityCounters,
+		Enchantments:       s.Enchantments,
+		AvailableTribes:    s.AvailableTribes,
+		AnomalyCardID:      s.AnomalyCardID,
+		AnomalyName:        s.AnomalyName,
+		AnomalyDescription: s.AnomalyDescription,
+		StartTimeUnix:      s.StartTime.Unix(),
+		Placement:          s.Placement,
+		IsDuos:                 s.IsDuos,
+		Partner:                s.Partner,
+		PartnerBuffSources:     s.PartnerBuffSources,
+		PartnerAbilityCounters: s.PartnerAbilityCounters,
 	}
+	if s.EndTime != nil {
+		j.EndTimeUnix = s.EndTime.Unix()
+	}
+	if s.PartnerBoard != nil {
+		j.PartnerBoard = s.PartnerBoard.Minions
+		j.PartnerBoardTurn = s.PartnerBoard.Turn
+		j.PartnerBoardStale = s.PartnerBoard.Stale
+	}
+	return j
 }
 
 // --- WebSocket hub ---
