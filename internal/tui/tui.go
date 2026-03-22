@@ -624,7 +624,11 @@ func (m *Model) renderGamePanel(w int) string {
 
 		if phase == "GAME_OVER" {
 			placement := int(m.game.Placement)
-			if placement >= 1 && placement <= 4 {
+			winThreshold := 4
+			if m.game.IsDuos {
+				winThreshold = 2
+			}
+			if placement >= 1 && placement <= winThreshold {
 				b.WriteString(styleLabel.Render("Result ") + styleWin.Render(fmt.Sprintf("WIN #%d", placement)) + "\n")
 			} else if placement > 0 {
 				b.WriteString(styleLabel.Render("Result ") + styleLoss.Render(fmt.Sprintf("LOSS #%d", placement)) + "\n")

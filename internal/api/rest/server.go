@@ -191,7 +191,11 @@ func (s *Server) handleGetPlayer(w http.ResponseWriter, r *http.Request) {
 		p.GamesPlayed++
 		p.GameIDs = append(p.GameIDs, m.GameID)
 		total += m.Placement
-		if m.Placement <= 4 {
+		winThreshold := 4
+		if m.IsDuos {
+			winThreshold = 2
+		}
+		if m.Placement <= winThreshold {
 			p.Wins++
 		} else {
 			p.Losses++

@@ -177,7 +177,11 @@ func (s *Server) GetPlayerProfile(_ context.Context, req *bspb.GetPlayerRequest)
 		profile.GamesPlayed++
 		profile.GameIds = append(profile.GameIds, m.GameID)
 		totalPlacement += m.Placement
-		if int32(m.Placement) <= 4 {
+		winThreshold := 4
+		if m.IsDuos {
+			winThreshold = 2
+		}
+		if int32(m.Placement) <= int32(winThreshold) {
 			profile.Wins++
 		} else {
 			profile.Losses++
