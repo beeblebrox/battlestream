@@ -170,11 +170,19 @@ function navigateTo(level) {
 
 let timelineChart = null;
 let scrubberDebounce = null;
+let allUnfilteredGames = []; // kept for scrubber sync
+let scrubberMinTs = 0;
+let scrubberMaxTs = 0;
 
 function initFilters() {
   const lastNInput = document.getElementById('filter-last-n');
   lastNInput.addEventListener('input', () => {
     State.lastN = parseInt(lastNInput.value, 10) || 0;
+    // Clear last-days when typing last-N
+    document.getElementById('filter-last-days').value = '';
+    State.lastDays = 0;
+    State.dateFrom = null;
+    State.dateTo = null;
     refreshDashboard();
   });
 
@@ -182,14 +190,8 @@ function initFilters() {
   lastDaysInput.addEventListener('input', () => {
     State.lastDays = parseInt(lastDaysInput.value, 10) || 0;
     if (State.lastDays > 0) {
-      // Set date range from lastDays and clear the scrubber selection
-      const now = new Date();
       State.dateTo = null;
-      State.dateFrom = new Date(now.getTime() - State.lastDays * 86400000);
-      // Reset scrubber to match
-      if (timelineChart) {
-        timelineChart.dispatchAction({ type: 'dataZoom', start: 0, end: 100 });
-      }
+      State.dateFrom = new Date(Date.now() - State.lastDays * 86400000);
     } else {
       State.dateFrom = null;
       State.dateTo = null;
@@ -204,11 +206,33 @@ function initFilters() {
     State.lastDays = 0;
     State.dateFrom = null;
     State.dateTo = null;
-    if (timelineChart) {
-      timelineChart.dispatchAction({ type: 'dataZoom', start: 0, end: 100 });
-    }
     refreshDashboard();
   });
+}
+
+// After filtering, sync the scrubber handles to show the filtered range.
+function syncScrubberToFiltered() {
+  if (!timelineChart || allUnfilteredGames.length === 0 || State.games.length === 0) return;
+  if (State.games.length === allUnfilteredGames.length && !State.dateFrom && !State.dateTo) return; // no filter active
+
+  const range = scrubberMaxTs - scrubberMinTs || 1;
+
+  // Find the time bounds of the filtered games
+  const filteredSorted = [...State.games].sort((a, b) => a.start_time_unix - b.start_time_unix);
+  const filteredMin = filteredSorted[0].start_time_unix * 1000;
+  const filteredMax = filteredSorted[filteredSorted.length - 1].start_time_unix * 1000;
+
+  // Add a small padding (1% of range) so edge dots aren't clipped by handles
+  const pad = range * 0.01;
+  const startPct = Math.max(0, ((filteredMin - pad - scrubberMinTs) / range) * 100);
+  const endPct = Math.min(100, ((filteredMax + pad - scrubberMinTs) / range) * 100);
+
+  // Suppress the datazoom event to avoid feedback loop
+  timelineChart.off('datazoom');
+  timelineChart.dispatchAction({ type: 'dataZoom', dataZoomIndex: 0, start: startPct, end: endPct });
+
+  // Re-attach the handler after a tick
+  setTimeout(() => attachScrubberHandler(), 50);
 }
 
 // Build the timeline scrubber from all game metas (unfiltered).
@@ -236,16 +260,16 @@ function renderTimelineScrubber(allMetas) {
     };
   });
 
-  const minTs = sorted[0].start_time_unix * 1000;
-  const maxTs = sorted[sorted.length - 1].start_time_unix * 1000;
+  scrubberMinTs = sorted[0].start_time_unix * 1000;
+  scrubberMaxTs = sorted[sorted.length - 1].start_time_unix * 1000;
 
   // Compute initial zoom percent from current date filters
   let startPct = 0;
   let endPct = 100;
   if (State.dateFrom || State.dateTo) {
-    const range = maxTs - minTs || 1;
-    if (State.dateFrom) startPct = Math.max(0, ((State.dateFrom.getTime() - minTs) / range) * 100);
-    if (State.dateTo) endPct = Math.min(100, ((State.dateTo.getTime() - minTs) / range) * 100);
+    const range = scrubberMaxTs - scrubberMinTs || 1;
+    if (State.dateFrom) startPct = Math.max(0, ((State.dateFrom.getTime() - scrubberMinTs) / range) * 100);
+    if (State.dateTo) endPct = Math.min(100, ((State.dateTo.getTime() - scrubberMinTs) / range) * 100);
   }
 
   timelineChart.setOption({
@@ -306,29 +330,32 @@ function renderTimelineScrubber(allMetas) {
     ],
   }, true);
 
-  // Debounced handler: update date filters when scrubber moves
+  attachScrubberHandler();
+}
+
+function attachScrubberHandler() {
+  if (!timelineChart) return;
   timelineChart.off('datazoom');
-  timelineChart.on('datazoom', (params) => {
+  timelineChart.on('datazoom', () => {
     clearTimeout(scrubberDebounce);
     scrubberDebounce = setTimeout(() => {
       const option = timelineChart.getOption();
       const zoom = option.dataZoom[0];
-      const startVal = zoom.startValue;
-      const endVal = zoom.endValue;
+      const range = scrubberMaxTs - scrubberMinTs || 1;
 
-      if (startVal != null && endVal != null) {
-        State.dateFrom = new Date(startVal);
-        State.dateTo = new Date(endVal);
+      if (zoom.startValue != null && zoom.endValue != null) {
+        State.dateFrom = new Date(zoom.startValue);
+        State.dateTo = new Date(zoom.endValue);
       } else {
-        // Percent-based — compute from data range
-        const range = maxTs - minTs || 1;
-        State.dateFrom = (zoom.start > 0) ? new Date(minTs + (zoom.start / 100) * range) : null;
-        State.dateTo = (zoom.end < 100) ? new Date(minTs + (zoom.end / 100) * range) : null;
+        State.dateFrom = (zoom.start > 0) ? new Date(scrubberMinTs + (zoom.start / 100) * range) : null;
+        State.dateTo = (zoom.end < 100) ? new Date(scrubberMinTs + (zoom.end / 100) * range) : null;
       }
 
-      // Clear last-days input since user is manually scrubbing
+      // Clear text inputs since user is manually scrubbing
       document.getElementById('filter-last-days').value = '';
+      document.getElementById('filter-last-n').value = '';
       State.lastDays = 0;
+      State.lastN = 0;
 
       refreshDashboardFromScrubber();
     }, 300);
@@ -1476,12 +1503,15 @@ async function refreshDashboard() {
   showLoading();
   try {
     const mode = State.mode === 'compare' ? 'all' : State.mode;
-    const allGames = await API.getAllGames(mode);
+    allUnfilteredGames = await API.getAllGames(mode);
 
     // Render scrubber with ALL games (unfiltered) so user can see full timeline
-    renderTimelineScrubber(allGames);
+    renderTimelineScrubber(allUnfilteredGames);
 
-    State.games = applyGameFilters(allGames);
+    State.games = applyGameFilters(allUnfilteredGames);
+
+    // Sync scrubber handles to the filtered range
+    syncScrubberToFiltered();
 
     if (State.level === 1) await renderLevel1();
     else if (State.level === 2) await renderLevel2();
