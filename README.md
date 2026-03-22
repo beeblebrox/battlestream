@@ -81,11 +81,23 @@ HS_LOG_PATH=/path/to/hearthstone/Logs docker compose up
 
 ### Updating
 
+If you installed via **Homebrew or Scoop** (recommended), update through your package manager — this avoids macOS Gatekeeper and Windows SmartScreen warnings:
+
+```sh
+# macOS / Linux
+brew upgrade battlestream
+
+# Windows
+scoop update battlestream
+```
+
+If you downloaded the binary directly, you can self-update:
+
 ```sh
 battlestream update
 ```
 
-Or via your package manager (`brew upgrade battlestream` / `scoop update battlestream`).
+Note: `battlestream update` downloads the binary directly, so macOS and Windows may show security warnings on the updated binary. Use Homebrew or Scoop to avoid this.
 
 ## Configuration
 
