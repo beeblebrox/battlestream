@@ -68,6 +68,7 @@ persists aggregate stats, and exposes them via gRPC, REST, WebSocket, and file o
 	updateCh := startUpdateCheck()
 
 	if err := root.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
