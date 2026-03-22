@@ -283,8 +283,12 @@ function renderTimelineScrubber(allMetas) {
       handleStyle: { color: '#e94560', borderColor: '#e94560' },
       textStyle: { color: '#888', fontSize: 10 },
       dataBackground: {
-        lineStyle: { color: '#444' },
-        areaStyle: { color: '#222' },
+        lineStyle: { opacity: 0 },
+        areaStyle: { opacity: 0 },
+      },
+      selectedDataBackground: {
+        lineStyle: { opacity: 0 },
+        areaStyle: { opacity: 0 },
       },
     }],
   }, true);
