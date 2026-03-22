@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Battlestream Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <h1>Battlestream</h1>
+  <nav class="breadcrumb" id="breadcrumb">
+    <a href="#" data-level="1">Overview</a>
+  </nav>
+</header>
+
+<div class="mode-bar">
+  <button class="mode-btn active" data-mode="all">All</button>
+  <button class="mode-btn" data-mode="solo">Solo</button>
+  <button class="mode-btn" data-mode="duos">Duos</button>
+  <button class="mode-btn" data-mode="compare">Compare</button>
+</div>
+
+<div class="partner-filter hidden" id="partner-filter">
+  <label>Partner:</label>
+</div>
+
+<main>
+  <!-- Level 1: Overview -->
+  <section id="level-1">
+    <div class="card-row" id="summary-cards"></div>
+
+    <div class="chart-grid">
+      <div class="chart-container" id="chart-placement-trend">
+        <h3>Placement Trend</h3>
+      </div>
+      <div class="chart-container" id="chart-placement-dist">
+        <h3>Placement Distribution</h3>
+      </div>
+      <div class="chart-container" id="chart-winrate-trend">
+        <h3>Win Rate Trend</h3>
+      </div>
+      <div class="chart-container" id="chart-hero-perf">
+        <h3>Hero Performance</h3>
+      </div>
+      <div class="chart-container" id="chart-tavern-tier">
+        <h3>Final Tavern Tier</h3>
+      </div>
+      <div class="chart-container" id="chart-buff-breakdown">
+        <h3>Buff Source Breakdown</h3>
+      </div>
+      <div class="chart-container" id="chart-duration">
+        <h3>Game Duration</h3>
+      </div>
+      <div class="chart-container" id="chart-anomaly-perf">
+        <h3>Anomaly Performance</h3>
+      </div>
+      <div class="chart-container" id="chart-tribe-winrate">
+        <h3>Tribe Win Rate</h3>
+      </div>
+      <div class="chart-container" id="chart-buff-efficiency">
+        <h3>Buff Efficiency</h3>
+      </div>
+      <div class="chart-container wide" id="chart-heatmap-hero">
+        <h3>Hero Placement Heatmap</h3>
+      </div>
+      <div class="chart-container wide" id="chart-heatmap-tier-turn">
+        <h3>Tier-Turn Heatmap</h3>
+      </div>
+      <div class="chart-container wide" id="chart-heatmap-tribe">
+        <h3>Tribe Heatmap</h3>
+      </div>
+      <div class="chart-container wide" id="chart-heatmap-buff">
+        <h3>Buff Heatmap</h3>
+      </div>
+    </div>
+  </section>
+
+  <!-- Level 2: Game Detail -->
+  <section id="level-2" class="hidden">
+    <div class="game-header" id="game-header">
+      <h2>Game Detail</h2>
+    </div>
+
+    <div class="chart-grid">
+      <div class="chart-container" id="chart-board-stats">
+        <h3>Board Stats Over Time</h3>
+      </div>
+      <div class="chart-container" id="chart-health-armor">
+        <h3>Health &amp; Armor</h3>
+      </div>
+      <div class="chart-container" id="chart-tier-prog">
+        <h3>Tier Progression</h3>
+      </div>
+      <div class="chart-container" id="chart-buff-accum">
+        <h3>Buff Accumulation</h3>
+      </div>
+      <div class="chart-container" id="chart-gold-econ">
+        <h3>Gold Economy</h3>
+      </div>
+      <div class="chart-container" id="chart-board-size">
+        <h3>Board Size</h3>
+      </div>
+    </div>
+  </section>
+
+  <!-- Level 3: Turn Detail -->
+  <section id="level-3" class="hidden">
+    <div class="turn-header" id="turn-header">
+      <h2>Turn Detail</h2>
+    </div>
+
+    <div class="board-row" id="turn-board"></div>
+    <div class="delta-row" id="turn-deltas"></div>
+  </section>
+</main>
+
+<script src="echarts.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
