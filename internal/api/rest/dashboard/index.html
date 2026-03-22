@@ -24,17 +24,20 @@
 
 <div class="filter-bar" id="filter-bar">
   <div class="filter-group">
-    <label>Last N games:</label>
-    <input type="number" id="filter-last-n" min="0" placeholder="All" style="width:5rem;">
+    <label>Last:</label>
+    <input type="number" id="filter-last-n" min="0" placeholder="All" style="width:4rem;" title="Last N games">
+    <span class="sep">games</span>
   </div>
-  <div class="filter-group filter-range-group">
-    <label>Date range:</label>
-    <input type="date" id="filter-date-from">
-    <span class="sep">to</span>
-    <input type="date" id="filter-date-to">
-    <button class="mode-btn" id="filter-date-clear">Clear</button>
+  <div class="filter-group">
+    <label>Last:</label>
+    <input type="number" id="filter-last-days" min="0" placeholder="All" style="width:4rem;" title="Last N days">
+    <span class="sep">days</span>
+  </div>
+  <div class="filter-group">
+    <button class="mode-btn" id="filter-clear-all">Reset Filters</button>
   </div>
 </div>
+<div id="timeline-scrubber" style="height:80px;background:var(--bg-card);border-bottom:1px solid var(--border);"></div>
 
 <div class="partner-filter hidden" id="partner-filter">
   <label>Partner:</label>

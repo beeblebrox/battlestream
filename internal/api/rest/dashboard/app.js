@@ -65,6 +65,7 @@ const State = {
   partners: new Set(),
   excludedPartners: new Set(),
   lastN: 0,                 // 0 = all games
+  lastDays: 0,               // 0 = no day limit
   dateFrom: null,            // Date or null
   dateTo: null,              // Date or null
 };
@@ -164,8 +165,11 @@ function navigateTo(level) {
 }
 
 // ============================================================================
-// 5. Filters (Last N games, Date range)
+// 5. Filters (Last N games, Last N days, Timeline scrubber)
 // ============================================================================
+
+let timelineChart = null;
+let scrubberDebounce = null;
 
 function initFilters() {
   const lastNInput = document.getElementById('filter-last-n');
@@ -174,31 +178,170 @@ function initFilters() {
     refreshDashboard();
   });
 
-  const dateFrom = document.getElementById('filter-date-from');
-  const dateTo = document.getElementById('filter-date-to');
-
-  dateFrom.addEventListener('change', () => {
-    State.dateFrom = dateFrom.value ? new Date(dateFrom.value + 'T00:00:00') : null;
+  const lastDaysInput = document.getElementById('filter-last-days');
+  lastDaysInput.addEventListener('input', () => {
+    State.lastDays = parseInt(lastDaysInput.value, 10) || 0;
+    if (State.lastDays > 0) {
+      // Set date range from lastDays and clear the scrubber selection
+      const now = new Date();
+      State.dateTo = null;
+      State.dateFrom = new Date(now.getTime() - State.lastDays * 86400000);
+      // Reset scrubber to match
+      if (timelineChart) {
+        timelineChart.dispatchAction({ type: 'dataZoom', start: 0, end: 100 });
+      }
+    } else {
+      State.dateFrom = null;
+      State.dateTo = null;
+    }
     refreshDashboard();
   });
-  dateTo.addEventListener('change', () => {
-    State.dateTo = dateTo.value ? new Date(dateTo.value + 'T23:59:59') : null;
-    refreshDashboard();
-  });
 
-  document.getElementById('filter-date-clear').addEventListener('click', () => {
-    dateFrom.value = '';
-    dateTo.value = '';
+  document.getElementById('filter-clear-all').addEventListener('click', () => {
+    lastNInput.value = '';
+    lastDaysInput.value = '';
+    State.lastN = 0;
+    State.lastDays = 0;
     State.dateFrom = null;
     State.dateTo = null;
+    if (timelineChart) {
+      timelineChart.dispatchAction({ type: 'dataZoom', start: 0, end: 100 });
+    }
     refreshDashboard();
   });
 }
 
-// Apply lastN and date range filters to game metas.
+// Build the timeline scrubber from all game metas (unfiltered).
+// This is an ECharts scatter chart with dataZoom slider showing game dots.
+function renderTimelineScrubber(allMetas) {
+  const el = document.getElementById('timeline-scrubber');
+  if (!el) return;
+
+  if (!timelineChart) {
+    timelineChart = echarts.init(el, 'dark');
+    window.addEventListener('resize', () => timelineChart.resize());
+  }
+
+  if (!allMetas || allMetas.length === 0) {
+    timelineChart.clear();
+    return;
+  }
+
+  const sorted = [...allMetas].sort((a, b) => a.start_time_unix - b.start_time_unix);
+  const data = sorted.map((g) => {
+    const ts = g.start_time_unix * 1000;
+    return {
+      value: [ts, g.placement],
+      itemStyle: { color: (g.is_duos ? (g.placement <= 2) : (g.placement <= 4)) ? '#00c853' : '#ff5252' },
+    };
+  });
+
+  const minTs = sorted[0].start_time_unix * 1000;
+  const maxTs = sorted[sorted.length - 1].start_time_unix * 1000;
+
+  // Compute initial zoom percent from current date filters
+  let startPct = 0;
+  let endPct = 100;
+  if (State.dateFrom || State.dateTo) {
+    const range = maxTs - minTs || 1;
+    if (State.dateFrom) startPct = Math.max(0, ((State.dateFrom.getTime() - minTs) / range) * 100);
+    if (State.dateTo) endPct = Math.min(100, ((State.dateTo.getTime() - minTs) / range) * 100);
+  }
+
+  timelineChart.setOption({
+    grid: { left: 50, right: 20, top: 8, bottom: 30 },
+    xAxis: {
+      type: 'time',
+      axisLabel: { fontSize: 10, color: '#888' },
+      splitLine: { show: false },
+    },
+    yAxis: {
+      type: 'value', min: 1, max: 8, inverse: true, show: false,
+    },
+    series: [{
+      type: 'scatter',
+      symbolSize: 8,
+      data,
+    }],
+    tooltip: {
+      trigger: 'item',
+      formatter: (p) => {
+        const d = new Date(p.data.value[0]);
+        return `${d.toLocaleDateString()} ${d.toLocaleTimeString()}<br/>Placement: #${p.data.value[1]}`;
+      },
+    },
+    dataZoom: [{
+      type: 'slider',
+      xAxisIndex: 0,
+      start: startPct,
+      end: endPct,
+      height: 20,
+      bottom: 2,
+      borderColor: '#444',
+      backgroundColor: '#1a1a2e',
+      fillerColor: 'rgba(233, 69, 96, 0.25)',
+      handleStyle: { color: '#e94560', borderColor: '#e94560' },
+      textStyle: { color: '#888', fontSize: 10 },
+      dataBackground: {
+        lineStyle: { color: '#444' },
+        areaStyle: { color: '#222' },
+      },
+    }],
+  }, true);
+
+  // Debounced handler: update date filters when scrubber moves
+  timelineChart.off('datazoom');
+  timelineChart.on('datazoom', (params) => {
+    clearTimeout(scrubberDebounce);
+    scrubberDebounce = setTimeout(() => {
+      const option = timelineChart.getOption();
+      const zoom = option.dataZoom[0];
+      const startVal = zoom.startValue;
+      const endVal = zoom.endValue;
+
+      if (startVal != null && endVal != null) {
+        State.dateFrom = new Date(startVal);
+        State.dateTo = new Date(endVal);
+      } else {
+        // Percent-based — compute from data range
+        const range = maxTs - minTs || 1;
+        State.dateFrom = (zoom.start > 0) ? new Date(minTs + (zoom.start / 100) * range) : null;
+        State.dateTo = (zoom.end < 100) ? new Date(minTs + (zoom.end / 100) * range) : null;
+      }
+
+      // Clear last-days input since user is manually scrubbing
+      document.getElementById('filter-last-days').value = '';
+      State.lastDays = 0;
+
+      refreshDashboardFromScrubber();
+    }, 300);
+  });
+}
+
+// Refresh without re-rendering the scrubber (to avoid loop).
+async function refreshDashboardFromScrubber() {
+  showLoading();
+  try {
+    const mode = State.mode === 'compare' ? 'all' : State.mode;
+    const allGames = await API.getAllGames(mode);
+    State.games = applyGameFilters(allGames);
+    if (State.level === 1) await renderLevel1();
+  } catch (err) {
+    console.error('Dashboard refresh error:', err);
+  } finally {
+    hideLoading();
+  }
+}
+
+// Apply lastN, lastDays, and date range filters to game metas.
 // Games are assumed to be sorted newest-first from the API.
 function applyGameFilters(metas) {
   let filtered = metas;
+
+  // Last N days filter (sets dateFrom)
+  if (State.lastDays > 0 && !State.dateFrom) {
+    State.dateFrom = new Date(Date.now() - State.lastDays * 86400000);
+  }
 
   // Date range filter
   if (State.dateFrom || State.dateTo) {
@@ -210,7 +353,7 @@ function applyGameFilters(metas) {
     });
   }
 
-  // Last N filter (applied after date filter)
+  // Last N games filter (applied after date filter)
   if (State.lastN > 0 && filtered.length > State.lastN) {
     filtered = filtered.slice(0, State.lastN);
   }
@@ -1317,6 +1460,10 @@ async function refreshDashboard() {
   try {
     const mode = State.mode === 'compare' ? 'all' : State.mode;
     const allGames = await API.getAllGames(mode);
+
+    // Render scrubber with ALL games (unfiltered) so user can see full timeline
+    renderTimelineScrubber(allGames);
+
     State.games = applyGameFilters(allGames);
 
     if (State.level === 1) await renderLevel1();
