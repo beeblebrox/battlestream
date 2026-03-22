@@ -165,6 +165,10 @@ type Model struct {
 
 	// Config reference for persisting layout preferences.
 	cfg *config.Config
+
+	// Y offset from parent view (e.g. CombinedModel tab bar).
+	// Parent sets this so mouse coordinates are adjusted correctly.
+	parentYOffset int
 }
 
 // New creates a Model that will connect to the daemon at grpcAddr.
@@ -829,18 +833,21 @@ func abs32(x int32) int32 {
 // ── Mouse handling ───────────────────────────────────────────────
 
 func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	x := msg.X
+	y := msg.Y - m.parentYOffset
+
 	// Wheel: route to whichever panel the cursor is over.
 	if tea.MouseEvent(msg).IsWheel() {
 		var cmd tea.Cmd
 		// Check partner pane first (below main panels).
 		if m.game != nil && m.game.IsDuos &&
-			msg.Y >= m.partnerVPY && msg.Y < m.partnerVPY+m.partnerVPH {
-			if msg.X >= m.width/2 {
+			y >= m.partnerVPY && y < m.partnerVPY+m.partnerVPH {
+			if x >= m.width/2 {
 				m.partnerModsVP, cmd = m.partnerModsVP.Update(msg)
 			} else {
 				m.partnerBoardVP, cmd = m.partnerBoardVP.Update(msg)
 			}
-		} else if msg.X >= m.width/2 {
+		} else if x >= m.width/2 {
 			m.modsVP, cmd = m.modsVP.Update(msg)
 		} else {
 			m.boardVP, cmd = m.boardVP.Update(msg)
@@ -852,31 +859,31 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	case tea.MouseActionPress:
 		if msg.Button == tea.MouseButtonLeft {
 			// Check vertical divider.
-			if msg.X >= m.dividerX-1 && msg.X <= m.dividerX+1 &&
-				msg.Y >= m.row2StartY {
+			if x >= m.dividerX-1 && x <= m.dividerX+1 &&
+				y >= m.row2StartY {
 				m.draggingV = true
 				return m, nil
 			}
 			// Check horizontal divider (Duos only).
 			if m.game != nil && m.game.IsDuos &&
-				msg.Y >= m.dividerY-1 && msg.Y <= m.dividerY+1 {
+				y >= m.dividerY-1 && y <= m.dividerY+1 {
 				m.draggingH = true
 				return m, nil
 			}
 			// Scrollbar detection.
-			panel, trackY, trackH := m.identifyScrollbar(msg.X, msg.Y)
+			panel, trackY, trackH := m.identifyScrollbar(x, y)
 			if panel >= 0 {
 				m.scrubbing = true
 				m.scrubPanel = panel
 				m.scrubTrackY = trackY
 				m.scrubTrackH = trackH
-				m.scrubAt(msg.Y)
+				m.scrubAt(y)
 			}
 		}
 	case tea.MouseActionMotion:
 		if m.draggingV && msg.Button == tea.MouseButtonLeft {
 			totalInner := m.width - 8
-			newLeft := msg.X - 4
+			newLeft := x - 4
 			ratio := float64(newLeft) / float64(totalInner)
 			if ratio < 0.2 {
 				ratio = 0.2
@@ -889,7 +896,7 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 		if m.draggingH && msg.Button == tea.MouseButtonLeft {
 			totalAvailable := m.height - m.row2StartY - 3 - 1 - 3
-			newMain := msg.Y - m.row2StartY
+			newMain := y - m.row2StartY
 			ratio := float64(newMain) / float64(totalAvailable)
 			if ratio < 0.2 {
 				ratio = 0.2
@@ -901,7 +908,7 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.scrubbing && msg.Button == tea.MouseButtonLeft {
-			m.scrubAt(msg.Y)
+			m.scrubAt(y)
 		}
 	case tea.MouseActionRelease:
 		if m.draggingV || m.draggingH {

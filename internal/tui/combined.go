@@ -40,9 +40,11 @@ type CombinedModel struct {
 
 // NewCombined creates a CombinedModel that starts in live mode.
 func NewCombined(grpcAddr string, st *store.Store, logFiles []string, cfg *config.Config) *CombinedModel {
+	live := New(grpcAddr, cfg)
+	live.parentYOffset = 1 // mode indicator bar
 	return &CombinedModel{
 		mode:     modeLive,
-		live:     New(grpcAddr, cfg),
+		live:     live,
 		grpcAddr: grpcAddr,
 		logFiles: logFiles,
 		store:    st,
