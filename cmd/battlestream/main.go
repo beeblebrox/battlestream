@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"syscall"
@@ -591,24 +592,63 @@ func findPowerLogs(logPath string) []string {
 }
 
 // sessionDirDate extracts the reference date for a Power.log file.
-// First tries parsing the session directory name (e.g. "Hearthstone_2026_03_17_20_51_27").
-// Falls back to the file's modification time.
+//
+// Strategy (in order):
+//  1. Parse session directory name (e.g. "Hearthstone_2026_03_17_20_51_27") — Windows/Linux.
+//  2. Read the first timestamp from the file and compute the start date using
+//     the file's modification time. This works on all platforms including macOS
+//     where there are no session subdirectories.
 func sessionDirDate(logFilePath string) time.Time {
+	// Strategy 1: session directory name.
 	dir := filepath.Base(filepath.Dir(logFilePath))
 	const prefix = "Hearthstone_"
 	if strings.HasPrefix(dir, prefix) {
-		// Hearthstone_YYYY_MM_DD_HH_MM_SS
 		t, err := time.ParseInLocation("2006_01_02_15_04_05", strings.TrimPrefix(dir, prefix), time.Local)
 		if err == nil {
 			return t
 		}
 	}
-	// Fallback: use the file's modification time (works on all platforms).
+
+	// Strategy 2: first-line timestamp + file mod time.
+	// The first timestamp tells us what time-of-day the log started.
+	// The file mod time tells us when the last line was written.
+	// We put them together to find the calendar date of the first line.
 	info, err := os.Stat(logFilePath)
-	if err == nil {
-		return info.ModTime()
+	if err != nil {
+		return time.Time{}
 	}
-	return time.Time{}
+	modTime := info.ModTime()
+
+	f, err := os.Open(logFilePath)
+	if err != nil {
+		return modTime // best effort
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 4096), 4096)
+	reTS := regexp.MustCompile(`D (\d{2}:\d{2}:\d{2}\.\d+)`)
+	for scanner.Scan() {
+		m := reTS.FindStringSubmatch(scanner.Text())
+		if m != nil {
+			firstTime, err := time.Parse("15:04:05.9999999", m[1])
+			if err != nil {
+				break
+			}
+			// Start with the mod date as the base, then set the time-of-day from the first line.
+			candidate := time.Date(modTime.Year(), modTime.Month(), modTime.Day(),
+				firstTime.Hour(), firstTime.Minute(), firstTime.Second(), firstTime.Nanosecond(),
+				modTime.Location())
+			// If the first timestamp is after the mod time, the log must have started
+			// the previous day (crossed midnight during the session).
+			if candidate.After(modTime) {
+				candidate = candidate.Add(-24 * time.Hour)
+			}
+			return candidate
+		}
+	}
+
+	return modTime
 }
 
 // --- discover ---
