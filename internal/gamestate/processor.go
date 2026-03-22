@@ -329,12 +329,16 @@ func (p *Processor) handlePlayerDef(e parser.GameEvent) {
 }
 
 // handlePlayerName maps PlayerID to a display name.
+// In Duos, the DebugPrintGame lines show only two players: the local player
+// (real) and the bot player. The bot's PlayerName is the partner's battletag.
 func (p *Processor) handlePlayerName(e parser.GameEvent) {
 	if e.PlayerID == p.localPlayerID {
 		p.localPlayerName = e.EntityName
 		p.machine.UpdatePlayerName(e.EntityName)
 		slog.Info("local player name", "name", e.EntityName)
-	} else if p.isDuos && e.PlayerID == p.partnerPlayerID {
+	} else if p.isDuos && e.PlayerID != p.localPlayerID && p.partnerPlayerName == "" {
+		// In duos, the non-local PlayerName is the partner's battletag
+		// (carried by the bot player entity).
 		p.partnerPlayerName = e.EntityName
 		p.machine.UpdatePartnerName(e.EntityName)
 		slog.Info("partner player name", "name", e.EntityName)

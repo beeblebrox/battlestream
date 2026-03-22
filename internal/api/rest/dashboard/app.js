@@ -286,7 +286,7 @@ function reRenderFiltered(fullGames) {
 
 function getPartnerLabel(g) {
   if (!g.partner) return null;
-  return g.partner.name || heroName(g.partner.hero_card_id) || null;
+  return g.partner.name || null;
 }
 
 function filterGamesByPartner(games) {
