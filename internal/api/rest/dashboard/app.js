@@ -417,12 +417,27 @@ function applyGameFilters(metas) {
     });
   }
 
-  // Last N games filter (applied after date filter)
+  // Last N games filter — sort newest-first by timestamp, then take N
   if (State.lastN > 0 && filtered.length > State.lastN) {
+    filtered = [...filtered].sort((a, b) => b.start_time_unix - a.start_time_unix);
     filtered = filtered.slice(0, State.lastN);
   }
 
+  updateFilterStatus(filtered, metas);
   return filtered;
+}
+
+function updateFilterStatus(filtered, total) {
+  const el = document.getElementById('filter-status');
+  if (!el) return;
+  const active = State.lastN || State.lastDays || State.dateFrom || State.dateTo;
+  if (!active) {
+    el.textContent = '';
+  } else if (filtered.length === total.length) {
+    el.textContent = `Showing all ${filtered.length} games (all match filter)`;
+  } else {
+    el.textContent = `Showing ${filtered.length} of ${total.length} games`;
+  }
 }
 
 // ============================================================================
