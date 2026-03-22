@@ -298,13 +298,18 @@ function renderTimelineScrubber(allMetas) {
   scrubberMaxTs = sorted[sorted.length - 1].start_time_unix * 1000;
 
   timelineChart.setOption({
-    grid: { left: 50, right: 20, top: 5, bottom: 5 },
+    grid: { left: 50, right: 20, top: 5, bottom: 22 },
     xAxis: {
       type: 'time',
-      axisLabel: { show: false },
-      axisTick: { show: false },
-      axisLine: { show: false },
-      splitLine: { show: false },
+      axisLabel: {
+        show: true,
+        color: '#888',
+        fontSize: 10,
+        hideOverlap: true,
+      },
+      axisTick: { show: true, lineStyle: { color: '#444' } },
+      axisLine: { show: true, lineStyle: { color: '#444' } },
+      splitLine: { show: true, lineStyle: { color: '#222', type: 'dashed' } },
     },
     yAxis: {
       type: 'value', min: 0, max: 9, show: false,
