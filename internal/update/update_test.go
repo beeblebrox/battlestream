@@ -7,6 +7,7 @@ import (
 )
 
 func TestShouldCheck_NoState(t *testing.T) {
+	t.Setenv("CI", "")
 	dir := t.TempDir()
 	if !ShouldCheck(dir) {
 		t.Error("expected true when no state file exists")
@@ -14,6 +15,7 @@ func TestShouldCheck_NoState(t *testing.T) {
 }
 
 func TestShouldCheck_RecentCheck(t *testing.T) {
+	t.Setenv("CI", "")
 	dir := t.TempDir()
 	_ = writeState(dir, state{CheckedAt: time.Now()})
 	if ShouldCheck(dir) {
@@ -22,6 +24,7 @@ func TestShouldCheck_RecentCheck(t *testing.T) {
 }
 
 func TestShouldCheck_StaleCheck(t *testing.T) {
+	t.Setenv("CI", "")
 	dir := t.TempDir()
 	_ = writeState(dir, state{CheckedAt: time.Now().Add(-25 * time.Hour)})
 	if !ShouldCheck(dir) {
