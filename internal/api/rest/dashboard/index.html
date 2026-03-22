@@ -22,6 +22,26 @@
   <button class="mode-btn" data-mode="compare">Compare</button>
 </div>
 
+<div class="filter-bar" id="filter-bar">
+  <div class="filter-group">
+    <label>Last N games:</label>
+    <select id="filter-last-n">
+      <option value="0">All</option>
+      <option value="5">5</option>
+      <option value="10">10</option>
+      <option value="20">20</option>
+      <option value="50">50</option>
+    </select>
+  </div>
+  <div class="filter-group filter-range-group">
+    <label>Date range:</label>
+    <input type="date" id="filter-date-from">
+    <span class="sep">to</span>
+    <input type="date" id="filter-date-to">
+    <button class="mode-btn" id="filter-date-clear">Clear</button>
+  </div>
+</div>
+
 <div class="partner-filter hidden" id="partner-filter">
   <label>Partner:</label>
 </div>

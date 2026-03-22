@@ -64,6 +64,9 @@ const State = {
   selectedTurn: null,
   partners: new Set(),
   excludedPartners: new Set(),
+  lastN: 0,                 // 0 = all games
+  dateFrom: null,            // Date or null
+  dateTo: null,              // Date or null
 };
 
 // ============================================================================
@@ -161,7 +164,62 @@ function navigateTo(level) {
 }
 
 // ============================================================================
-// 5. Mode Toggle
+// 5. Filters (Last N games, Date range)
+// ============================================================================
+
+function initFilters() {
+  const lastNSelect = document.getElementById('filter-last-n');
+  lastNSelect.addEventListener('change', () => {
+    State.lastN = parseInt(lastNSelect.value, 10) || 0;
+    refreshDashboard();
+  });
+
+  const dateFrom = document.getElementById('filter-date-from');
+  const dateTo = document.getElementById('filter-date-to');
+
+  dateFrom.addEventListener('change', () => {
+    State.dateFrom = dateFrom.value ? new Date(dateFrom.value + 'T00:00:00') : null;
+    refreshDashboard();
+  });
+  dateTo.addEventListener('change', () => {
+    State.dateTo = dateTo.value ? new Date(dateTo.value + 'T23:59:59') : null;
+    refreshDashboard();
+  });
+
+  document.getElementById('filter-date-clear').addEventListener('click', () => {
+    dateFrom.value = '';
+    dateTo.value = '';
+    State.dateFrom = null;
+    State.dateTo = null;
+    refreshDashboard();
+  });
+}
+
+// Apply lastN and date range filters to game metas.
+// Games are assumed to be sorted newest-first from the API.
+function applyGameFilters(metas) {
+  let filtered = metas;
+
+  // Date range filter
+  if (State.dateFrom || State.dateTo) {
+    filtered = filtered.filter((g) => {
+      const ts = new Date(g.start_time_unix * 1000);
+      if (State.dateFrom && ts < State.dateFrom) return false;
+      if (State.dateTo && ts > State.dateTo) return false;
+      return true;
+    });
+  }
+
+  // Last N filter (applied after date filter)
+  if (State.lastN > 0 && filtered.length > State.lastN) {
+    filtered = filtered.slice(0, State.lastN);
+  }
+
+  return filtered;
+}
+
+// ============================================================================
+// 6. Mode Toggle
 // ============================================================================
 
 function initModeToggle() {
@@ -301,6 +359,25 @@ function filterGamesByPartner(games) {
 // ============================================================================
 // 7. Summary Cards
 // ============================================================================
+
+// Compute aggregate stats from filtered game metas (client-side).
+function computeAgg(metas) {
+  if (!metas || metas.length === 0) return { games_played: 0, wins: 0, losses: 0, avg_placement: 0, best_placement: 0, worst_placement: 0 };
+  let wins = 0, losses = 0, total = 0, best = 8, worst = 1;
+  for (const g of metas) {
+    const p = g.placement || 0;
+    total += p;
+    const threshold = g.is_duos ? 2 : 4;
+    if (p <= threshold) wins++; else losses++;
+    if (p < best) best = p;
+    if (p > worst) worst = p;
+  }
+  return {
+    games_played: metas.length, wins, losses,
+    avg_placement: total / metas.length,
+    best_placement: best, worst_placement: worst,
+  };
+}
 
 function renderSummaryCards(agg, compareAgg) {
   const el = document.getElementById('summary-cards');
@@ -1239,7 +1316,8 @@ async function refreshDashboard() {
   showLoading();
   try {
     const mode = State.mode === 'compare' ? 'all' : State.mode;
-    State.games = await API.getAllGames(mode);
+    const allGames = await API.getAllGames(mode);
+    State.games = applyGameFilters(allGames);
 
     if (State.level === 1) await renderLevel1();
     else if (State.level === 2) await renderLevel2();
@@ -1252,17 +1330,14 @@ async function refreshDashboard() {
 }
 
 async function renderLevel1() {
-  // Summary cards
-  try {
-    if (State.mode === 'compare') {
-      const [soloAgg, duosAgg] = await Promise.all([API.getAggregate('solo'), API.getAggregate('duos')]);
-      renderSummaryCards(soloAgg, duosAgg);
-    } else {
-      renderSummaryCards(await API.getAggregate(State.mode === 'compare' ? 'all' : State.mode));
-    }
-  } catch (err) {
-    console.error('Summary cards error:', err);
-    renderSummaryCards(null);
+  // Summary cards — computed client-side from filtered metas
+  if (State.mode === 'compare') {
+    renderSummaryCards(
+      computeAgg(State.games.filter((g) => !g.is_duos)),
+      computeAgg(State.games.filter((g) => g.is_duos))
+    );
+  } else {
+    renderSummaryCards(computeAgg(State.games));
   }
 
   // Fast charts from metas
@@ -1470,6 +1545,7 @@ function linearRegression(points) {
 // ============================================================================
 
 document.addEventListener('DOMContentLoaded', async () => {
+  initFilters();
   initModeToggle();
   showLevel(1);
   try {
