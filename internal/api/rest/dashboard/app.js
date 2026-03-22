@@ -642,20 +642,20 @@ function renderTavernTier(games) {
   if (!games || games.length === 0) return showNoData('chart-tavern-tier');
   const chart = getChart('chart-tavern-tier');
 
-  const tiers = new Array(7).fill(0); // index 0 unused, 1-6
+  const tiers = new Array(8).fill(0); // index 0 unused, 1-7
   for (const g of games) {
     const t = g.tavern_tier || g.player?.tavern_tier || 0;
-    if (t >= 1 && t <= 6) tiers[t]++;
+    if (t >= 1 && t <= 7) tiers[t]++;
   }
 
   chart.setOption({
     ...BASE_ANIM,
     tooltip: { trigger: 'axis' },
-    xAxis: { type: 'category', data: ['T1', 'T2', 'T3', 'T4', 'T5', 'T6'] },
+    xAxis: { type: 'category', data: ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'] },
     yAxis: { type: 'value' },
     series: [{
       type: 'bar',
-      data: tiers.slice(1),
+      data: tiers.slice(1, 8),
       itemStyle: { color: '#7c4dff' },
     }],
   }, true);
@@ -885,7 +885,7 @@ function renderHeatmapTierTurn(games) {
 
   const turns = [];
   for (let i = 1; i <= Math.min(maxTurn, 20); i++) turns.push(i);
-  const tiers = [1, 2, 3, 4, 5, 6];
+  const tiers = [1, 2, 3, 4, 5, 6, 7];
   const data = [];
   let maxVal = 0;
   for (let xi = 0; xi < turns.length; xi++) {
@@ -1083,7 +1083,7 @@ function renderTierProg(turns) {
     ...BASE_ANIM,
     tooltip: { trigger: 'axis' },
     xAxis: { type: 'category', data: turnNums, name: 'Turn' },
-    yAxis: { type: 'value', min: 1, max: 6, name: 'Tier' },
+    yAxis: { type: 'value', min: 1, max: 7, name: 'Tier' },
     series: [{
       name: 'Tavern Tier', type: 'line', data: tiers, step: 'end',
       lineStyle: { color: '#7c4dff' }, itemStyle: { color: '#7c4dff' },
