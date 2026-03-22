@@ -40,46 +40,32 @@ curl http://localhost:8080/v1/stats/aggregate
 | `config` | Show/validate current configuration |
 | `reparse` | Re-process all stored Power.log data |
 | `db-reset` | Reset the BadgerDB database |
+| `update` | Update to the latest version |
 | `version` | Print version info |
 
 ## Installation
 
-### Install Go
+### Homebrew (macOS / Linux)
 
-battlestream requires **Go 1.24+** to build from source.
+```sh
+brew tap beeblebrox/tap
+brew install battlestream
+```
 
-**Windows** (winget):
+### Scoop (Windows)
+
 ```powershell
-winget install GoLang.Go
+scoop bucket add battlestream https://github.com/beeblebrox/scoop-bucket
+scoop install battlestream
 ```
 
-**macOS** (Homebrew):
-```sh
-brew install go
-```
+### Download binary
 
-**Linux** (official tarball — works on all distros):
-```sh
-curl -fsSL https://go.dev/dl/go1.24.4.linux-amd64.tar.gz | sudo tar -C /usr/local -xzf -
-echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.profile
-source ~/.profile
-```
-
-Or use your package manager:
-```sh
-# Arch
-sudo pacman -S go
-
-# Ubuntu/Debian (may be an older version — prefer the tarball above)
-sudo apt install golang-go
-
-# Fedora
-sudo dnf install golang
-```
-
-Verify: `go version` should print `go1.24` or later.
+Pre-built binaries for Linux, macOS (universal), and Windows are available on the [Releases](https://github.com/beeblebrox/battlestream/releases) page. Each release includes cosign signatures and SBOMs for supply chain verification.
 
 ### Build from source
+
+Requires **Go 1.25+**.
 
 ```sh
 git clone https://github.com/beeblebrox/battlestream
@@ -92,6 +78,14 @@ go build -o battlestream ./cmd/battlestream
 ```sh
 HS_LOG_PATH=/path/to/hearthstone/Logs docker compose up
 ```
+
+### Updating
+
+```sh
+battlestream update
+```
+
+Or via your package manager (`brew upgrade battlestream` / `scoop update battlestream`).
 
 ## Configuration
 
