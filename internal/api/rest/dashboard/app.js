@@ -1182,7 +1182,25 @@ function renderTurnDetail(snapshot) {
 // 13. Main Orchestration
 // ============================================================================
 
+function showLoading() {
+  let el = document.getElementById('loading-overlay');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'loading-overlay';
+    el.className = 'loading';
+    el.textContent = 'Loading';
+    document.querySelector('main').prepend(el);
+  }
+  el.classList.remove('hidden');
+}
+
+function hideLoading() {
+  const el = document.getElementById('loading-overlay');
+  if (el) el.classList.add('hidden');
+}
+
 async function refreshDashboard() {
+  showLoading();
   try {
     const mode = State.mode === 'compare' ? 'all' : State.mode;
     State.games = await API.getAllGames(mode);
@@ -1192,6 +1210,8 @@ async function refreshDashboard() {
     else if (State.level === 3) await renderLevel3();
   } catch (err) {
     console.error('Dashboard refresh error:', err);
+  } finally {
+    hideLoading();
   }
 }
 
