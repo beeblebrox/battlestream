@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -62,6 +63,13 @@ func (s *Server) Serve(ctx context.Context, addr string) error {
 
 	// SSE endpoint
 	mux.HandleFunc("GET /v1/events", s.withAuth(s.handleSSE))
+
+	// Dashboard — serve embedded SPA
+	dashSub, _ := fs.Sub(dashboardFS, "dashboard")
+	mux.Handle("GET /dashboard/", http.StripPrefix("/dashboard/", http.FileServer(http.FS(dashSub))))
+	mux.HandleFunc("GET /dashboard", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/dashboard/", http.StatusMovedPermanently)
+	})
 
 	srv := &http.Server{
 		Addr:    addr,
