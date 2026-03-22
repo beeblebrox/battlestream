@@ -42,6 +42,7 @@ func New(out chan<- GameEvent) *Parser {
 // the reference date is advanced by one day.
 func (p *Parser) SetReferenceDate(t time.Time) {
 	p.refDate = t.Truncate(24 * time.Hour)
+	p.lastTS = time.Time{} // reset midnight wrap detection for new file
 }
 
 // blockTagMinIndent is the minimum number of leading spaces for block tag

@@ -19,10 +19,11 @@ import (
 
 // Watcher tails one or more HS log files and sends lines to Lines channel.
 type Watcher struct {
-	Lines  <-chan Line
-	lines  chan Line
-	errors chan error
-	done   chan struct{}
+	Lines       <-chan Line
+	ResolvedDir string // the resolved session log directory being tailed
+	lines       chan Line
+	errors      chan error
+	done        chan struct{}
 
 	mu    sync.Mutex
 	tails []*tail.Tail
@@ -75,6 +76,7 @@ func New(ctx context.Context, cfg Config) (*Watcher, error) {
 
 	// Non-macOS: tail per-session log files in the Logs directory.
 	logDir := resolveLogDir(cfg.LogDir, cfg.Files)
+	w.ResolvedDir = logDir
 	slog.Info("resolved log directory", "configured", cfg.LogDir, "resolved", logDir)
 
 	if err := w.startTails(ctx, logDir, cfg, cfg.ReadFromStart); err != nil {

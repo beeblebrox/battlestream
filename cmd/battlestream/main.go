@@ -229,6 +229,12 @@ func startDaemon(ctx context.Context, cfg *config.Config, profile *config.Profil
 		st.Close()
 		return nil, fmt.Errorf("starting watcher: %w", err)
 	}
+	// Set parser reference date from the session directory so timestamps
+	// are correct when reading from the start of historical log files.
+	if refDate := sessionDirDate(filepath.Join(w.ResolvedDir, "Power.log")); !refDate.IsZero() {
+		p.SetReferenceDate(refDate)
+		slog.Info("parser reference date set from session dir", "date", refDate.Format("2006-01-02"))
+	}
 
 	done := make(chan struct{})
 
@@ -584,6 +590,27 @@ func findPowerLogs(logPath string) []string {
 	return files
 }
 
+// sessionDirDate extracts the reference date for a Power.log file.
+// First tries parsing the session directory name (e.g. "Hearthstone_2026_03_17_20_51_27").
+// Falls back to the file's modification time.
+func sessionDirDate(logFilePath string) time.Time {
+	dir := filepath.Base(filepath.Dir(logFilePath))
+	const prefix = "Hearthstone_"
+	if strings.HasPrefix(dir, prefix) {
+		// Hearthstone_YYYY_MM_DD_HH_MM_SS
+		t, err := time.ParseInLocation("2006_01_02_15_04_05", strings.TrimPrefix(dir, prefix), time.Local)
+		if err == nil {
+			return t
+		}
+	}
+	// Fallback: use the file's modification time (works on all platforms).
+	info, err := os.Stat(logFilePath)
+	if err == nil {
+		return info.ModTime()
+	}
+	return time.Time{}
+}
+
 // --- discover ---
 
 func cmdDiscover() *cobra.Command {
@@ -867,6 +894,13 @@ func cmdReparse() *cobra.Command {
 			// Parse each log file sequentially.
 			for _, lf := range logFiles {
 				fmt.Printf("Parsing %s...\n", lf)
+
+				// Extract reference date from session directory name
+				// (e.g. "Hearthstone_2026_03_17_20_51_27" → 2026-03-17).
+				if refDate := sessionDirDate(lf); !refDate.IsZero() {
+					p.SetReferenceDate(refDate)
+				}
+
 				f, err := os.Open(lf)
 				if err != nil {
 					slog.Error("opening log file", "path", lf, "err", err)
