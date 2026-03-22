@@ -173,6 +173,7 @@ let scrubberDebounce = null;
 let allUnfilteredGames = []; // kept for scrubber sync
 let scrubberMinTs = 0;
 let scrubberMaxTs = 0;
+let scrubberDataHash = ''; // track when data changes to avoid re-rendering
 
 function initFilters() {
   const lastNInput = document.getElementById('filter-last-n');
@@ -212,20 +213,42 @@ function initFilters() {
 
 // After filtering, sync the scrubber handles to show the filtered range.
 function syncScrubberToFiltered() {
-  if (!timelineChart || allUnfilteredGames.length === 0 || State.games.length === 0) return;
-  if (State.games.length === allUnfilteredGames.length && !State.dateFrom && !State.dateTo) return; // no filter active
+  if (!timelineChart || allUnfilteredGames.length === 0) return;
+
+  const noFilter = State.games.length === allUnfilteredGames.length
+    && !State.dateFrom && !State.dateTo && !State.lastN && !State.lastDays;
+
+  if (noFilter) {
+    // Reset scrubber to full range
+    timelineChart.off('datazoom');
+    timelineChart.dispatchAction({ type: 'dataZoom', dataZoomIndex: 0, start: 0, end: 100 });
+    setTimeout(() => attachScrubberHandler(), 50);
+    return;
+  }
+
+  if (State.games.length === 0) return;
 
   const range = scrubberMaxTs - scrubberMinTs || 1;
 
-  // Find the time bounds of the filtered games
-  const filteredSorted = [...State.games].sort((a, b) => a.start_time_unix - b.start_time_unix);
-  const filteredMin = filteredSorted[0].start_time_unix * 1000;
-  const filteredMax = filteredSorted[filteredSorted.length - 1].start_time_unix * 1000;
+  // Use date filters if set, otherwise use filtered game time bounds
+  let rangeMin, rangeMax;
+  if (State.dateFrom) {
+    rangeMin = State.dateFrom.getTime();
+  } else {
+    const filteredSorted = [...State.games].sort((a, b) => a.start_time_unix - b.start_time_unix);
+    rangeMin = filteredSorted[0].start_time_unix * 1000;
+  }
+  if (State.dateTo) {
+    rangeMax = State.dateTo.getTime();
+  } else {
+    const filteredSorted = [...State.games].sort((a, b) => b.start_time_unix - a.start_time_unix);
+    rangeMax = filteredSorted[0].start_time_unix * 1000;
+  }
 
   // Add a small padding (1% of range) so edge dots aren't clipped by handles
   const pad = range * 0.01;
-  const startPct = Math.max(0, ((filteredMin - pad - scrubberMinTs) / range) * 100);
-  const endPct = Math.min(100, ((filteredMax + pad - scrubberMinTs) / range) * 100);
+  const startPct = Math.max(0, ((rangeMin - pad - scrubberMinTs) / range) * 100);
+  const endPct = Math.min(100, ((rangeMax + pad - scrubberMinTs) / range) * 100);
 
   // Suppress the datazoom event to avoid feedback loop
   timelineChart.off('datazoom');
@@ -248,8 +271,14 @@ function renderTimelineScrubber(allMetas) {
 
   if (!allMetas || allMetas.length === 0) {
     timelineChart.clear();
+    scrubberDataHash = '';
     return;
   }
+
+  // Only re-render chart data when the game set changes (avoid resetting zoom)
+  const newHash = allMetas.map((g) => g.game_id).join(',');
+  if (newHash === scrubberDataHash) return;
+  scrubberDataHash = newHash;
 
   const sorted = [...allMetas].sort((a, b) => a.start_time_unix - b.start_time_unix);
   const data = sorted.map((g) => {
@@ -262,15 +291,6 @@ function renderTimelineScrubber(allMetas) {
 
   scrubberMinTs = sorted[0].start_time_unix * 1000;
   scrubberMaxTs = sorted[sorted.length - 1].start_time_unix * 1000;
-
-  // Compute initial zoom percent from current date filters
-  let startPct = 0;
-  let endPct = 100;
-  if (State.dateFrom || State.dateTo) {
-    const range = scrubberMaxTs - scrubberMinTs || 1;
-    if (State.dateFrom) startPct = Math.max(0, ((State.dateFrom.getTime() - scrubberMinTs) / range) * 100);
-    if (State.dateTo) endPct = Math.min(100, ((State.dateTo.getTime() - scrubberMinTs) / range) * 100);
-  }
 
   timelineChart.setOption({
     grid: { left: 50, right: 20, top: 5, bottom: 5 },
@@ -301,8 +321,8 @@ function renderTimelineScrubber(allMetas) {
       {
         type: 'slider',
         xAxisIndex: 0,
-        start: startPct,
-        end: endPct,
+        start: 0,
+        end: 100,
         height: '100%',
         top: 0,
         borderColor: '#444',
