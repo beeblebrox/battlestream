@@ -46,6 +46,31 @@ func main() {
 persists aggregate stats, and exposes them via gRPC, REST, WebSocket, and file output.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load(cfgFile)
+			if err != nil || !hasUsableProfile(cfg) {
+				// No config or no profiles — run discover first.
+				fmt.Println("No Hearthstone install configured. Starting setup...")
+				fmt.Println()
+				discoverCmd := cmdDiscover()
+				discoverCmd.SetArgs(nil)
+				if err := discoverCmd.Execute(); err != nil {
+					return err
+				}
+				// Reload config after discover.
+				cfg, err = config.Load(cfgFile)
+				if err != nil {
+					return fmt.Errorf("loading config after setup: %w", err)
+				}
+				if !hasUsableProfile(cfg) {
+					return fmt.Errorf("no profiles configured — run 'battlestream discover' manually")
+				}
+				fmt.Println()
+			}
+			// Delegate to the run command (daemon + TUI).
+			runCmd := cmdRun()
+			return runCmd.RunE(cmd, nil)
+		},
 	}
 
 	root.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ~/.battlestream/config.yaml)")
@@ -921,6 +946,17 @@ func cmdVersion() *cobra.Command {
 			fmt.Printf("module: battlestream.fixates.io\n")
 		},
 	}
+}
+
+// hasUsableProfile returns true if the config has at least one profile
+// with a log path configured, or if auto-discovery can find Hearthstone.
+func hasUsableProfile(cfg *config.Config) bool {
+	if cfg == nil || len(cfg.Profiles) == 0 {
+		// No profiles, but auto-discovery might work — check.
+		_, err := discovery.Discover()
+		return err == nil
+	}
+	return true
 }
 
 // --- helpers ---
