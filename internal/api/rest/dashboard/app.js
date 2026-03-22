@@ -168,9 +168,9 @@ function navigateTo(level) {
 // ============================================================================
 
 function initFilters() {
-  const lastNSelect = document.getElementById('filter-last-n');
-  lastNSelect.addEventListener('change', () => {
-    State.lastN = parseInt(lastNSelect.value, 10) || 0;
+  const lastNInput = document.getElementById('filter-last-n');
+  lastNInput.addEventListener('input', () => {
+    State.lastN = parseInt(lastNInput.value, 10) || 0;
     refreshDashboard();
   });
 

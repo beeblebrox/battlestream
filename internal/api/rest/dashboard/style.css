@@ -111,6 +111,7 @@ header h1 {
 }
 
 .filter-group select,
+.filter-group input[type="number"],
 .filter-group input[type="date"] {
   background: var(--bg);
   color: var(--text);
@@ -121,6 +122,7 @@ header h1 {
 }
 
 .filter-group select:focus,
+.filter-group input[type="number"]:focus,
 .filter-group input[type="date"]:focus {
   outline: none;
   border-color: var(--accent);
