@@ -1398,33 +1398,46 @@ async function fetchFullGames(metas) {
 // 15. Helper: getDominantTribe
 // ============================================================================
 
-function getDominantTribe(board) {
-  if (!board || board.length === 0) return 'NONE';
+function getTribeComposition(board) {
+  if (!board || board.length === 0) return { tribe: 'NONE', pct: 0 };
 
   const counts = new Map();
+  let typed = 0;
   for (const m of board) {
     const t = m.minion_type || 'INVALID';
-    if (t === 'INVALID' || t === 'ALL') continue;
+    if (t === 'INVALID') continue;
+    if (t === 'ALL') { typed++; continue; } // ALL-type minions count toward typed but no single tribe
     counts.set(t, (counts.get(t) || 0) + 1);
+    typed++;
   }
 
-  if (counts.size === 0) return 'MIXED';
+  if (typed === 0) return { tribe: 'MIXED', pct: 0 };
 
   let maxCount = 0;
   let maxTribe = 'MIXED';
-  let tied = false;
-
   for (const [tribe, count] of counts) {
     if (count > maxCount) {
       maxCount = count;
       maxTribe = tribe;
-      tied = false;
-    } else if (count === maxCount) {
-      tied = true;
     }
   }
 
-  return tied ? 'MIXED' : maxTribe;
+  return { tribe: maxTribe, pct: typed > 0 ? maxCount / typed : 0 };
+}
+
+function getTribeLabel(board) {
+  const { tribe, pct } = getTribeComposition(board);
+  if (tribe === 'NONE' || tribe === 'MIXED') return 'Mixed';
+  const p = Math.round(pct * 100);
+  if (p >= 90) return `${tribe} (90%+)`;
+  if (p >= 70) return `${tribe} (70%+)`;
+  if (p >= 50) return `${tribe} (50%+)`;
+  return 'Mixed';
+}
+
+// Legacy compat
+function getDominantTribe(board) {
+  return getTribeLabel(board);
 }
 
 // ============================================================================
