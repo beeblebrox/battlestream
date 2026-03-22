@@ -174,6 +174,7 @@ let allUnfilteredGames = []; // kept for scrubber sync
 let scrubberMinTs = 0;
 let scrubberMaxTs = 0;
 let scrubberDataHash = ''; // track when data changes to avoid re-rendering
+let scrubberManual = false; // true when user is dragging handles
 
 function initFilters() {
   const lastNInput = document.getElementById('filter-last-n');
@@ -184,6 +185,7 @@ function initFilters() {
     State.lastDays = 0;
     State.dateFrom = null;
     State.dateTo = null;
+    scrubberManual = false;
     refreshDashboard();
   });
 
@@ -197,6 +199,7 @@ function initFilters() {
       State.dateFrom = null;
       State.dateTo = null;
     }
+    scrubberManual = false;
     refreshDashboard();
   });
 
@@ -207,6 +210,7 @@ function initFilters() {
     State.lastDays = 0;
     State.dateFrom = null;
     State.dateTo = null;
+    scrubberManual = false;
     refreshDashboard();
   });
 }
@@ -214,6 +218,7 @@ function initFilters() {
 // After filtering, sync the scrubber handles to show the filtered range.
 function syncScrubberToFiltered() {
   if (!timelineChart || allUnfilteredGames.length === 0) return;
+  if (scrubberManual) return; // don't fight manual handle dragging
 
   const noFilter = State.games.length === allUnfilteredGames.length
     && !State.dateFrom && !State.dateTo && !State.lastN && !State.lastDays;
@@ -376,6 +381,7 @@ function attachScrubberHandler() {
       document.getElementById('filter-last-n').value = '';
       State.lastDays = 0;
       State.lastN = 0;
+      scrubberManual = true;
 
       refreshDashboardFromScrubber();
     }, 300);
