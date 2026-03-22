@@ -95,7 +95,8 @@ release:
   prerelease: auto
 
 brews:
-  - repository:
+  - skip_upload: '{{ if not (isEnvSet "HOMEBREW_TAP_TOKEN") }}true{{ end }}'
+    repository:
       owner: beeblebrox
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
@@ -108,7 +109,8 @@ brews:
       system "#{bin}/battlestream", "version"
 
 scoops:
-  - repository:
+  - skip_upload: '{{ if not (isEnvSet "SCOOP_BUCKET_TOKEN") }}true{{ end }}'
+    repository:
       owner: beeblebrox
       name: scoop-bucket
       token: "{{ .Env.SCOOP_BUCKET_TOKEN }}"
