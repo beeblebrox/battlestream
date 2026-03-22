@@ -249,19 +249,22 @@ function renderTimelineScrubber(allMetas) {
   }
 
   timelineChart.setOption({
-    grid: { left: 50, right: 20, top: 8, bottom: 30 },
+    grid: { left: 50, right: 20, top: 5, bottom: 5 },
     xAxis: {
       type: 'time',
-      axisLabel: { fontSize: 10, color: '#888' },
+      axisLabel: { show: false },
+      axisTick: { show: false },
+      axisLine: { show: false },
       splitLine: { show: false },
     },
     yAxis: {
-      type: 'value', min: 1, max: 8, inverse: true, show: false,
+      type: 'value', min: 0, max: 9, show: false,
     },
     series: [{
       type: 'scatter',
-      symbolSize: 8,
+      symbolSize: 10,
       data,
+      z: 10,
     }],
     tooltip: {
       trigger: 'item',
@@ -270,27 +273,37 @@ function renderTimelineScrubber(allMetas) {
         return `${d.toLocaleDateString()} ${d.toLocaleTimeString()}<br/>Placement: #${p.data.value[1]}`;
       },
     },
-    dataZoom: [{
-      type: 'slider',
-      xAxisIndex: 0,
-      start: startPct,
-      end: endPct,
-      height: 20,
-      bottom: 2,
-      borderColor: '#444',
-      backgroundColor: '#1a1a2e',
-      fillerColor: 'rgba(233, 69, 96, 0.25)',
-      handleStyle: { color: '#e94560', borderColor: '#e94560' },
-      textStyle: { color: '#888', fontSize: 10 },
-      dataBackground: {
-        lineStyle: { opacity: 0 },
-        areaStyle: { opacity: 0 },
+    dataZoom: [
+      {
+        type: 'slider',
+        xAxisIndex: 0,
+        start: startPct,
+        end: endPct,
+        height: '100%',
+        top: 0,
+        borderColor: '#444',
+        backgroundColor: 'transparent',
+        fillerColor: 'rgba(233, 69, 96, 0.15)',
+        handleStyle: { color: '#e94560', borderColor: '#e94560' },
+        moveHandleSize: 4,
+        moveHandleStyle: { color: '#e94560' },
+        emphasis: { handleStyle: { color: '#ff6b81' } },
+        textStyle: { color: '#888', fontSize: 10 },
+        dataBackground: {
+          lineStyle: { opacity: 0 },
+          areaStyle: { opacity: 0 },
+        },
+        selectedDataBackground: {
+          lineStyle: { opacity: 0 },
+          areaStyle: { opacity: 0 },
+        },
+        brushSelect: false,
       },
-      selectedDataBackground: {
-        lineStyle: { opacity: 0 },
-        areaStyle: { opacity: 0 },
+      {
+        type: 'inside',
+        xAxisIndex: 0,
       },
-    }],
+    ],
   }, true);
 
   // Debounced handler: update date filters when scrubber moves
