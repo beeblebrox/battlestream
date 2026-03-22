@@ -135,6 +135,7 @@ type Model struct {
 	partnerModsVP  viewport.Model
 
 	// Panel positions (updated each View frame) for mouse routing.
+	// row2StartY: Y where viewport panels begin (max of left/right header heights).
 	row2StartY int
 
 	// Per-panel scrollbar column X and viewport Y/height.
@@ -380,10 +381,6 @@ func (m *Model) View() string {
 	if vSplit <= 0 {
 		vSplit = 0.5
 	}
-	hSplit := m.hSplit
-	if hSplit <= 0 {
-		hSplit = 0.7
-	}
 	totalInner := m.width - 8 // total inner width minus borders/padding for both panels
 	leftInner := int(vSplit * float64(totalInner))
 	rightInner := totalInner - leftInner
@@ -410,78 +407,111 @@ func (m *Model) View() string {
 		rightVPW = 10
 	}
 
-	// ── Row 1: game header | hero stats ──────────────────────
-	row1 := lipgloss.JoinHorizontal(lipgloss.Top,
-		m.renderGamePanel(colW),
-		m.renderHeroPanel(rightColW),
-	)
-	m.row2StartY = lipgloss.Height(row1)
+	// ── Header panels (rendered first to measure natural heights) ──
+	gamePanel := m.renderGamePanel(colW)
+	heroPanel := m.renderHeroPanel(rightColW)
+	gamePanelH := lipgloss.Height(gamePanel)
+	heroPanelH := lipgloss.Height(heroPanel)
 
-	// Height budget: terminal minus row1, session bar (3), help (1), row2 border (2), row2 title (1).
-	sessionH := 3
-	totalAvailable := m.height - m.row2StartY - sessionH - 1 - 3
-	if totalAvailable < 8 {
-		totalAvailable = 8
+	// Store divider X position for drag detection.
+	m.dividerX = colW + 4
+
+	// Use the taller header to compute row2StartY (for vertical divider detection).
+	// row2StartY: Y where viewport panels begin (max of left/right header heights).
+	m.row2StartY = gamePanelH
+	if heroPanelH > gamePanelH {
+		m.row2StartY = heroPanelH
 	}
-	var available, partnerH int
+
+	// ── Per-column viewport height budgets ──
+	sessionH := 3
+	helpH := 1
+	borderOverhead := 3 // border top(1) + title line(1) + border bottom(1)
+
+	leftAvailable := m.height - gamePanelH - sessionH - helpH - borderOverhead
+	rightAvailable := m.height - heroPanelH - sessionH - helpH - borderOverhead
+	if leftAvailable < 8 {
+		leftAvailable = 8
+	}
+	if rightAvailable < 8 {
+		rightAvailable = 8
+	}
+
+	hSplit := m.hSplit
+	if hSplit <= 0 {
+		hSplit = 0.7
+	}
+
+	var leftMainH, leftPartnerH, rightMainH, rightPartnerH int
 	if m.game != nil && m.game.IsDuos {
-		available = int(hSplit * float64(totalAvailable))
-		partnerH = totalAvailable - available - 3 // 3 for partner border/title
+		partnerBorderH := 3 // border overhead for partner panel
+		leftMainH = int(hSplit * float64(leftAvailable - partnerBorderH))
+		leftPartnerH = leftAvailable - leftMainH - partnerBorderH
+		rightMainH = int(hSplit * float64(rightAvailable - partnerBorderH))
+		rightPartnerH = rightAvailable - rightMainH - partnerBorderH
 		const minH = 4
-		if available < minH {
-			available = minH
-			partnerH = totalAvailable - available - 3
+		if leftMainH < minH {
+			leftMainH = minH
+			leftPartnerH = leftAvailable - leftMainH - partnerBorderH
 		}
-		if partnerH < minH {
-			partnerH = minH
-			available = totalAvailable - partnerH - 3
+		if leftPartnerH < minH {
+			leftPartnerH = minH
+			leftMainH = leftAvailable - leftPartnerH - partnerBorderH
+		}
+		if rightMainH < minH {
+			rightMainH = minH
+			rightPartnerH = rightAvailable - rightMainH - partnerBorderH
+		}
+		if rightPartnerH < minH {
+			rightPartnerH = minH
+			rightMainH = rightAvailable - rightPartnerH - partnerBorderH
 		}
 	} else {
-		available = totalAvailable
+		leftMainH = leftAvailable
+		rightMainH = rightAvailable
 	}
 
 	// Scrollbar column X positions (absolute terminal coordinates).
-	m.boardScrollX = 2 + vpContentW                     // left panel: border+pad + vp
-	m.modsScrollX = (colW + 4) + 2 + rightVPW           // right panel: left total + border+pad + vp
+	m.boardScrollX = 2 + vpContentW
+	m.modsScrollX = (colW + 4) + 2 + rightVPW
 
-	// ── Row 2: board (viewport) | buff sources (viewport) ────
+	// ── Board panel (left column) ──
 	boardTitle := "YOUR BOARD"
 	if m.game != nil && m.game.Phase == "GAME_OVER" {
 		boardTitle = "FINAL BOARD"
 	}
 	m.boardVP.Width = vpContentW
-	m.boardVP.Height = available
+	m.boardVP.Height = leftMainH
 	m.boardVP.MouseWheelEnabled = true
 	m.boardVP.SetContent(m.boardItems())
-	m.boardVPY = m.row2StartY + 2 // border(1) + title line(1)
-	m.boardVPH = available
+	m.boardVPY = gamePanelH + 2 // border(1) + title(1)
+	m.boardVPH = leftMainH
 	boardVPView := lipgloss.JoinHorizontal(lipgloss.Top,
-		m.boardVP.View(), tuiScrollbar(m.boardVP, available))
+		m.boardVP.View(), tuiScrollbar(m.boardVP, leftMainH))
 	boardPanel := styleBorder.Width(colW).Render(
 		styleTitle.Render(boardTitle) + "\n" + boardVPView)
 
+	// ── Buff sources panel (right column) ──
 	m.modsVP.Width = rightVPW
-	m.modsVP.Height = available
+	m.modsVP.Height = rightMainH
 	m.modsVP.MouseWheelEnabled = true
 	m.modsVP.SetContent(m.modsItems())
-	m.modsVPY = m.row2StartY + 2
-	m.modsVPH = available
+	m.modsVPY = heroPanelH + 2 // border(1) + title(1)
+	m.modsVPH = rightMainH
 	modsVPView := lipgloss.JoinHorizontal(lipgloss.Top,
-		m.modsVP.View(), tuiScrollbar(m.modsVP, available))
+		m.modsVP.View(), tuiScrollbar(m.modsVP, rightMainH))
 	modsPanel := styleBorder.Width(rightColW).Render(
 		styleTitle.Render("BUFF SOURCES") + "\n" + modsVPView)
 
-	row2 := lipgloss.JoinHorizontal(lipgloss.Top, boardPanel, modsPanel)
+	// ── Build columns ──
+	leftPanels := []string{gamePanel, boardPanel}
+	rightPanels := []string{heroPanel, modsPanel}
 
-	// Store divider positions for drag detection.
-	m.dividerX = colW + 4 // X column where the vertical divider sits
-
-	// ── Row 3 (Duos): Partner board | Partner buff sources ──────
-	var rowPartner string
+	// ── Partner panels (Duos) ──
 	if m.game != nil && m.game.IsDuos {
 		// Partner board (left column).
 		m.partnerBoardVP.Width = vpContentW
-		m.partnerBoardVP.Height = partnerH
+		m.partnerBoardVP.Height = leftPartnerH
 		m.partnerBoardVP.MouseWheelEnabled = true
 		m.partnerBoardVP.SetContent(m.partnerBoardItems())
 
@@ -494,17 +524,17 @@ func (m *Model) View() string {
 			}
 		}
 
-		m.partnerVPY = m.row2StartY + lipgloss.Height(row2) + 2
-		m.partnerVPH = partnerH
+		m.partnerVPY = gamePanelH + lipgloss.Height(boardPanel) + 2
+		m.partnerVPH = leftPartnerH
 		m.partnerScrollX = 2 + vpContentW
 		partnerBoardVPView := lipgloss.JoinHorizontal(lipgloss.Top,
-			m.partnerBoardVP.View(), tuiScrollbar(m.partnerBoardVP, partnerH))
+			m.partnerBoardVP.View(), tuiScrollbar(m.partnerBoardVP, leftPartnerH))
 		partnerBoardPanel := styleBorder.Width(colW).Render(
 			styleTitle.Render(title) + "\n" + partnerBoardVPView)
 
 		// Partner buffs (right column).
 		m.partnerModsVP.Width = rightVPW
-		m.partnerModsVP.Height = partnerH
+		m.partnerModsVP.Height = rightPartnerH
 		m.partnerModsVP.MouseWheelEnabled = true
 		m.partnerModsVP.SetContent(m.partnerModsItems())
 
@@ -513,34 +543,41 @@ func (m *Model) View() string {
 			partnerModsTitle = "PARTNER BUFFS (last seen)"
 		}
 
-		m.partnerModsVPY = m.partnerVPY
-		m.partnerModsVPH = partnerH
+		m.partnerModsVPY = heroPanelH + lipgloss.Height(modsPanel) + 2
+		m.partnerModsVPH = rightPartnerH
 		m.partnerModsScrollX = (colW + 4) + 2 + rightVPW
 		partnerModsVPView := lipgloss.JoinHorizontal(lipgloss.Top,
-			m.partnerModsVP.View(), tuiScrollbar(m.partnerModsVP, partnerH))
+			m.partnerModsVP.View(), tuiScrollbar(m.partnerModsVP, rightPartnerH))
 		partnerModsPanel := styleBorder.Width(rightColW).Render(
 			styleTitle.Render(partnerModsTitle) + "\n" + partnerModsVPView)
 
-		rowPartner = lipgloss.JoinHorizontal(lipgloss.Top, partnerBoardPanel, partnerModsPanel)
-		m.dividerY = m.row2StartY + lipgloss.Height(row2) // Y row of horizontal divider
+		leftPanels = append(leftPanels, partnerBoardPanel)
+		rightPanels = append(rightPanels, partnerModsPanel)
+
+		// Horizontal divider Y: use max of left/right main panel bottoms.
+		leftDivY := gamePanelH + lipgloss.Height(boardPanel)
+		rightDivY := heroPanelH + lipgloss.Height(modsPanel)
+		m.dividerY = leftDivY
+		if rightDivY > leftDivY {
+			m.dividerY = rightDivY
+		}
 	}
 
-	// ── Session stats ─────────────────────────────────────────
+	leftCol := lipgloss.JoinVertical(lipgloss.Left, leftPanels...)
+	rightCol := lipgloss.JoinVertical(lipgloss.Left, rightPanels...)
+	columns := lipgloss.JoinHorizontal(lipgloss.Top, leftCol, rightCol)
+
+	// ── Session stats ──
 	rowSession := m.renderSessionBar(m.width - 4)
 
-	// ── Help bar ──────────────────────────────────────────────
+	// ── Help bar ──
 	helpText := "  [r] Refresh game  [R] Refresh stats  [d] Anomaly desc  [l] Last result  [q] Quit  scroll: mouse wheel"
 	if m.game != nil && m.game.IsDuos {
 		helpText = "  [r] Refresh  [R] Stats  [d] Anomaly desc  [l] Last result  [q] Quit  scroll: mouse wheel"
 	}
 	help := styleHelp.Render(helpText)
 
-	rows := []string{row1, row2}
-	if rowPartner != "" {
-		rows = append(rows, rowPartner)
-	}
-	rows = append(rows, rowSession, help)
-	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+	return lipgloss.JoinVertical(lipgloss.Left, columns, rowSession, help)
 }
 
 // ============================================================
