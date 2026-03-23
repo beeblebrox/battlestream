@@ -1626,6 +1626,12 @@ async function renderLevel1() {
 }
 
 function renderRichCharts(filtered) {
+  // Hide loading spinners before rendering
+  const richCharts = ['chart-hero-perf', 'chart-tavern-tier', 'chart-buff-breakdown',
+    'chart-anomaly-perf', 'chart-tribe-winrate', 'chart-buff-efficiency',
+    'chart-heatmap-hero', 'chart-heatmap-tier-turn', 'chart-heatmap-tribe', 'chart-heatmap-buff'];
+  richCharts.forEach(hideChartLoading);
+
   renderHeroPerf(filtered);
   renderTavernTier(filtered);
   renderBuffBreakdown(filtered);
