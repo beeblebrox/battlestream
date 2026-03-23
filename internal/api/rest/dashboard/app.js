@@ -1266,6 +1266,11 @@ function renderHeatmapTierTurn(games) {
     if (turn > maxTurn) maxTurn = turn;
     const key = `${turn}|${tier}`;
     countMap.set(key, (countMap.get(key) || 0) + 1);
+    // Include partner's final tier for duos games
+    if (g.is_duos && g.partner?.tavern_tier) {
+      const pKey = `${turn}|${g.partner.tavern_tier}`;
+      countMap.set(pKey, (countMap.get(pKey) || 0) + 1);
+    }
   }
 
   const turns = [];
