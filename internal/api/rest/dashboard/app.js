@@ -1121,13 +1121,21 @@ function renderTribeWinrate(games) {
   if (!games || games.length === 0) return showNoData('chart-tribe-winrate');
   const chart = getChart('chart-tribe-winrate');
 
-  // Group by base tribe — combine player+partner boards for duos
+  // Group by tribe — for duos, show player + partner tribe pairing
   const tribeMap = new Map();
   for (const g of games) {
-    let board = g.board || [];
-    if (g.is_duos) { const pm = getPartnerMinions(g); if (pm.length > 0) board = [...board, ...pm]; }
-    const { tribe } = getTribeComposition(board);
-    const baseTribe = (tribe === 'NONE' || tribe === 'MIXED') ? 'Mixed' : tribe;
+    const { tribe: playerTribe } = getTribeComposition(g.board);
+    let label;
+    if (g.is_duos) {
+      const pm = getPartnerMinions(g);
+      const { tribe: partnerTribe } = getTribeComposition(pm);
+      const pt = (playerTribe === 'NONE' || playerTribe === 'MIXED') ? 'Mixed' : playerTribe;
+      const pp = (partnerTribe === 'NONE' || partnerTribe === 'MIXED') ? 'Mixed' : partnerTribe;
+      label = pt === pp ? pt : `${pt} + ${pp}`;
+    } else {
+      label = (playerTribe === 'NONE' || playerTribe === 'MIXED') ? 'Mixed' : playerTribe;
+    }
+    const baseTribe = label;
     if (!tribeMap.has(baseTribe)) tribeMap.set(baseTribe, { total: 0, count: 0, wins: 0 });
     const entry = tribeMap.get(baseTribe);
     entry.total += g.placement || 0;
@@ -1308,10 +1316,17 @@ function renderHeatmapTribe(games) {
   const tribeSet = new Set();
   const countMap = new Map();
   for (const g of games) {
-    let board = g.board || [];
-    if (g.is_duos) { const pm = getPartnerMinions(g); if (pm.length > 0) board = [...board, ...pm]; }
-    const { tribe } = getTribeComposition(board);
-    const baseTribe = (tribe === 'NONE' || tribe === 'MIXED') ? 'Mixed' : tribe;
+    const { tribe: playerTribe } = getTribeComposition(g.board);
+    let baseTribe;
+    if (g.is_duos) {
+      const pm = getPartnerMinions(g);
+      const { tribe: partnerTribe } = getTribeComposition(pm);
+      const pt = (playerTribe === 'NONE' || playerTribe === 'MIXED') ? 'Mixed' : playerTribe;
+      const pp = (partnerTribe === 'NONE' || partnerTribe === 'MIXED') ? 'Mixed' : partnerTribe;
+      baseTribe = pt === pp ? pt : `${pt} + ${pp}`;
+    } else {
+      baseTribe = (playerTribe === 'NONE' || playerTribe === 'MIXED') ? 'Mixed' : playerTribe;
+    }
     tribeSet.add(baseTribe);
     const key = `${g.placement}|${baseTribe}`;
     countMap.set(key, (countMap.get(key) || 0) + 1);
