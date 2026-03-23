@@ -719,9 +719,7 @@ const TRIBE_EMOJI = {
 };
 
 function tribeIcon(name) {
-  const emoji = TRIBE_EMOJI[name] || '';
-  const short = TRIBE_SHORT[name] || name;
-  return emoji ? `${emoji}${short}` : short;
+  return TRIBE_EMOJI[name] || TRIBE_SHORT[name] || name;
 }
 
 function tribeEmoji(name) {
@@ -733,11 +731,21 @@ function renderTribeLegend(containerId) {
   if (!container || container.querySelector('.tribe-legend')) return;
   const legend = document.createElement('div');
   legend.className = 'tribe-legend';
-  const entries = Object.entries(TRIBE_SHORT).filter(([k]) => k !== 'ALL' && k !== 'None');
+  const entries = Object.entries(TRIBE_EMOJI).filter(([k, v]) => k !== 'ALL' && k !== 'None' && v);
   legend.innerHTML = entries
-    .map(([k, v]) => `<span>${TRIBE_EMOJI[k] || ''}${v}=${k}</span>`)
+    .map(([k, v]) => `<span>${v}=${k}</span>`)
     .join(' ');
   container.appendChild(legend);
+}
+
+function autoSizeChart(containerId, rowCount) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  const minRowHeight = 28;
+  const overhead = 100; // title + tabs + legend + padding
+  const needed = rowCount * minRowHeight + overhead;
+  const defaultHeight = container.classList.contains('wide') ? 300 : 350;
+  container.style.height = Math.max(defaultHeight, needed) + 'px';
 }
 
 function removeVariantTabs(containerId) {
@@ -1052,6 +1060,7 @@ function renderHeroPerfInner(games, variant) {
     .map(([name, v]) => ({ name, avg: v.total / v.count, count: v.count }))
     .sort((a, b) => a.avg - b.avg);
 
+  autoSizeChart('chart-hero-perf', entries.length);
   const maxNameLen = Math.max(...entries.map((e) => e.name.length));
   const gridLeft = Math.min(260, Math.max(140, maxNameLen * 7));
 
@@ -1246,6 +1255,7 @@ function renderTribeWinrateInner(games, variant) {
     .map(([name, v]) => ({ name, avg: v.total / v.count, count: v.count, winRate: ((v.wins / v.count) * 100).toFixed(0) }))
     .sort((a, b) => a.avg - b.avg);
 
+  autoSizeChart('chart-tribe-winrate', entries.length);
   if (entries.length === 0) return showNoData('chart-tribe-winrate');
 
   chart.setOption({
@@ -1348,6 +1358,7 @@ function renderHeatmapHeroInner(games, variant) {
   }
 
   const heroes = [...heroSet].sort();
+  autoSizeChart('chart-heatmap-hero', heroes.length);
   const placements = [1, 2, 3, 4, 5, 6, 7, 8];
   const data = [];
   let maxVal = 0;
@@ -1452,6 +1463,7 @@ function renderHeatmapTribeInner(games, variant) {
   }
 
   const tribes = [...tribeSet].sort();
+  autoSizeChart('chart-heatmap-tribe', tribes.length);
   const placements = [1, 2, 3, 4, 5, 6, 7, 8];
   const data = [];
   let maxVal = 0;
@@ -1534,6 +1546,7 @@ function renderHeatmapBuffInner(games, variant) {
     yLabels = buckets;
   }
 
+  autoSizeChart('chart-heatmap-buff', yLabels.length);
   const placements = [1, 2, 3, 4, 5, 6, 7, 8];
   const data = [];
   let maxVal = 0;
