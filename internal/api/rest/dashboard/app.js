@@ -900,12 +900,16 @@ function renderHeroPerf(games) {
     .map(([id, v]) => ({ id, name: heroName(id), avg: v.total / v.count, count: v.count }))
     .sort((a, b) => a.avg - b.avg);
 
+  // Compute max label width to set dynamic left margin
+  const maxNameLen = Math.max(...entries.map((e) => e.name.length));
+  const gridLeft = Math.min(220, Math.max(140, maxNameLen * 7));
+
   chart.setOption({
     ...BASE_ANIM,
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    grid: { left: 140, right: 60 },
-    yAxis: { type: 'category', data: entries.map((e) => e.name), inverse: true },
-    xAxis: { type: 'value', min: 1, ...xName('Avg Placement') },
+    grid: { left: gridLeft, right: 80 },
+    yAxis: { type: 'category', data: entries.map((e) => e.name), inverse: true, axisLabel: { width: gridLeft - 20, overflow: 'truncate', fontSize: 11 } },
+    xAxis: { type: 'value', min: 1, max: Math.min(8, Math.ceil(Math.max(...entries.map((e) => e.avg)) + 1)), ...xName('Avg Placement') },
     series: [{
       type: 'bar',
       data: entries.map((e) => ({ value: parseFloat(e.avg.toFixed(2)), count: e.count })),
@@ -963,8 +967,9 @@ function renderBuffBreakdown(games) {
     ...BASE_ANIM,
     tooltip: { trigger: 'axis' },
     legend: { data: ['Attack', 'Health'], textStyle: { color: '#ccc' } },
-    xAxis: { type: 'category', data: categories, axisLabel: { rotate: 30, fontSize: 10 }, ...xName('Category') },
-    yAxis: { type: 'value', ...yName('Total') },
+    grid: { bottom: 80 },
+    xAxis: { type: 'category', data: categories, axisLabel: { rotate: 45, fontSize: 10, interval: 0 }, ...xName('Category'), nameGap: 55 },
+    yAxis: { type: 'value', min: 0, ...yName('Total') },
     series: [
       { name: 'Attack', type: 'bar', stack: 'total', data: categories.map((c) => catMap.get(c).atk), itemStyle: { color: '#ffc107' } },
       { name: 'Health', type: 'bar', stack: 'total', data: categories.map((c) => catMap.get(c).hp), itemStyle: { color: WIN_COLOR } },
@@ -1029,9 +1034,9 @@ function renderAnomalyPerf(games) {
   chart.setOption({
     ...BASE_ANIM,
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    grid: { left: 140, right: 60 },
+    grid: { left: 160, right: 80 },
     yAxis: { type: 'category', data: entries.map((e) => e.name), inverse: true },
-    xAxis: { type: 'value', min: 1, ...xName('Avg Placement') },
+    xAxis: { type: 'value', min: 1, max: Math.min(8, Math.ceil(Math.max(...entries.map((e) => e.avg)) + 1)), ...xName('Avg Placement') },
     series: [{
       type: 'bar',
       data: entries.map((e) => parseFloat(e.avg.toFixed(2))),
@@ -1076,9 +1081,9 @@ function renderTribeWinrate(games) {
         return `<b>${e.name}</b><br/>Avg Placement: ${e.avg.toFixed(2)}<br/>Win Rate: ${e.winRate}%<br/>Games: ${e.count}`;
       },
     },
-    grid: { left: 100, right: 80 },
+    grid: { left: 110, right: 100 },
     yAxis: { type: 'category', data: entries.map((e) => e.name), inverse: true },
-    xAxis: { type: 'value', min: 1, ...xName('Avg Placement') },
+    xAxis: { type: 'value', min: 1, max: Math.min(8, Math.ceil(Math.max(...entries.map((e) => e.avg)) + 1)), ...xName('Avg Placement') },
     series: [{
       type: 'bar',
       data: entries.map((e) => parseFloat(e.avg.toFixed(2))),
