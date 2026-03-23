@@ -362,6 +362,51 @@ main {
   height: calc(100% - 28px);
 }
 
+.variant-tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+
+.variant-btn {
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.7rem;
+  transition: all 0.2s;
+}
+
+.variant-btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.variant-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.tribe-legend {
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 0.15rem 0;
+  line-height: 1.4;
+}
+
+.tribe-legend span {
+  margin: 0 0.25rem;
+  white-space: nowrap;
+}
+
+.chart-container.has-variants .echart-root {
+  height: calc(100% - 48px);
+}
+
 .loading {
   display: flex;
   align-items: center;

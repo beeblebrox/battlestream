@@ -705,6 +705,55 @@ const LOSS_COLOR = '#ff5252';
 const BASE_ANIM = { animationDuration: 800, animationEasing: 'cubicOut' };
 const AXIS_NAME_STYLE = { color: '#888', fontSize: 11 };
 
+const TRIBE_ICONS = {
+  DRAGON: '\u{1F409}', PET: '\u{1F43E}', PIRATE: '\u2620\uFE0F', UNDEAD: '\u{1F480}',
+  DEMON: '\u{1F525}', MECHANICAL: '\u2699\uFE0F', NAGA: '\u{1F40D}', QUILBOAR: '\u{1F417}',
+  MURLOC: '\u{1F41F}', ELEMENTAL: '\u{1F30A}', ALL: '\u2728', Mixed: '\u{1F3B2}',
+};
+
+function tribeIcon(name) {
+  return TRIBE_ICONS[name] || name;
+}
+
+function renderTribeLegend(containerId) {
+  const container = document.getElementById(containerId);
+  if (!container || container.querySelector('.tribe-legend')) return;
+  const legend = document.createElement('div');
+  legend.className = 'tribe-legend';
+  legend.innerHTML = Object.entries(TRIBE_ICONS)
+    .filter(([k]) => k !== 'ALL' && k !== 'Mixed')
+    .map(([k, v]) => `<span>${v}${k}</span>`)
+    .join(' ');
+  container.appendChild(legend);
+}
+
+function renderTripleVariant(containerId, games, renderFn) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  let tabs = container.querySelector('.variant-tabs');
+  if (!tabs) {
+    container.classList.add('has-variants');
+    tabs = document.createElement('div');
+    tabs.className = 'variant-tabs';
+    tabs.innerHTML = `
+      <button class="variant-btn active" data-variant="paired">Paired</button>
+      <button class="variant-btn" data-variant="player">Player</button>
+      <button class="variant-btn" data-variant="partner">Partner</button>
+    `;
+    const h3 = container.querySelector('h3');
+    if (h3) h3.after(tabs);
+    tabs.querySelectorAll('.variant-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        tabs.querySelectorAll('.variant-btn').forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+        renderFn(games, btn.dataset.variant);
+      });
+    });
+  }
+  const activeVariant = tabs.querySelector('.variant-btn.active')?.dataset.variant || 'paired';
+  renderFn(games, activeVariant);
+}
+
 // Standard axis name config: x-axis centered below labels, y-axis at top
 function xName(label) {
   return { name: label, nameLocation: 'center', nameGap: 25, nameTextStyle: AXIS_NAME_STYLE };
@@ -951,14 +1000,28 @@ function heroName(heroCardId) {
 function renderHeroPerf(games) {
   addChartHelp('chart-hero-perf', 'Average placement per hero, sorted best to worst. Shows game count in parentheses.');
   if (!games || games.length === 0) return showNoData('chart-hero-perf');
+
+  const anyDuos = games.some((g) => g.is_duos);
+  if (anyDuos) {
+    renderTripleVariant('chart-hero-perf', games, renderHeroPerfInner);
+  } else {
+    renderHeroPerfInner(games, 'player');
+  }
+}
+
+function renderHeroPerfInner(games, variant) {
   const chart = getChart('chart-hero-perf');
 
   const heroMap = new Map();
   for (const g of games) {
-    const playerHero = heroBaseName(g.player?.hero_card_id);
-    const label = (g.is_duos && g.partner?.hero_card_id)
-      ? `${playerHero} + ${heroBaseName(g.partner.hero_card_id)}`
-      : playerHero;
+    let label;
+    if (variant === 'paired' && g.is_duos && g.partner?.hero_card_id) {
+      label = `${heroBaseName(g.player?.hero_card_id)} / ${heroBaseName(g.partner.hero_card_id)}`;
+    } else if (variant === 'partner' && g.is_duos && g.partner?.hero_card_id) {
+      label = heroBaseName(g.partner.hero_card_id);
+    } else {
+      label = heroBaseName(g.player?.hero_card_id);
+    }
     if (!heroMap.has(label)) heroMap.set(label, { total: 0, count: 0 });
     const entry = heroMap.get(label);
     entry.total += g.placement || 0;
@@ -969,9 +1032,8 @@ function renderHeroPerf(games) {
     .map(([name, v]) => ({ name, avg: v.total / v.count, count: v.count }))
     .sort((a, b) => a.avg - b.avg);
 
-  // Compute max label width to set dynamic left margin
   const maxNameLen = Math.max(...entries.map((e) => e.name.length));
-  const gridLeft = Math.min(220, Math.max(140, maxNameLen * 7));
+  const gridLeft = Math.min(260, Math.max(140, maxNameLen * 7));
 
   chart.setOption({
     ...BASE_ANIM,
@@ -1119,25 +1181,36 @@ function renderAnomalyPerf(games) {
 function renderTribeWinrate(games) {
   addChartHelp('chart-tribe-winrate', 'Average placement per dominant board tribe. Green = winning (>50% WR), red = losing. Shows game count and win rate.');
   if (!games || games.length === 0) return showNoData('chart-tribe-winrate');
+
+  const anyDuos = games.some((g) => g.is_duos);
+  if (anyDuos) {
+    renderTripleVariant('chart-tribe-winrate', games, renderTribeWinrateInner);
+    renderTribeLegend('chart-tribe-winrate');
+  } else {
+    renderTribeWinrateInner(games, 'player');
+    renderTribeLegend('chart-tribe-winrate');
+  }
+}
+
+function getGameTribeLabel(g, variant) {
+  const { tribe: playerTribe } = getTribeComposition(g.board);
+  const pt = (playerTribe === 'NONE' || playerTribe === 'MIXED') ? 'Mixed' : playerTribe;
+  if (variant === 'player' || !g.is_duos) return tribeIcon(pt);
+  const pm = getPartnerMinions(g);
+  const { tribe: partnerTribe } = getTribeComposition(pm);
+  const pp = (partnerTribe === 'NONE' || partnerTribe === 'MIXED') ? 'Mixed' : partnerTribe;
+  if (variant === 'partner') return tribeIcon(pp);
+  return pt === pp ? tribeIcon(pt) : `${tribeIcon(pt)} / ${tribeIcon(pp)}`;
+}
+
+function renderTribeWinrateInner(games, variant) {
   const chart = getChart('chart-tribe-winrate');
 
-  // Group by tribe — for duos, show player + partner tribe pairing
   const tribeMap = new Map();
   for (const g of games) {
-    const { tribe: playerTribe } = getTribeComposition(g.board);
-    let label;
-    if (g.is_duos) {
-      const pm = getPartnerMinions(g);
-      const { tribe: partnerTribe } = getTribeComposition(pm);
-      const pt = (playerTribe === 'NONE' || playerTribe === 'MIXED') ? 'Mixed' : playerTribe;
-      const pp = (partnerTribe === 'NONE' || partnerTribe === 'MIXED') ? 'Mixed' : partnerTribe;
-      label = pt === pp ? pt : `${pt} + ${pp}`;
-    } else {
-      label = (playerTribe === 'NONE' || playerTribe === 'MIXED') ? 'Mixed' : playerTribe;
-    }
-    const baseTribe = label;
-    if (!tribeMap.has(baseTribe)) tribeMap.set(baseTribe, { total: 0, count: 0, wins: 0 });
-    const entry = tribeMap.get(baseTribe);
+    const label = getGameTribeLabel(g, variant);
+    if (!tribeMap.has(label)) tribeMap.set(label, { total: 0, count: 0, wins: 0 });
+    const entry = tribeMap.get(label);
     entry.total += g.placement || 0;
     entry.count++;
     const threshold = g.is_duos ? 2 : 4;
@@ -1220,15 +1293,29 @@ function renderBuffEfficiency(games) {
 function renderHeatmapHero(games) {
   addChartHelp('chart-heatmap-hero', 'Frequency of each placement per hero. Brighter = more games at that placement.');
   if (!games || games.length === 0) return showNoData('chart-heatmap-hero');
+
+  const anyDuos = games.some((g) => g.is_duos);
+  if (anyDuos) {
+    renderTripleVariant('chart-heatmap-hero', games, renderHeatmapHeroInner);
+  } else {
+    renderHeatmapHeroInner(games, 'player');
+  }
+}
+
+function renderHeatmapHeroInner(games, variant) {
   const chart = getChart('chart-heatmap-hero');
 
   const heroSet = new Set();
   const countMap = new Map();
   for (const g of games) {
-    const playerHero = heroBaseName(g.player?.hero_card_id || 'Unknown');
-    const label = (g.is_duos && g.partner?.hero_card_id)
-      ? `${playerHero} + ${heroBaseName(g.partner.hero_card_id)}`
-      : playerHero;
+    let label;
+    if (variant === 'paired' && g.is_duos && g.partner?.hero_card_id) {
+      label = `${heroBaseName(g.player?.hero_card_id)} / ${heroBaseName(g.partner.hero_card_id)}`;
+    } else if (variant === 'partner' && g.is_duos && g.partner?.hero_card_id) {
+      label = heroBaseName(g.partner.hero_card_id);
+    } else {
+      label = heroBaseName(g.player?.hero_card_id || 'Unknown');
+    }
     heroSet.add(label);
     const key = `${g.placement}|${label}`;
     countMap.set(key, (countMap.get(key) || 0) + 1);
@@ -1249,9 +1336,9 @@ function renderHeatmapHero(games) {
   chart.setOption({
     ...BASE_ANIM,
     tooltip: { formatter: (p) => `${heroes[p.data[1]]}<br/>Placement: ${placements[p.data[0]]}<br/>Games: ${p.data[2]}` },
-    grid: { left: 140, right: 60, bottom: 40 },
+    grid: { left: 160, right: 60, bottom: 40 },
     xAxis: { type: 'category', data: placements.map(String), splitArea: { show: true }, ...xNameHeatmap('Placement') },
-    yAxis: { type: 'category', data: heroes, splitArea: { show: true }, ...yName('Hero') },
+    yAxis: { type: 'category', data: heroes, splitArea: { show: true }, ...yName('Hero'), axisLabel: { width: 140, overflow: 'truncate', fontSize: 10 } },
     visualMap: { min: 0, max: maxVal || 1, calculable: true, orient: 'horizontal', left: 'center', bottom: 0, inRange: { color: ['#1a1a2e', '#304ffe', '#e94560', '#ff5252'] } },
     series: [{
       type: 'heatmap', data,
@@ -1311,24 +1398,26 @@ function renderHeatmapTierTurn(games) {
 function renderHeatmapTribe(games) {
   addChartHelp('chart-heatmap-tribe', 'Frequency of each placement per dominant tribe.');
   if (!games || games.length === 0) return showNoData('chart-heatmap-tribe');
+
+  const anyDuos = games.some((g) => g.is_duos);
+  if (anyDuos) {
+    renderTripleVariant('chart-heatmap-tribe', games, renderHeatmapTribeInner);
+    renderTribeLegend('chart-heatmap-tribe');
+  } else {
+    renderHeatmapTribeInner(games, 'player');
+    renderTribeLegend('chart-heatmap-tribe');
+  }
+}
+
+function renderHeatmapTribeInner(games, variant) {
   const chart = getChart('chart-heatmap-tribe');
 
   const tribeSet = new Set();
   const countMap = new Map();
   for (const g of games) {
-    const { tribe: playerTribe } = getTribeComposition(g.board);
-    let baseTribe;
-    if (g.is_duos) {
-      const pm = getPartnerMinions(g);
-      const { tribe: partnerTribe } = getTribeComposition(pm);
-      const pt = (playerTribe === 'NONE' || playerTribe === 'MIXED') ? 'Mixed' : playerTribe;
-      const pp = (partnerTribe === 'NONE' || partnerTribe === 'MIXED') ? 'Mixed' : partnerTribe;
-      baseTribe = pt === pp ? pt : `${pt} + ${pp}`;
-    } else {
-      baseTribe = (playerTribe === 'NONE' || playerTribe === 'MIXED') ? 'Mixed' : playerTribe;
-    }
-    tribeSet.add(baseTribe);
-    const key = `${g.placement}|${baseTribe}`;
+    const label = getGameTribeLabel(g, variant);
+    tribeSet.add(label);
+    const key = `${g.placement}|${label}`;
     countMap.set(key, (countMap.get(key) || 0) + 1);
   }
 
@@ -1361,6 +1450,16 @@ function renderHeatmapTribe(games) {
 function renderHeatmapBuff(games) {
   addChartHelp('chart-heatmap-buff', 'Frequency of each placement bucketed by total buff amount.');
   if (!games || games.length === 0) return showNoData('chart-heatmap-buff');
+
+  const anyDuos = games.some((g) => g.is_duos);
+  if (anyDuos) {
+    renderTripleVariant('chart-heatmap-buff', games, renderHeatmapBuffInner);
+  } else {
+    renderHeatmapBuffInner(games, 'player');
+  }
+}
+
+function renderHeatmapBuffInner(games, variant) {
   const chart = getChart('chart-heatmap-buff');
 
   const buckets = ['0-10', '10-25', '25-50', '50-100', '100+'];
@@ -1373,22 +1472,46 @@ function renderHeatmapBuff(games) {
   }
 
   const countMap = new Map();
-  for (const g of games) {
-    let total = (g.buff_sources || []).reduce((s, bs) => s + (bs.attack || 0) + (bs.health || 0), 0);
-    if (g.is_duos && g.partner_buff_sources) {
-      total += g.partner_buff_sources.reduce((s, bs) => s + (bs.attack || 0) + (bs.health || 0), 0);
+  let yLabels;
+
+  if (variant === 'paired') {
+    // Paired: "playerBucket / partnerBucket"
+    const pairLabels = new Set();
+    for (const g of games) {
+      const pTotal = (g.buff_sources || []).reduce((s, bs) => s + (bs.attack || 0) + (bs.health || 0), 0);
+      const partTotal = (g.is_duos && g.partner_buff_sources)
+        ? g.partner_buff_sources.reduce((s, bs) => s + (bs.attack || 0) + (bs.health || 0), 0) : 0;
+      const label = `${buckets[getBucket(pTotal)]} / ${buckets[getBucket(partTotal)]}`;
+      pairLabels.add(label);
+      const key = `${g.placement}|${label}`;
+      countMap.set(key, (countMap.get(key) || 0) + 1);
     }
-    const bi = getBucket(total);
-    const key = `${g.placement}|${bi}`;
-    countMap.set(key, (countMap.get(key) || 0) + 1);
+    yLabels = [...pairLabels].sort();
+  } else {
+    // player or partner: single bucket
+    for (const g of games) {
+      let total;
+      if (variant === 'partner' && g.is_duos && g.partner_buff_sources) {
+        total = g.partner_buff_sources.reduce((s, bs) => s + (bs.attack || 0) + (bs.health || 0), 0);
+      } else {
+        total = (g.buff_sources || []).reduce((s, bs) => s + (bs.attack || 0) + (bs.health || 0), 0);
+      }
+      const bi = getBucket(total);
+      const key = `${g.placement}|${bi}`;
+      countMap.set(key, (countMap.get(key) || 0) + 1);
+    }
+    yLabels = buckets;
   }
 
   const placements = [1, 2, 3, 4, 5, 6, 7, 8];
   const data = [];
   let maxVal = 0;
   for (let xi = 0; xi < placements.length; xi++) {
-    for (let yi = 0; yi < buckets.length; yi++) {
-      const val = countMap.get(`${placements[xi]}|${yi}`) || 0;
+    for (let yi = 0; yi < yLabels.length; yi++) {
+      const key = variant === 'paired'
+        ? `${placements[xi]}|${yLabels[yi]}`
+        : `${placements[xi]}|${yi}`;
+      const val = countMap.get(key) || 0;
       if (val > maxVal) maxVal = val;
       data.push([xi, yi, val]);
     }
@@ -1396,10 +1519,10 @@ function renderHeatmapBuff(games) {
 
   chart.setOption({
     ...BASE_ANIM,
-    tooltip: { formatter: (p) => `Buff: ${buckets[p.data[1]]}<br/>Placement: ${placements[p.data[0]]}<br/>Games: ${p.data[2]}` },
-    grid: { left: 80, right: 60, bottom: 40 },
+    tooltip: { formatter: (p) => `Buff: ${yLabels[p.data[1]]}<br/>Placement: ${placements[p.data[0]]}<br/>Games: ${p.data[2]}` },
+    grid: { left: variant === 'paired' ? 120 : 80, right: 60, bottom: 40 },
     xAxis: { type: 'category', data: placements.map(String), ...xNameHeatmap('Placement') },
-    yAxis: { type: 'category', data: buckets, ...yName('Buff Total') },
+    yAxis: { type: 'category', data: yLabels, ...yName('Buff Total') },
     visualMap: { min: 0, max: maxVal || 1, calculable: true, orient: 'horizontal', left: 'center', bottom: 0, inRange: { color: ['#1a1a2e', '#6a1b9a', '#e94560'] } },
     series: [{
       type: 'heatmap', data,
@@ -1712,7 +1835,7 @@ function renderTurnDetail(snapshot) {
     board.innerHTML = minions
       .map((m) => {
         const typeBadge = m.minion_type && m.minion_type !== 'INVALID'
-          ? `<div style="font-size:0.65rem;color:var(--text-muted);margin-top:0.25rem;">${m.minion_type}</div>`
+          ? `<div style="font-size:0.65rem;color:var(--text-muted);margin-top:0.25rem;">${tribeIcon(m.minion_type)}</div>`
           : '';
         return `
         <div class="minion-card">
@@ -1738,7 +1861,7 @@ function renderTurnDetail(snapshot) {
         <div style="display:flex;gap:0.75rem;flex-wrap:wrap;justify-content:center;">
           ${partnerMinions.map((m) => {
             const typeBadge = m.minion_type && m.minion_type !== 'INVALID' && m.minion_type !== ''
-              ? `<div style="font-size:0.65rem;color:var(--text-muted);margin-top:0.25rem;">${m.minion_type}</div>`
+              ? `<div style="font-size:0.65rem;color:var(--text-muted);margin-top:0.25rem;">${tribeIcon(m.minion_type)}</div>`
               : '';
             return `
             <div class="minion-card" style="border-color:#4fc3f7;">
