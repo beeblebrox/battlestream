@@ -46,6 +46,10 @@ config.yaml
 
 # Generated protobuf files are committed (see internal/api/grpc/gen/)
 
+# QA reports and screenshots
+qa-reports/
+.playwright-mcp/
+
 # Air live reload
 tmp/
 
