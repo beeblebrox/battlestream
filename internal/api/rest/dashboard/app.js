@@ -659,6 +659,18 @@ const ACCENT = '#e94560';
 const WIN_COLOR = '#00c853';
 const LOSS_COLOR = '#ff5252';
 const BASE_ANIM = { animationDuration: 800, animationEasing: 'cubicOut' };
+const AXIS_NAME_STYLE = { color: '#888', fontSize: 11 };
+
+// Standard axis name config: x-axis centered below labels, y-axis at top
+function xName(label) {
+  return { name: label, nameLocation: 'center', nameGap: 25, nameTextStyle: AXIS_NAME_STYLE };
+}
+function xNameHeatmap(label) {
+  return { name: label, nameLocation: 'center', nameGap: 35, nameTextStyle: AXIS_NAME_STYLE };
+}
+function yName(label) {
+  return { name: label, nameLocation: 'end', nameTextStyle: AXIS_NAME_STYLE };
+}
 
 function isWin(placement, isDuos) {
   return isDuos ? placement <= 2 : placement <= 4;
@@ -713,8 +725,8 @@ function renderPlacementTrend(metas) {
       ...BASE_ANIM,
       tooltip: { trigger: 'item' },
       legend: { data: ['Solo', 'Duos'], textStyle: { color: '#ccc' } },
-      xAxis: { type: 'time', name: 'Date', nameTextStyle: { color: '#888', fontSize: 11 } },
-      yAxis: { type: 'value', inverse: true, min: 1, max: 8, name: 'Placement', nameTextStyle: { color: '#888', fontSize: 11 } },
+      xAxis: { type: 'time', ...xName('Date') },
+      yAxis: { type: 'value', inverse: true, min: 1, max: 8, ...yName('Placement') },
       series: [
         { name: 'Solo', type: 'line', data: soloData, smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { color: ACCENT }, itemStyle: { color: ACCENT } },
         { name: 'Duos', type: 'line', data: duosData, smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { color: '#4fc3f7' }, itemStyle: { color: '#4fc3f7' } },
@@ -731,8 +743,8 @@ function renderPlacementTrend(metas) {
       ...BASE_ANIM,
       tooltip: { trigger: 'item' },
       legend: { data: ['Placement', 'Trend'], textStyle: { color: '#ccc' } },
-      xAxis: { type: 'time', name: 'Date', nameTextStyle: { color: '#888', fontSize: 11 } },
-      yAxis: { type: 'value', inverse: true, min: 1, max: 8, name: 'Placement', nameTextStyle: { color: '#888', fontSize: 11 } },
+      xAxis: { type: 'time', ...xName('Date') },
+      yAxis: { type: 'value', inverse: true, min: 1, max: 8, ...yName('Placement') },
       series: [
         {
           name: 'Placement', type: 'line', data, smooth: true, symbol: 'circle', symbolSize: 6,
@@ -776,8 +788,8 @@ function renderPlacementDist(metas) {
       ...BASE_ANIM,
       tooltip: { trigger: 'axis' },
       legend: { data: ['Solo', 'Duos'], textStyle: { color: '#ccc' } },
-      xAxis: { type: 'category', data: ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th'], name: 'Placement', nameTextStyle: { color: '#888', fontSize: 11 } },
-      yAxis: { type: 'value', name: 'Games', nameTextStyle: { color: '#888', fontSize: 11 } },
+      xAxis: { type: 'category', data: ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th'], ...xName('Placement') },
+      yAxis: { type: 'value', ...yName('Games') },
       series: [
         { name: 'Solo', type: 'bar', data: soloCounts, itemStyle: { color: ACCENT } },
         { name: 'Duos', type: 'bar', data: duosCounts, itemStyle: { color: '#4fc3f7' } },
@@ -799,8 +811,8 @@ function renderPlacementDist(metas) {
     chart.setOption({
       ...BASE_ANIM,
       tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th'], name: 'Placement', nameTextStyle: { color: '#888', fontSize: 11 } },
-      yAxis: { type: 'value', name: 'Games', nameTextStyle: { color: '#888', fontSize: 11 } },
+      xAxis: { type: 'category', data: ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th'], ...xName('Placement') },
+      yAxis: { type: 'value', ...yName('Games') },
       series: [{
         type: 'bar',
         data: counts.map((v, i) => ({ value: v, itemStyle: { color: colors[i] } })),
@@ -828,8 +840,8 @@ function renderWinRateTrend(metas) {
   chart.setOption({
     ...BASE_ANIM,
     tooltip: { trigger: 'axis', formatter: (p) => `Game #${p[0].data[0]}<br/>Win Rate: ${p[0].data[1]}%` },
-    xAxis: { type: 'value', name: 'Game #' },
-    yAxis: { type: 'value', name: '%', min: 0, max: 100 },
+    xAxis: { type: 'value', ...xName('Game #') },
+    yAxis: { type: 'value', min: 0, max: 100, ...yName('%') },
     series: [{
       type: 'line', data, smooth: true, symbol: 'none',
       areaStyle: { opacity: 0.15, color: ACCENT },
@@ -888,7 +900,7 @@ function renderHeroPerf(games) {
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
     grid: { left: 140, right: 60 },
     yAxis: { type: 'category', data: entries.map((e) => e.name), inverse: true },
-    xAxis: { type: 'value', name: 'Avg Placement', min: 1 },
+    xAxis: { type: 'value', min: 1, ...xName('Avg Placement') },
     series: [{
       type: 'bar',
       data: entries.map((e) => ({ value: parseFloat(e.avg.toFixed(2)), count: e.count })),
@@ -912,8 +924,8 @@ function renderTavernTier(games) {
   chart.setOption({
     ...BASE_ANIM,
     tooltip: { trigger: 'axis' },
-    xAxis: { type: 'category', data: ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'], name: 'Tier', nameTextStyle: { color: '#888', fontSize: 11 } },
-    yAxis: { type: 'value', name: 'Games', nameTextStyle: { color: '#888', fontSize: 11 } },
+    xAxis: { type: 'category', data: ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'], ...xName('Tier') },
+    yAxis: { type: 'value', ...yName('Games') },
     series: [{
       type: 'bar',
       data: tiers.slice(1, 8),
@@ -946,8 +958,8 @@ function renderBuffBreakdown(games) {
     ...BASE_ANIM,
     tooltip: { trigger: 'axis' },
     legend: { data: ['Attack', 'Health'], textStyle: { color: '#ccc' } },
-    xAxis: { type: 'category', data: categories, name: 'Category', nameTextStyle: { color: '#888', fontSize: 11 }, axisLabel: { rotate: 30, fontSize: 10 } },
-    yAxis: { type: 'value', name: 'Total', nameTextStyle: { color: '#888', fontSize: 11 } },
+    xAxis: { type: 'category', data: categories, axisLabel: { rotate: 30, fontSize: 10 }, ...xName('Category') },
+    yAxis: { type: 'value', ...yName('Total') },
     series: [
       { name: 'Attack', type: 'bar', stack: 'total', data: categories.map((c) => catMap.get(c).atk), itemStyle: { color: '#ffc107' } },
       { name: 'Health', type: 'bar', stack: 'total', data: categories.map((c) => catMap.get(c).hp), itemStyle: { color: WIN_COLOR } },
@@ -972,8 +984,8 @@ function renderDuration(metas) {
   chart.setOption({
     ...BASE_ANIM,
     tooltip: { trigger: 'item', formatter: (p) => `Duration: ${p.data.value[0]} min<br/>Placement: ${p.data.value[1]}` },
-    xAxis: { type: 'value', name: 'Minutes' },
-    yAxis: { type: 'value', name: 'Placement', inverse: true, min: 1, max: 8 },
+    xAxis: { type: 'value', ...xName('Minutes') },
+    yAxis: { type: 'value', inverse: true, min: 1, max: 8, ...yName('Placement') },
     series: [{
       type: 'scatter', data,
       symbolSize: 8,
@@ -1014,7 +1026,7 @@ function renderAnomalyPerf(games) {
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
     grid: { left: 140, right: 60 },
     yAxis: { type: 'category', data: entries.map((e) => e.name), inverse: true },
-    xAxis: { type: 'value', name: 'Avg Placement', min: 1 },
+    xAxis: { type: 'value', min: 1, ...xName('Avg Placement') },
     series: [{
       type: 'bar',
       data: entries.map((e) => parseFloat(e.avg.toFixed(2))),
@@ -1061,7 +1073,7 @@ function renderTribeWinrate(games) {
     },
     grid: { left: 100, right: 80 },
     yAxis: { type: 'category', data: entries.map((e) => e.name), inverse: true },
-    xAxis: { type: 'value', name: 'Avg Placement', min: 1 },
+    xAxis: { type: 'value', min: 1, ...xName('Avg Placement') },
     series: [{
       type: 'bar',
       data: entries.map((e) => parseFloat(e.avg.toFixed(2))),
@@ -1093,8 +1105,8 @@ function renderBuffEfficiency(games) {
   chart.setOption({
     ...BASE_ANIM,
     tooltip: { trigger: 'item', formatter: (p) => `Total Buffs: ${p.data.value[0]}<br/>Placement: ${p.data.value[1]}` },
-    xAxis: { type: 'value', name: 'Total Buff (ATK+HP)' },
-    yAxis: { type: 'value', name: 'Placement', inverse: true, min: 1, max: 8 },
+    xAxis: { type: 'value', ...xName('Total Buff (ATK+HP)') },
+    yAxis: { type: 'value', inverse: true, min: 1, max: 8, ...yName('Placement') },
     series: [{
       type: 'scatter', data,
       symbolSize: 8,
@@ -1142,8 +1154,8 @@ function renderHeatmapHero(games) {
     ...BASE_ANIM,
     tooltip: { formatter: (p) => `${heroes[p.data[1]]}<br/>Placement: ${placements[p.data[0]]}<br/>Games: ${p.data[2]}` },
     grid: { left: 140, right: 60, bottom: 40 },
-    xAxis: { type: 'category', data: placements.map(String), splitArea: { show: true }, name: 'Placement', nameTextStyle: { color: '#888', fontSize: 11 } },
-    yAxis: { type: 'category', data: heroes, splitArea: { show: true }, name: 'Hero', nameTextStyle: { color: '#888', fontSize: 11 } },
+    xAxis: { type: 'category', data: placements.map(String), splitArea: { show: true }, ...xNameHeatmap('Placement') },
+    yAxis: { type: 'category', data: heroes, splitArea: { show: true }, ...yName('Hero') },
     visualMap: { min: 0, max: maxVal || 1, calculable: true, orient: 'horizontal', left: 'center', bottom: 0, inRange: { color: ['#1a1a2e', '#304ffe', '#e94560', '#ff5252'] } },
     series: [{
       type: 'heatmap', data,
@@ -1185,8 +1197,8 @@ function renderHeatmapTierTurn(games) {
     ...BASE_ANIM,
     tooltip: { formatter: (p) => `Turn ${turns[p.data[0]]}<br/>Tier ${tiers[p.data[1]]}<br/>Games: ${p.data[2]}` },
     grid: { left: 60, right: 60, bottom: 40 },
-    xAxis: { type: 'category', data: turns.map(String), name: 'Turn', nameTextStyle: { color: '#888', fontSize: 11 } },
-    yAxis: { type: 'category', data: tiers.map((t) => `T${t}`), name: 'Tier', nameTextStyle: { color: '#888', fontSize: 11 } },
+    xAxis: { type: 'category', data: turns.map(String), ...xNameHeatmap('Turn') },
+    yAxis: { type: 'category', data: tiers.map((t) => `T${t}`), ...yName('Tier') },
     visualMap: { min: 0, max: maxVal || 1, calculable: true, orient: 'horizontal', left: 'center', bottom: 0, inRange: { color: ['#1a1a2e', '#1565c0', '#4fc3f7'] } },
     series: [{
       type: 'heatmap', data,
@@ -1226,8 +1238,8 @@ function renderHeatmapTribe(games) {
     ...BASE_ANIM,
     tooltip: { formatter: (p) => `${tribes[p.data[1]]}<br/>Placement: ${placements[p.data[0]]}<br/>Games: ${p.data[2]}` },
     grid: { left: 100, right: 60, bottom: 40 },
-    xAxis: { type: 'category', data: placements.map(String), name: 'Placement', nameTextStyle: { color: '#888', fontSize: 11 } },
-    yAxis: { type: 'category', data: tribes, name: 'Tribe', nameTextStyle: { color: '#888', fontSize: 11 } },
+    xAxis: { type: 'category', data: placements.map(String), ...xNameHeatmap('Placement') },
+    yAxis: { type: 'category', data: tribes, ...yName('Tribe') },
     visualMap: { min: 0, max: maxVal || 1, calculable: true, orient: 'horizontal', left: 'center', bottom: 0, inRange: { color: ['#1a1a2e', '#2e7d32', '#00c853'] } },
     series: [{
       type: 'heatmap', data,
@@ -1273,8 +1285,8 @@ function renderHeatmapBuff(games) {
     ...BASE_ANIM,
     tooltip: { formatter: (p) => `Buff: ${buckets[p.data[1]]}<br/>Placement: ${placements[p.data[0]]}<br/>Games: ${p.data[2]}` },
     grid: { left: 80, right: 60, bottom: 40 },
-    xAxis: { type: 'category', data: placements.map(String), name: 'Placement', nameTextStyle: { color: '#888', fontSize: 11 } },
-    yAxis: { type: 'category', data: buckets, name: 'Buff Total', nameTextStyle: { color: '#888', fontSize: 11 } },
+    xAxis: { type: 'category', data: placements.map(String), ...xNameHeatmap('Placement') },
+    yAxis: { type: 'category', data: buckets, ...yName('Buff Total') },
     visualMap: { min: 0, max: maxVal || 1, calculable: true, orient: 'horizontal', left: 'center', bottom: 0, inRange: { color: ['#1a1a2e', '#6a1b9a', '#e94560'] } },
     series: [{
       type: 'heatmap', data,
@@ -1324,7 +1336,7 @@ function renderBoardStats(turns) {
     ...BASE_ANIM,
     tooltip: { trigger: 'axis' },
     legend: { data: ['Total ATK', 'Total HP'], textStyle: { color: '#ccc' } },
-    xAxis: { type: 'category', data: turnNums, name: 'Turn' },
+    xAxis: { type: 'category', data: turnNums, ...xName('Turn') },
     yAxis: { type: 'value' },
     series: [
       { name: 'Total ATK', type: 'line', data: totalAtk, smooth: true, lineStyle: { color: '#ffc107' }, itemStyle: { color: '#ffc107' } },
@@ -1348,8 +1360,8 @@ function renderHealthArmor(turns) {
   chart.setOption({
     ...BASE_ANIM,
     tooltip: { trigger: 'axis' },
-    xAxis: { type: 'category', data: turnNums, name: 'Turn' },
-    yAxis: { type: 'value', name: 'Effective HP' },
+    xAxis: { type: 'category', data: turnNums, ...xName('Turn') },
+    yAxis: { type: 'value', ...yName('Effective HP') },
     series: [{
       name: 'Effective HP', type: 'line', data: effHP, smooth: true,
       areaStyle: { opacity: 0.15, color: WIN_COLOR },
@@ -1370,8 +1382,8 @@ function renderTierProg(turns) {
   chart.setOption({
     ...BASE_ANIM,
     tooltip: { trigger: 'axis' },
-    xAxis: { type: 'category', data: turnNums, name: 'Turn' },
-    yAxis: { type: 'value', min: 1, max: 7, name: 'Tier' },
+    xAxis: { type: 'category', data: turnNums, ...xName('Turn') },
+    yAxis: { type: 'value', min: 1, max: 7, ...yName('Tier') },
     series: [{
       name: 'Tavern Tier', type: 'line', data: tiers, step: 'end',
       lineStyle: { color: '#7c4dff' }, itemStyle: { color: '#7c4dff' },
@@ -1419,8 +1431,8 @@ function renderBuffAccum(turns) {
     tooltip: { trigger: 'axis' },
     legend: { data: categories, textStyle: { color: '#ccc', fontSize: 10 }, type: 'scroll', bottom: 0 },
     grid: { bottom: 40 },
-    xAxis: { type: 'category', data: turnNums, name: 'Turn' },
-    yAxis: { type: 'value', name: 'Buff Total' },
+    xAxis: { type: 'category', data: turnNums, ...xName('Turn') },
+    yAxis: { type: 'value', ...yName('Buff Total') },
     series,
   }, true);
 
@@ -1439,8 +1451,8 @@ function renderGoldEcon(turns) {
     ...BASE_ANIM,
     tooltip: { trigger: 'axis' },
     legend: { data: ['Max Gold', 'Current Gold'], textStyle: { color: '#ccc' } },
-    xAxis: { type: 'category', data: turnNums, name: 'Turn' },
-    yAxis: { type: 'value', name: 'Gold' },
+    xAxis: { type: 'category', data: turnNums, ...xName('Turn') },
+    yAxis: { type: 'value', ...yName('Gold') },
     series: [
       { name: 'Max Gold', type: 'line', data: maxGold, lineStyle: { color: '#ffc107' }, itemStyle: { color: '#ffc107' } },
       { name: 'Current Gold', type: 'line', data: curGold, lineStyle: { color: '#ff9800', type: 'dashed' }, itemStyle: { color: '#ff9800' } },
@@ -1460,8 +1472,8 @@ function renderBoardSize(turns) {
   chart.setOption({
     ...BASE_ANIM,
     tooltip: { trigger: 'axis' },
-    xAxis: { type: 'category', data: turnNums, name: 'Turn' },
-    yAxis: { type: 'value', name: 'Minions', min: 0, max: 7 },
+    xAxis: { type: 'category', data: turnNums, ...xName('Turn') },
+    yAxis: { type: 'value', min: 0, max: 7, ...yName('Minions') },
     series: [{
       name: 'Board Size', type: 'line', data: sizes, step: 'end',
       areaStyle: { opacity: 0.15, color: ACCENT },
