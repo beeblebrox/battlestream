@@ -946,8 +946,8 @@ function renderBuffBreakdown(games) {
     ...BASE_ANIM,
     tooltip: { trigger: 'axis' },
     legend: { data: ['Attack', 'Health'], textStyle: { color: '#ccc' } },
-    xAxis: { type: 'category', data: categories, axisLabel: { rotate: 30, fontSize: 10 } },
-    yAxis: { type: 'value' },
+    xAxis: { type: 'category', data: categories, name: 'Category', nameTextStyle: { color: '#888', fontSize: 11 }, axisLabel: { rotate: 30, fontSize: 10 } },
+    yAxis: { type: 'value', name: 'Total', nameTextStyle: { color: '#888', fontSize: 11 } },
     series: [
       { name: 'Attack', type: 'bar', stack: 'total', data: categories.map((c) => catMap.get(c).atk), itemStyle: { color: '#ffc107' } },
       { name: 'Health', type: 'bar', stack: 'total', data: categories.map((c) => catMap.get(c).hp), itemStyle: { color: WIN_COLOR } },
