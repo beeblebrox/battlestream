@@ -1139,35 +1139,61 @@ function renderBuffBreakdown(games) {
 }
 
 function renderDuration(metas) {
-  addChartHelp('chart-duration', 'Game duration (minutes) vs placement. Click a point to drill into that game.');
+  addChartHelp('chart-duration', 'Game duration distribution by time bucket. Shows average placement and game count per bucket.');
   if (!metas || metas.length === 0) return showNoData('chart-duration');
   const chart = getChart('chart-duration');
 
-  const data = metas
-    .filter((g) => g.end_time_unix && g.start_time_unix && g.end_time_unix > g.start_time_unix)
-    .map((g) => {
-      const dur = (g.end_time_unix - g.start_time_unix) / 60;
-      return { value: [parseFloat(dur.toFixed(1)), g.placement], gameId: g.game_id };
-    });
+  const valid = metas.filter((g) => g.end_time_unix && g.start_time_unix && g.end_time_unix > g.start_time_unix);
+  if (valid.length === 0) return showNoData('chart-duration');
 
-  if (data.length === 0) return showNoData('chart-duration');
+  // Bucket games by duration
+  const bucketDefs = [
+    { label: '0-15m', min: 0, max: 15 },
+    { label: '15-20m', min: 15, max: 20 },
+    { label: '20-25m', min: 20, max: 25 },
+    { label: '25-30m', min: 25, max: 30 },
+    { label: '30-35m', min: 30, max: 35 },
+    { label: '35-40m', min: 35, max: 40 },
+    { label: '40m+', min: 40, max: Infinity },
+  ];
+
+  const buckets = bucketDefs.map((b) => {
+    const games = valid.filter((g) => {
+      const dur = (g.end_time_unix - g.start_time_unix) / 60;
+      return dur >= b.min && dur < b.max;
+    });
+    const count = games.length;
+    const avgPlacement = count > 0 ? games.reduce((s, g) => s + g.placement, 0) / count : 0;
+    const threshold = games.some((g) => g.is_duos) ? 2 : 4;
+    const wins = games.filter((g) => g.placement <= (g.is_duos ? 2 : 4)).length;
+    return { label: b.label, count, avgPlacement, wins };
+  });
 
   chart.setOption({
     ...BASE_ANIM,
-    tooltip: { trigger: 'item', formatter: (p) => `Duration: ${p.data.value[0]} min<br/>Placement: ${p.data.value[1]}` },
-    xAxis: { type: 'value', ...xName('Minutes') },
-    yAxis: { type: 'value', inverse: true, min: 1, max: 8, ...yNameInverse('Placement') },
+    tooltip: {
+      trigger: 'axis',
+      formatter: (params) => {
+        const p = params[0];
+        const b = buckets[p.dataIndex];
+        if (!b || b.count === 0) return `${b.label}<br/>No games`;
+        return `${b.label}<br/>Games: ${b.count}<br/>Avg Placement: ${b.avgPlacement.toFixed(1)}<br/>Win Rate: ${((b.wins / b.count) * 100).toFixed(0)}%`;
+      },
+    },
+    xAxis: { type: 'category', data: buckets.map((b) => b.label), ...xName('Duration') },
+    yAxis: { type: 'value', ...yName('Games') },
     series: [{
-      type: 'scatter', data,
-      symbolSize: 8,
-      itemStyle: { color: ACCENT, opacity: 0.7 },
+      type: 'bar',
+      data: buckets.map((b) => ({
+        value: b.count,
+        itemStyle: { color: b.count > 0 && b.avgPlacement <= 2.5 ? WIN_COLOR : b.count > 0 ? ACCENT : '#333' },
+      })),
+      label: {
+        show: true, position: 'top', color: '#ccc', fontSize: 10,
+        formatter: (p) => { const b = buckets[p.dataIndex]; return b.count > 0 ? b.avgPlacement.toFixed(1) : ''; },
+      },
     }],
   }, true);
-
-  chart.off('click');
-  chart.on('click', (params) => {
-    if (params.data && params.data.gameId) drillToGame(params.data.gameId);
-  });
 }
 
 function renderAnomalyPerf(games) {
