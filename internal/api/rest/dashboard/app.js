@@ -312,7 +312,7 @@ function renderTimelineScrubber(allMetas) {
       splitLine: { show: true, lineStyle: { color: '#222', type: 'dashed' } },
     },
     yAxis: {
-      type: 'value', min: 0, max: 9, show: false,
+      type: 'value', min: 1, max: 8, show: false, inverse: true,
     },
     series: [{
       type: 'scatter',
@@ -806,11 +806,11 @@ function renderPlacementDist(metas) {
       if (g.placement >= 1 && g.placement <= 8) counts[g.placement - 1]++;
     });
 
+    const duosCount = metas.filter((g) => g.is_duos).length;
+    const threshold = (State.mode === 'duos' || (State.mode === 'all' && duosCount > metas.length / 2)) ? 2 : 4;
     const colors = counts.map((_, i) => {
       const p = i + 1;
-      // Use first meta to check duos threshold, or default to solo
-      const anyDuos = metas.some((g) => g.is_duos);
-      return (anyDuos && State.mode === 'duos') ? (p <= 2 ? WIN_COLOR : LOSS_COLOR) : (p <= 4 ? WIN_COLOR : LOSS_COLOR);
+      return p <= threshold ? WIN_COLOR : LOSS_COLOR;
     });
 
     chart.setOption({
@@ -1361,6 +1361,9 @@ function renderHealthArmor(turns) {
   if (!turns || turns.length === 0) return showNoData('chart-health-armor');
   const chart = getChart('chart-health-armor');
 
+  const isDuos = State.selectedGameID && State.fullGames.get(State.selectedGameID)?.is_duos;
+  const hpLabel = isDuos ? 'Team HP' : 'Effective HP';
+
   const turnNums = turns.map((t) => t.turn);
   const effHP = turns.map((t) => {
     const p = t.state.player || {};
@@ -1371,9 +1374,9 @@ function renderHealthArmor(turns) {
     ...BASE_ANIM,
     tooltip: { trigger: 'axis' },
     xAxis: { type: 'category', data: turnNums, ...xName('Turn') },
-    yAxis: { type: 'value', ...yName('Effective HP') },
+    yAxis: { type: 'value', ...yName(hpLabel) },
     series: [{
-      name: 'Effective HP', type: 'line', data: effHP, smooth: true,
+      name: hpLabel, type: 'line', data: effHP, smooth: true,
       areaStyle: { opacity: 0.15, color: WIN_COLOR },
       lineStyle: { color: WIN_COLOR }, itemStyle: { color: WIN_COLOR },
     }],

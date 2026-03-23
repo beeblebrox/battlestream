@@ -72,6 +72,15 @@ func (s *Server) Serve(ctx context.Context, addr string) error {
 		http.Redirect(w, r, "/dashboard/", http.StatusMovedPermanently)
 	})
 
+	// Root redirect to dashboard
+	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			http.Redirect(w, r, "/dashboard/", http.StatusMovedPermanently)
+			return
+		}
+		http.NotFound(w, r)
+	})
+
 	srv := &http.Server{
 		Addr:    addr,
 		Handler: mux,
