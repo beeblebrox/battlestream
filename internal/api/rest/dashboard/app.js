@@ -1253,8 +1253,8 @@ function renderTribeWinrateInner(games, variant) {
         return `<b>${e.name}</b><br/>Avg Placement: ${e.avg.toFixed(2)}<br/>Win Rate: ${e.winRate}%<br/>Games: ${e.count}`;
       },
     },
-    grid: { left: 110, right: 100 },
-    yAxis: { type: 'category', data: entries.map((e) => e.name), inverse: true },
+    grid: { left: Math.min(140, Math.max(60, Math.max(...entries.map(e => e.name.length)) * 8 + 10)), right: 100 },
+    yAxis: { type: 'category', data: entries.map((e) => e.name), inverse: true, axisLabel: { interval: 0 } },
     xAxis: { type: 'value', min: 1, max: Math.min(8, Math.ceil(Math.max(...entries.map((e) => e.avg)) + 1)), ...xName('Avg Placement') },
     series: [{
       type: 'bar',
@@ -1353,12 +1353,15 @@ function renderHeatmapHeroInner(games, variant) {
     }
   }
 
+  const maxLen = Math.max(...heroes.map((h) => h.length));
+  const heatGridLeft = Math.min(280, Math.max(120, maxLen * 6.5 + 10));
+
   chart.setOption({
     ...BASE_ANIM,
     tooltip: { formatter: (p) => `${heroes[p.data[1]]}<br/>Placement: ${placements[p.data[0]]}<br/>Games: ${p.data[2]}` },
-    grid: { left: 160, right: 60, bottom: 40 },
+    grid: { left: heatGridLeft, right: 60, bottom: 40 },
     xAxis: { type: 'category', data: placements.map(String), splitArea: { show: true }, ...xNameHeatmap('Placement') },
-    yAxis: { type: 'category', data: heroes, splitArea: { show: true }, ...yName('Hero'), axisLabel: { width: 140, overflow: 'truncate', fontSize: 10 } },
+    yAxis: { type: 'category', data: heroes, splitArea: { show: true }, ...yName('Hero'), axisLabel: { fontSize: 10, interval: 0 } },
     visualMap: { min: 0, max: maxVal || 1, calculable: true, orient: 'horizontal', left: 'center', bottom: 0, inRange: { color: ['#1a1a2e', '#304ffe', '#e94560', '#ff5252'] } },
     series: [{
       type: 'heatmap', data,
@@ -1457,9 +1460,9 @@ function renderHeatmapTribeInner(games, variant) {
   chart.setOption({
     ...BASE_ANIM,
     tooltip: { formatter: (p) => `${tribes[p.data[1]]}<br/>Placement: ${placements[p.data[0]]}<br/>Games: ${p.data[2]}` },
-    grid: { left: 100, right: 60, bottom: 40 },
+    grid: { left: Math.min(140, Math.max(60, Math.max(...tribes.map(t => t.length)) * 7 + 10)), right: 60, bottom: 40 },
     xAxis: { type: 'category', data: placements.map(String), ...xNameHeatmap('Placement') },
-    yAxis: { type: 'category', data: tribes, ...yName('Tribe') },
+    yAxis: { type: 'category', data: tribes, ...yName('Tribe'), axisLabel: { interval: 0, fontSize: 10 } },
     visualMap: { min: 0, max: maxVal || 1, calculable: true, orient: 'horizontal', left: 'center', bottom: 0, inRange: { color: ['#1a1a2e', '#2e7d32', '#00c853'] } },
     series: [{
       type: 'heatmap', data,
