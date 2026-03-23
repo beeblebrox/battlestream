@@ -1171,7 +1171,7 @@ function renderDuration(metas) {
 }
 
 function renderAnomalyPerf(games) {
-  addChartHelp('chart-anomaly-perf', 'Average placement per anomaly. Only shows anomalies with 2+ games.');
+  addChartHelp('chart-anomaly-perf', 'Average placement per anomaly. Shows game count in parentheses.');
   if (!games || games.length === 0) return showNoData('chart-anomaly-perf');
   const chart = getChart('chart-anomaly-perf');
 
@@ -1186,11 +1186,11 @@ function renderAnomalyPerf(games) {
   }
 
   const entries = [...anomMap.entries()]
-    .filter(([, v]) => v.count >= 2)
     .map(([name, v]) => ({ name, avg: v.total / v.count, count: v.count }))
     .sort((a, b) => a.avg - b.avg);
 
   if (entries.length === 0) return showNoData('chart-anomaly-perf');
+  autoSizeChart('chart-anomaly-perf', entries.length);
 
   chart.setOption({
     ...BASE_ANIM,
