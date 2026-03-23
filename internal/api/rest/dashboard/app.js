@@ -708,18 +708,20 @@ const AXIS_NAME_STYLE = { color: '#888', fontSize: 11 };
 const TRIBE_SHORT = {
   DRAGON: 'DRG', PET: 'BST', PIRATE: 'PIR', UNDEAD: 'UND',
   DEMON: 'DMN', MECHANICAL: 'MCH', NAGA: 'NGA', QUILBOAR: 'QUI',
-  MURLOC: 'MRL', ELEMENTAL: 'ELE', ALL: 'ALL', Mixed: 'MIX',
+  MURLOC: 'MRL', ELEMENTAL: 'ELE', ALL: 'ALL', Mixed: 'MIX', None: '---',
 };
 
 // Emoji for HTML rendering (legend, minion cards)
 const TRIBE_EMOJI = {
   DRAGON: '\u{1F409}', PET: '\u{1F43E}', PIRATE: '\u2620\uFE0F', UNDEAD: '\u{1F480}',
   DEMON: '\u{1F525}', MECHANICAL: '\u2699\uFE0F', NAGA: '\u{1F40D}', QUILBOAR: '\u{1F417}',
-  MURLOC: '\u{1F41F}', ELEMENTAL: '\u{1F30A}', ALL: '\u2728', Mixed: '\u{1F3B2}',
+  MURLOC: '\u{1F41F}', ELEMENTAL: '\u{1F30A}', ALL: '\u2728', Mixed: '\u{1F3B2}', None: '',
 };
 
 function tribeIcon(name) {
-  return TRIBE_SHORT[name] || name;
+  const emoji = TRIBE_EMOJI[name] || '';
+  const short = TRIBE_SHORT[name] || name;
+  return emoji ? `${emoji}${short}` : short;
 }
 
 function tribeEmoji(name) {
@@ -731,7 +733,7 @@ function renderTribeLegend(containerId) {
   if (!container || container.querySelector('.tribe-legend')) return;
   const legend = document.createElement('div');
   legend.className = 'tribe-legend';
-  const entries = Object.entries(TRIBE_SHORT).filter(([k]) => k !== 'ALL');
+  const entries = Object.entries(TRIBE_SHORT).filter(([k]) => k !== 'ALL' && k !== 'None');
   legend.innerHTML = entries
     .map(([k, v]) => `<span>${TRIBE_EMOJI[k] || ''}${v}=${k}</span>`)
     .join(' ');
@@ -1211,15 +1213,19 @@ function renderTribeWinrate(games) {
   }
 }
 
+function resolveTribe(board) {
+  if (!board || board.length === 0) return 'None';
+  const { tribe } = getTribeComposition(board);
+  return (tribe === 'NONE' || tribe === 'MIXED') ? 'Mixed' : tribe;
+}
+
 function getGameTribeLabel(g, variant) {
-  const { tribe: playerTribe } = getTribeComposition(g.board);
-  const pt = (playerTribe === 'NONE' || playerTribe === 'MIXED') ? 'Mixed' : playerTribe;
+  const pt = resolveTribe(g.board);
   if (variant === 'player' || !g.is_duos) return tribeIcon(pt);
   const pm = getPartnerMinions(g);
-  const { tribe: partnerTribe } = getTribeComposition(pm);
-  const pp = (partnerTribe === 'NONE' || partnerTribe === 'MIXED') ? 'Mixed' : partnerTribe;
+  const pp = resolveTribe(pm);
   if (variant === 'partner') return tribeIcon(pp);
-  return pt === pp ? tribeIcon(pt) : `${tribeIcon(pt)} / ${tribeIcon(pp)}`;
+  return `${tribeIcon(pt)} / ${tribeIcon(pp)}`;
 }
 
 function renderTribeWinrateInner(games, variant) {
