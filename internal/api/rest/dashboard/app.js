@@ -1007,32 +1007,49 @@ function renderTribeWinrate(games) {
   if (!games || games.length === 0) return showNoData('chart-tribe-winrate');
   const chart = getChart('chart-tribe-winrate');
 
+  // Group by base tribe (not concentration level)
   const tribeMap = new Map();
   for (const g of games) {
-    const tribe = getDominantTribe(g.board);
-    if (!tribeMap.has(tribe)) tribeMap.set(tribe, { total: 0, count: 0 });
-    const entry = tribeMap.get(tribe);
+    const { tribe } = getTribeComposition(g.board);
+    const baseTribe = (tribe === 'NONE' || tribe === 'MIXED') ? 'Mixed' : tribe;
+    if (!tribeMap.has(baseTribe)) tribeMap.set(baseTribe, { total: 0, count: 0, wins: 0 });
+    const entry = tribeMap.get(baseTribe);
     entry.total += g.placement || 0;
     entry.count++;
+    const threshold = g.is_duos ? 2 : 4;
+    if ((g.placement || 0) <= threshold) entry.wins++;
   }
 
   const entries = [...tribeMap.entries()]
-    .map(([name, v]) => ({ name, avg: v.total / v.count, count: v.count }))
+    .map(([name, v]) => ({ name, avg: v.total / v.count, count: v.count, winRate: ((v.wins / v.count) * 100).toFixed(0) }))
     .sort((a, b) => a.avg - b.avg);
 
   if (entries.length === 0) return showNoData('chart-tribe-winrate');
 
   chart.setOption({
     ...BASE_ANIM,
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    grid: { left: 120, right: 60 },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: (params) => {
+        const p = params[0];
+        const e = entries[p.dataIndex];
+        return `<b>${e.name}</b><br/>Avg Placement: ${e.avg.toFixed(2)}<br/>Win Rate: ${e.winRate}%<br/>Games: ${e.count}`;
+      },
+    },
+    grid: { left: 100, right: 80 },
     yAxis: { type: 'category', data: entries.map((e) => e.name), inverse: true },
     xAxis: { type: 'value', name: 'Avg Placement', min: 1 },
     series: [{
       type: 'bar',
       data: entries.map((e) => parseFloat(e.avg.toFixed(2))),
-      itemStyle: { color: '#26c6da' },
-      label: { show: true, position: 'right', formatter: (p) => `${p.value} (${entries[p.dataIndex].count}g)`, color: '#ccc', fontSize: 11 },
+      itemStyle: {
+        color: (p) => {
+          const e = entries[p.dataIndex];
+          return parseInt(e.winRate) >= 50 ? '#00c853' : '#ff5252';
+        },
+      },
+      label: { show: true, position: 'right', formatter: (p) => `${p.value} (${entries[p.dataIndex].count}g, ${entries[p.dataIndex].winRate}% WR)`, color: '#ccc', fontSize: 10 },
     }],
   }, true);
 }
@@ -1160,9 +1177,10 @@ function renderHeatmapTribe(games) {
   const tribeSet = new Set();
   const countMap = new Map();
   for (const g of games) {
-    const tribe = getDominantTribe(g.board);
-    tribeSet.add(tribe);
-    const key = `${g.placement}|${tribe}`;
+    const { tribe } = getTribeComposition(g.board);
+    const baseTribe = (tribe === 'NONE' || tribe === 'MIXED') ? 'Mixed' : tribe;
+    tribeSet.add(baseTribe);
+    const key = `${g.placement}|${baseTribe}`;
     countMap.set(key, (countMap.get(key) || 0) + 1);
   }
 

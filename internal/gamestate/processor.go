@@ -16,6 +16,7 @@ type entityInfo struct {
 	CardID       string
 	Name         string
 	CardType     string
+	Race         string // CARDRACE tag (e.g. "BEAST", "DRAGON", "MECHANICAL")
 	Attack       int
 	Health       int
 	Armor        int // cached for retroactive hero identification
@@ -816,6 +817,9 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 	if hp, ok := e.Tags["HEALTH"]; ok {
 		info.Health = parseInt(hp)
 	}
+	if race, ok := e.Tags["CARDRACE"]; ok {
+		info.Race = race
+	}
 	if zone, ok := e.Tags["ZONE"]; ok {
 		info.Zone = zone
 	}
@@ -1004,11 +1008,12 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 		return
 	}
 	mn := MinionState{
-		EntityID: e.EntityID,
-		CardID:   info.CardID,
-		Name:     info.Name,
-		Attack:   info.Attack,
-		Health:   info.Health,
+		EntityID:   e.EntityID,
+		CardID:     info.CardID,
+		Name:       info.Name,
+		Attack:     info.Attack,
+		Health:     info.Health,
+		MinionType: info.Race,
 	}
 	if (mn.Name == "" || isBareNumber(mn.Name)) && mn.CardID != "" {
 		mn.Name = CardName(mn.CardID)
@@ -1386,11 +1391,12 @@ func (p *Processor) tryAddMinionFromRegistry(entityID, controllerID int) {
 		return
 	}
 	mn := MinionState{
-		EntityID: entityID,
-		CardID:   info.CardID,
-		Name:     info.Name,
-		Attack:   info.Attack,
-		Health:   info.Health,
+		EntityID:   entityID,
+		CardID:     info.CardID,
+		Name:       info.Name,
+		Attack:     info.Attack,
+		Health:     info.Health,
+		MinionType: info.Race,
 	}
 	if (mn.Name == "" || isBareNumber(mn.Name)) && mn.CardID != "" {
 		mn.Name = CardName(mn.CardID)
