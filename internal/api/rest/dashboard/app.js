@@ -669,8 +669,18 @@ function showNoData(containerId) {
   if (!chart) return;
   chart.clear();
   chart.setOption({
-    title: { text: 'No data', left: 'center', top: 'center', textStyle: { color: '#888', fontSize: 14 } },
+    title: { text: 'No data', left: 'center', top: 'center', textStyle: { color: '#555', fontSize: 14 } },
   });
+}
+
+function showChartLoading(containerId) {
+  const chart = getChart(containerId);
+  if (chart) chart.showLoading('default', { text: '', color: '#e94560', maskColor: 'transparent' });
+}
+
+function hideChartLoading(containerId) {
+  const chart = getChart(containerId);
+  if (chart) chart.hideLoading();
 }
 
 function renderPlacementTrend(metas) {
@@ -1584,6 +1594,12 @@ async function renderLevel1() {
   renderPlacementTrend(State.games);
   renderPlacementDist(State.games);
   renderWinRateTrend(State.games);
+
+  // Show loading on rich chart containers while fetching full game data
+  const richCharts = ['chart-hero-perf', 'chart-tavern-tier', 'chart-buff-breakdown',
+    'chart-anomaly-perf', 'chart-tribe-winrate', 'chart-buff-efficiency',
+    'chart-heatmap-hero', 'chart-heatmap-tier-turn', 'chart-heatmap-tribe', 'chart-heatmap-buff'];
+  richCharts.forEach(showChartLoading);
 
   // Lazy: fetch full games for rich charts
   await fetchFullGames(State.games);
