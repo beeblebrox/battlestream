@@ -868,11 +868,12 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 		} else if cardType == "MINION" && zonePos > 0 &&
 			info.Attack > 0 && info.Health > 0 && info.Zone == "PLAY" {
 			mn := MinionState{
-				EntityID: e.EntityID,
-				CardID:   info.CardID,
-				Name:     info.Name,
-				Attack:   info.Attack,
-				Health:   info.Health,
+				EntityID:   e.EntityID,
+				CardID:     info.CardID,
+				Name:       info.Name,
+				Attack:     info.Attack,
+				Health:     info.Health,
+				MinionType: info.Race,
 			}
 			if (mn.Name == "" || isBareNumber(mn.Name)) && mn.CardID != "" {
 				mn.Name = CardName(mn.CardID)
