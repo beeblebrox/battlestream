@@ -683,7 +683,20 @@ function hideChartLoading(containerId) {
   if (chart) chart.hideLoading();
 }
 
+function addChartHelp(containerId, helpText) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  const h3 = container.querySelector('h3');
+  if (!h3 || h3.querySelector('.chart-help')) return; // already added
+  const help = document.createElement('span');
+  help.className = 'chart-help';
+  help.textContent = '?';
+  help.title = helpText;
+  h3.appendChild(help);
+}
+
 function renderPlacementTrend(metas) {
+  addChartHelp('chart-placement-trend', 'Your placement over time with a trend line. Lower is better (1st = best). Click a point to drill into that game.');
   if (!metas || metas.length === 0) return showNoData('chart-placement-trend');
   const chart = getChart('chart-placement-trend');
 
@@ -700,8 +713,8 @@ function renderPlacementTrend(metas) {
       ...BASE_ANIM,
       tooltip: { trigger: 'item' },
       legend: { data: ['Solo', 'Duos'], textStyle: { color: '#ccc' } },
-      xAxis: { type: 'time' },
-      yAxis: { type: 'value', inverse: true, min: 1, max: 8 },
+      xAxis: { type: 'time', name: 'Date', nameTextStyle: { color: '#888', fontSize: 11 } },
+      yAxis: { type: 'value', inverse: true, min: 1, max: 8, name: 'Placement', nameTextStyle: { color: '#888', fontSize: 11 } },
       series: [
         { name: 'Solo', type: 'line', data: soloData, smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { color: ACCENT }, itemStyle: { color: ACCENT } },
         { name: 'Duos', type: 'line', data: duosData, smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { color: '#4fc3f7' }, itemStyle: { color: '#4fc3f7' } },
@@ -717,8 +730,9 @@ function renderPlacementTrend(metas) {
     chart.setOption({
       ...BASE_ANIM,
       tooltip: { trigger: 'item' },
-      xAxis: { type: 'time' },
-      yAxis: { type: 'value', inverse: true, min: 1, max: 8 },
+      legend: { data: ['Placement', 'Trend'], textStyle: { color: '#ccc' } },
+      xAxis: { type: 'time', name: 'Date', nameTextStyle: { color: '#888', fontSize: 11 } },
+      yAxis: { type: 'value', inverse: true, min: 1, max: 8, name: 'Placement', nameTextStyle: { color: '#888', fontSize: 11 } },
       series: [
         {
           name: 'Placement', type: 'line', data, smooth: true, symbol: 'circle', symbolSize: 6,
@@ -745,6 +759,7 @@ function renderPlacementTrend(metas) {
 }
 
 function renderPlacementDist(metas) {
+  addChartHelp('chart-placement-dist', 'How often you finish in each placement. Green = win (top 4 solo, top 2 duos), red = loss.');
   if (!metas || metas.length === 0) return showNoData('chart-placement-dist');
   const chart = getChart('chart-placement-dist');
 
@@ -761,8 +776,8 @@ function renderPlacementDist(metas) {
       ...BASE_ANIM,
       tooltip: { trigger: 'axis' },
       legend: { data: ['Solo', 'Duos'], textStyle: { color: '#ccc' } },
-      xAxis: { type: 'category', data: ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th'] },
-      yAxis: { type: 'value' },
+      xAxis: { type: 'category', data: ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th'], name: 'Placement', nameTextStyle: { color: '#888', fontSize: 11 } },
+      yAxis: { type: 'value', name: 'Games', nameTextStyle: { color: '#888', fontSize: 11 } },
       series: [
         { name: 'Solo', type: 'bar', data: soloCounts, itemStyle: { color: ACCENT } },
         { name: 'Duos', type: 'bar', data: duosCounts, itemStyle: { color: '#4fc3f7' } },
@@ -784,8 +799,8 @@ function renderPlacementDist(metas) {
     chart.setOption({
       ...BASE_ANIM,
       tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th'] },
-      yAxis: { type: 'value' },
+      xAxis: { type: 'category', data: ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th'], name: 'Placement', nameTextStyle: { color: '#888', fontSize: 11 } },
+      yAxis: { type: 'value', name: 'Games', nameTextStyle: { color: '#888', fontSize: 11 } },
       series: [{
         type: 'bar',
         data: counts.map((v, i) => ({ value: v, itemStyle: { color: colors[i] } })),
@@ -795,6 +810,7 @@ function renderPlacementDist(metas) {
 }
 
 function renderWinRateTrend(metas) {
+  addChartHelp('chart-winrate-trend', 'Rolling win rate over a 20-game window. Shows how your win rate changes over time.');
   if (!metas || metas.length < 2) return showNoData('chart-winrate-trend');
   const chart = getChart('chart-winrate-trend');
 
@@ -850,6 +866,7 @@ function heroName(heroCardId) {
 }
 
 function renderHeroPerf(games) {
+  addChartHelp('chart-hero-perf', 'Average placement per hero, sorted best to worst. Shows game count in parentheses.');
   if (!games || games.length === 0) return showNoData('chart-hero-perf');
   const chart = getChart('chart-hero-perf');
 
@@ -882,6 +899,7 @@ function renderHeroPerf(games) {
 }
 
 function renderTavernTier(games) {
+  addChartHelp('chart-tavern-tier', 'Distribution of final tavern tier reached across your games.');
   if (!games || games.length === 0) return showNoData('chart-tavern-tier');
   const chart = getChart('chart-tavern-tier');
 
@@ -894,8 +912,8 @@ function renderTavernTier(games) {
   chart.setOption({
     ...BASE_ANIM,
     tooltip: { trigger: 'axis' },
-    xAxis: { type: 'category', data: ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'] },
-    yAxis: { type: 'value' },
+    xAxis: { type: 'category', data: ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'], name: 'Tier', nameTextStyle: { color: '#888', fontSize: 11 } },
+    yAxis: { type: 'value', name: 'Games', nameTextStyle: { color: '#888', fontSize: 11 } },
     series: [{
       type: 'bar',
       data: tiers.slice(1, 8),
@@ -905,6 +923,7 @@ function renderTavernTier(games) {
 }
 
 function renderBuffBreakdown(games) {
+  addChartHelp('chart-buff-breakdown', 'Total attack and health buffs accumulated across games, broken down by buff source category.');
   if (!games || games.length === 0) return showNoData('chart-buff-breakdown');
   const chart = getChart('chart-buff-breakdown');
 
@@ -937,6 +956,7 @@ function renderBuffBreakdown(games) {
 }
 
 function renderDuration(metas) {
+  addChartHelp('chart-duration', 'Game duration (minutes) vs placement. Click a point to drill into that game.');
   if (!metas || metas.length === 0) return showNoData('chart-duration');
   const chart = getChart('chart-duration');
 
@@ -968,6 +988,7 @@ function renderDuration(metas) {
 }
 
 function renderAnomalyPerf(games) {
+  addChartHelp('chart-anomaly-perf', 'Average placement per anomaly. Only shows anomalies with 2+ games.');
   if (!games || games.length === 0) return showNoData('chart-anomaly-perf');
   const chart = getChart('chart-anomaly-perf');
 
@@ -1004,6 +1025,7 @@ function renderAnomalyPerf(games) {
 }
 
 function renderTribeWinrate(games) {
+  addChartHelp('chart-tribe-winrate', 'Average placement per dominant board tribe. Green = winning (>50% WR), red = losing. Shows game count and win rate.');
   if (!games || games.length === 0) return showNoData('chart-tribe-winrate');
   const chart = getChart('chart-tribe-winrate');
 
@@ -1055,6 +1077,7 @@ function renderTribeWinrate(games) {
 }
 
 function renderBuffEfficiency(games) {
+  addChartHelp('chart-buff-efficiency', 'Total buff stats vs placement. Shows whether bigger buffs correlate with better finishes.');
   if (!games || games.length === 0) return showNoData('chart-buff-efficiency');
   const chart = getChart('chart-buff-efficiency');
 
@@ -1090,6 +1113,7 @@ function renderBuffEfficiency(games) {
 // ============================================================================
 
 function renderHeatmapHero(games) {
+  addChartHelp('chart-heatmap-hero', 'Frequency of each placement per hero. Brighter = more games at that placement.');
   if (!games || games.length === 0) return showNoData('chart-heatmap-hero');
   const chart = getChart('chart-heatmap-hero');
 
@@ -1118,8 +1142,8 @@ function renderHeatmapHero(games) {
     ...BASE_ANIM,
     tooltip: { formatter: (p) => `${heroes[p.data[1]]}<br/>Placement: ${placements[p.data[0]]}<br/>Games: ${p.data[2]}` },
     grid: { left: 140, right: 60, bottom: 40 },
-    xAxis: { type: 'category', data: placements.map(String), splitArea: { show: true } },
-    yAxis: { type: 'category', data: heroes, splitArea: { show: true } },
+    xAxis: { type: 'category', data: placements.map(String), splitArea: { show: true }, name: 'Placement', nameTextStyle: { color: '#888', fontSize: 11 } },
+    yAxis: { type: 'category', data: heroes, splitArea: { show: true }, name: 'Hero', nameTextStyle: { color: '#888', fontSize: 11 } },
     visualMap: { min: 0, max: maxVal || 1, calculable: true, orient: 'horizontal', left: 'center', bottom: 0, inRange: { color: ['#1a1a2e', '#304ffe', '#e94560', '#ff5252'] } },
     series: [{
       type: 'heatmap', data,
@@ -1130,6 +1154,7 @@ function renderHeatmapHero(games) {
 }
 
 function renderHeatmapTierTurn(games) {
+  addChartHelp('chart-heatmap-tier-turn', 'How many games reached each tavern tier by each turn number.');
   if (!games || games.length === 0) return showNoData('chart-heatmap-tier-turn');
   const chart = getChart('chart-heatmap-tier-turn');
 
@@ -1160,8 +1185,8 @@ function renderHeatmapTierTurn(games) {
     ...BASE_ANIM,
     tooltip: { formatter: (p) => `Turn ${turns[p.data[0]]}<br/>Tier ${tiers[p.data[1]]}<br/>Games: ${p.data[2]}` },
     grid: { left: 60, right: 60, bottom: 40 },
-    xAxis: { type: 'category', data: turns.map(String), name: 'Turn' },
-    yAxis: { type: 'category', data: tiers.map((t) => `T${t}`) },
+    xAxis: { type: 'category', data: turns.map(String), name: 'Turn', nameTextStyle: { color: '#888', fontSize: 11 } },
+    yAxis: { type: 'category', data: tiers.map((t) => `T${t}`), name: 'Tier', nameTextStyle: { color: '#888', fontSize: 11 } },
     visualMap: { min: 0, max: maxVal || 1, calculable: true, orient: 'horizontal', left: 'center', bottom: 0, inRange: { color: ['#1a1a2e', '#1565c0', '#4fc3f7'] } },
     series: [{
       type: 'heatmap', data,
@@ -1171,6 +1196,7 @@ function renderHeatmapTierTurn(games) {
 }
 
 function renderHeatmapTribe(games) {
+  addChartHelp('chart-heatmap-tribe', 'Frequency of each placement per dominant tribe.');
   if (!games || games.length === 0) return showNoData('chart-heatmap-tribe');
   const chart = getChart('chart-heatmap-tribe');
 
@@ -1200,8 +1226,8 @@ function renderHeatmapTribe(games) {
     ...BASE_ANIM,
     tooltip: { formatter: (p) => `${tribes[p.data[1]]}<br/>Placement: ${placements[p.data[0]]}<br/>Games: ${p.data[2]}` },
     grid: { left: 100, right: 60, bottom: 40 },
-    xAxis: { type: 'category', data: placements.map(String) },
-    yAxis: { type: 'category', data: tribes },
+    xAxis: { type: 'category', data: placements.map(String), name: 'Placement', nameTextStyle: { color: '#888', fontSize: 11 } },
+    yAxis: { type: 'category', data: tribes, name: 'Tribe', nameTextStyle: { color: '#888', fontSize: 11 } },
     visualMap: { min: 0, max: maxVal || 1, calculable: true, orient: 'horizontal', left: 'center', bottom: 0, inRange: { color: ['#1a1a2e', '#2e7d32', '#00c853'] } },
     series: [{
       type: 'heatmap', data,
@@ -1211,6 +1237,7 @@ function renderHeatmapTribe(games) {
 }
 
 function renderHeatmapBuff(games) {
+  addChartHelp('chart-heatmap-buff', 'Frequency of each placement bucketed by total buff amount.');
   if (!games || games.length === 0) return showNoData('chart-heatmap-buff');
   const chart = getChart('chart-heatmap-buff');
 
@@ -1246,8 +1273,8 @@ function renderHeatmapBuff(games) {
     ...BASE_ANIM,
     tooltip: { formatter: (p) => `Buff: ${buckets[p.data[1]]}<br/>Placement: ${placements[p.data[0]]}<br/>Games: ${p.data[2]}` },
     grid: { left: 80, right: 60, bottom: 40 },
-    xAxis: { type: 'category', data: placements.map(String) },
-    yAxis: { type: 'category', data: buckets },
+    xAxis: { type: 'category', data: placements.map(String), name: 'Placement', nameTextStyle: { color: '#888', fontSize: 11 } },
+    yAxis: { type: 'category', data: buckets, name: 'Buff Total', nameTextStyle: { color: '#888', fontSize: 11 } },
     visualMap: { min: 0, max: maxVal || 1, calculable: true, orient: 'horizontal', left: 'center', bottom: 0, inRange: { color: ['#1a1a2e', '#6a1b9a', '#e94560'] } },
     series: [{
       type: 'heatmap', data,
