@@ -704,14 +704,26 @@ const LOSS_COLOR = '#ff5252';
 const BASE_ANIM = { animationDuration: 800, animationEasing: 'cubicOut' };
 const AXIS_NAME_STYLE = { color: '#888', fontSize: 11 };
 
-const TRIBE_ICONS = {
+// Short codes for chart axis labels (ECharts canvas can't reliably render emoji)
+const TRIBE_SHORT = {
+  DRAGON: 'DRG', PET: 'BST', PIRATE: 'PIR', UNDEAD: 'UND',
+  DEMON: 'DMN', MECHANICAL: 'MCH', NAGA: 'NGA', QUILBOAR: 'QUI',
+  MURLOC: 'MRL', ELEMENTAL: 'ELE', ALL: 'ALL', Mixed: 'MIX',
+};
+
+// Emoji for HTML rendering (legend, minion cards)
+const TRIBE_EMOJI = {
   DRAGON: '\u{1F409}', PET: '\u{1F43E}', PIRATE: '\u2620\uFE0F', UNDEAD: '\u{1F480}',
   DEMON: '\u{1F525}', MECHANICAL: '\u2699\uFE0F', NAGA: '\u{1F40D}', QUILBOAR: '\u{1F417}',
   MURLOC: '\u{1F41F}', ELEMENTAL: '\u{1F30A}', ALL: '\u2728', Mixed: '\u{1F3B2}',
 };
 
 function tribeIcon(name) {
-  return TRIBE_ICONS[name] || name;
+  return TRIBE_SHORT[name] || name;
+}
+
+function tribeEmoji(name) {
+  return TRIBE_EMOJI[name] || '';
 }
 
 function renderTribeLegend(containerId) {
@@ -719,9 +731,9 @@ function renderTribeLegend(containerId) {
   if (!container || container.querySelector('.tribe-legend')) return;
   const legend = document.createElement('div');
   legend.className = 'tribe-legend';
-  legend.innerHTML = Object.entries(TRIBE_ICONS)
-    .filter(([k]) => k !== 'ALL' && k !== 'Mixed')
-    .map(([k, v]) => `<span>${v}${k}</span>`)
+  const entries = Object.entries(TRIBE_SHORT).filter(([k]) => k !== 'ALL');
+  legend.innerHTML = entries
+    .map(([k, v]) => `<span>${TRIBE_EMOJI[k] || ''}${v}=${k}</span>`)
     .join(' ');
   container.appendChild(legend);
 }
@@ -1532,7 +1544,7 @@ function renderHeatmapBuffInner(games, variant) {
     tooltip: { formatter: (p) => `Buff: ${yLabels[p.data[1]]}<br/>Placement: ${placements[p.data[0]]}<br/>Games: ${p.data[2]}` },
     grid: { left: variant === 'paired' ? 120 : 80, right: 60, bottom: 40 },
     xAxis: { type: 'category', data: placements.map(String), ...xNameHeatmap('Placement') },
-    yAxis: { type: 'category', data: yLabels, ...yName('Buff Total') },
+    yAxis: { type: 'category', data: yLabels, axisLabel: { interval: 0, fontSize: 10 }, ...yName('Buff Total') },
     visualMap: { min: 0, max: maxVal || 1, calculable: true, orient: 'horizontal', left: 'center', bottom: 0, inRange: { color: ['#1a1a2e', '#6a1b9a', '#e94560'] } },
     series: [{
       type: 'heatmap', data,
@@ -1845,7 +1857,7 @@ function renderTurnDetail(snapshot) {
     board.innerHTML = minions
       .map((m) => {
         const typeBadge = m.minion_type && m.minion_type !== 'INVALID'
-          ? `<div style="font-size:0.65rem;color:var(--text-muted);margin-top:0.25rem;">${tribeIcon(m.minion_type)}</div>`
+          ? `<div style="font-size:0.65rem;color:var(--text-muted);margin-top:0.25rem;">${tribeEmoji(m.minion_type) || tribeIcon(m.minion_type)}</div>`
           : '';
         return `
         <div class="minion-card">
@@ -1871,7 +1883,7 @@ function renderTurnDetail(snapshot) {
         <div style="display:flex;gap:0.75rem;flex-wrap:wrap;justify-content:center;">
           ${partnerMinions.map((m) => {
             const typeBadge = m.minion_type && m.minion_type !== 'INVALID' && m.minion_type !== ''
-              ? `<div style="font-size:0.65rem;color:var(--text-muted);margin-top:0.25rem;">${tribeIcon(m.minion_type)}</div>`
+              ? `<div style="font-size:0.65rem;color:var(--text-muted);margin-top:0.25rem;">${tribeEmoji(m.minion_type) || tribeIcon(m.minion_type)}</div>`
               : '';
             return `
             <div class="minion-card" style="border-color:#4fc3f7;">
