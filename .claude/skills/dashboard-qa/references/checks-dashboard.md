@@ -28,6 +28,7 @@ step-by-step validation instructions using Playwright browser tools.
 | 19    | Scrubber Inverted Axis | scrubber     |
 | 20    | Scrubber Handle Stability | scrubber  |
 | 21    | Scrubber Zoom Proportional | scrubber |
+| 22    | Duos-Aware Grouping    | duos         |
 
 ---
 
@@ -679,3 +680,67 @@ while covering the same time period.
 7. Record the state again
 8. Verify: the `span` is smaller than the 3-game span (tighter zoom for fewer games)
 9. Reset filters when done
+
+---
+
+### Check 22: Duos-Aware Grouping
+**Group:** duos
+
+Validates that charts use duos-appropriate grouping when games are duos.
+
+**Steps:**
+1. Switch to All or Duos mode (ensure duos games exist in dataset)
+2. Evaluate Hero Performance chart y-axis labels:
+   ```javascript
+   (() => {
+     const opts = Charts['chart-hero-perf'].getOption();
+     const labels = opts.yAxis[0].data || [];
+     const hasPairings = labels.some(l => typeof l === 'string' && l.includes(' + '));
+     const hasSkinSuffix = labels.some(l => typeof l === 'string' && l.includes('(Skin'));
+     return { labels, hasPairings, hasSkinSuffix };
+   })()
+   ```
+3. Verify: `hasPairings === true` — duos games show hero pairings like "HeroA + HeroB"
+4. Verify: `hasSkinSuffix === false` — no skin variant suffixes in hero names
+5. Evaluate Hero Placement Heatmap y-axis labels — same check as above for pairings
+6. Drill into a duos game. Evaluate Level 2 charts for partner series:
+   ```javascript
+   (() => {
+     const boardOpts = Charts['chart-board-stats']?.getOption();
+     const tierOpts = Charts['chart-tier-prog']?.getOption();
+     const sizeOpts = Charts['chart-board-size']?.getOption();
+     const buffOpts = Charts['chart-buff-accum']?.getOption();
+     return {
+       boardSeriesCount: boardOpts?.series?.length,
+       boardHasPartner: boardOpts?.series?.some(s => s.name?.includes('Partner')),
+       tierSeriesCount: tierOpts?.series?.length,
+       tierHasPartner: tierOpts?.series?.some(s => s.name?.includes('Partner')),
+       sizeSeriesCount: sizeOpts?.series?.length,
+       sizeHasPartner: sizeOpts?.series?.some(s => s.name?.includes('Partner')),
+       buffHasPartner: buffOpts?.series?.some(s => s.name?.includes('Partner')),
+       healthLabel: Charts['chart-health-armor']?.getOption()?.yAxis?.[0]?.name,
+     };
+   })()
+   ```
+7. Verify: `boardHasPartner === true` (Board Stats has partner ATK/HP dashed series)
+8. Verify: `tierHasPartner === true` (Tier Progression has partner tier dashed series)
+9. Verify: `sizeHasPartner === true` (Board Size has partner board dashed series)
+10. Verify: `healthLabel === 'Team HP'` (Health chart labeled for shared team pool)
+11. Drill into a turn. Verify partner board section visible:
+    ```javascript
+    (() => {
+      const board = document.getElementById('turn-board');
+      const hasPartnerSection = board && board.innerHTML.includes('Partner Board');
+      return { hasPartnerSection };
+    })()
+    ```
+12. Verify: `hasPartnerSection === true`
+13. Navigate back to Level 1. Verify summary cards include "Best Partner":
+    ```javascript
+    (() => {
+      const cards = document.getElementById('summary-cards');
+      const hasPartnerCard = cards && cards.innerHTML.includes('Best Partner');
+      return { hasPartnerCard };
+    })()
+    ```
+14. Verify: `hasPartnerCard === true` (when duos games exist)

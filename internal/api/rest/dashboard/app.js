@@ -651,6 +651,50 @@ function renderSummaryCards(agg, compareAgg) {
     .join('');
 }
 
+function updatePartnerStats(fullGames) {
+  const el = document.getElementById('summary-cards');
+  if (!el) return;
+  // Only show in duos or all mode when duos games exist
+  const duosGames = fullGames.filter((g) => g.is_duos && g.partner?.name);
+  if (duosGames.length === 0) return;
+
+  const partnerMap = new Map();
+  for (const g of duosGames) {
+    const name = g.partner.name;
+    if (!partnerMap.has(name)) partnerMap.set(name, { total: 0, count: 0, wins: 0 });
+    const e = partnerMap.get(name);
+    e.total += g.placement || 0;
+    e.count++;
+    if ((g.placement || 0) <= 2) e.wins++;
+  }
+
+  // Find best partner by avg placement (min 2 games)
+  let best = null;
+  for (const [name, v] of partnerMap) {
+    const avg = v.total / v.count;
+    if (v.count >= 2 && (!best || avg < best.avg)) {
+      best = { name, avg, count: v.count, winRate: ((v.wins / v.count) * 100).toFixed(0) };
+    }
+  }
+  // Fallback: most games partner
+  if (!best) {
+    let most = null;
+    for (const [name, v] of partnerMap) {
+      if (!most || v.count > most.count) most = { name, avg: v.total / v.count, count: v.count, winRate: ((v.wins / v.count) * 100).toFixed(0) };
+    }
+    best = most;
+  }
+
+  if (best) {
+    el.innerHTML += `
+      <div class="summary-card">
+        <div class="label">Best Partner</div>
+        <div class="value" style="font-size:1.1rem;">${best.name}</div>
+        <div class="sub">${best.avg.toFixed(2)} avg, ${best.count}g, ${best.winRate}% WR</div>
+      </div>`;
+  }
+}
+
 // ============================================================================
 // 8. Level 1 Charts — Meta-based (fast)
 // ============================================================================
@@ -859,6 +903,28 @@ function renderWinRateTrend(metas) {
 // 9. Level 1 Charts — Full game data (rich)
 // ============================================================================
 
+// Return the base hero name without skin suffixes, for grouping purposes.
+function heroBaseName(heroCardId) {
+  if (!heroCardId) return 'Unknown';
+  const names = State.cardNames;
+  // Strip _SKIN_* suffix
+  const skinMatch = heroCardId.match(/^(.+?)(_SKIN_\w+)$/);
+  const baseId = skinMatch ? skinMatch[1] : heroCardId;
+  // Strip _G (golden) suffix
+  const goldenMatch = baseId.match(/^(.+?)_G$/);
+  const lookupId = goldenMatch ? goldenMatch[1] : baseId;
+  return names[lookupId] || names[baseId] || names[heroCardId] || heroCardId;
+}
+
+// Extract partner board minions array from a turn state or game object.
+function getPartnerMinions(obj) {
+  const pb = obj?.partner_board;
+  if (!pb) return [];
+  if (Array.isArray(pb)) return pb;
+  if (Array.isArray(pb.minions)) return pb.minions;
+  return [];
+}
+
 function heroName(heroCardId) {
   if (!heroCardId) return 'Unknown';
   const names = State.cardNames;
@@ -889,15 +955,18 @@ function renderHeroPerf(games) {
 
   const heroMap = new Map();
   for (const g of games) {
-    const hid = g.player?.hero_card_id || 'Unknown';
-    if (!heroMap.has(hid)) heroMap.set(hid, { total: 0, count: 0 });
-    const entry = heroMap.get(hid);
+    const playerHero = heroBaseName(g.player?.hero_card_id);
+    const label = (g.is_duos && g.partner?.hero_card_id)
+      ? `${playerHero} + ${heroBaseName(g.partner.hero_card_id)}`
+      : playerHero;
+    if (!heroMap.has(label)) heroMap.set(label, { total: 0, count: 0 });
+    const entry = heroMap.get(label);
     entry.total += g.placement || 0;
     entry.count++;
   }
 
   const entries = [...heroMap.entries()]
-    .map(([id, v]) => ({ id, name: heroName(id), avg: v.total / v.count, count: v.count }))
+    .map(([name, v]) => ({ name, avg: v.total / v.count, count: v.count }))
     .sort((a, b) => a.avg - b.avg);
 
   // Compute max label width to set dynamic left margin
@@ -950,8 +1019,9 @@ function renderBuffBreakdown(games) {
 
   const catMap = new Map();
   for (const g of games) {
-    if (!g.buff_sources) continue;
-    for (const bs of g.buff_sources) {
+    const allBuffs = [...(g.buff_sources || [])];
+    if (g.is_duos && g.partner_buff_sources) allBuffs.push(...g.partner_buff_sources);
+    for (const bs of allBuffs) {
       if (!catMap.has(bs.category)) catMap.set(bs.category, { atk: 0, hp: 0 });
       const entry = catMap.get(bs.category);
       entry.atk += bs.attack || 0;
@@ -1051,10 +1121,12 @@ function renderTribeWinrate(games) {
   if (!games || games.length === 0) return showNoData('chart-tribe-winrate');
   const chart = getChart('chart-tribe-winrate');
 
-  // Group by base tribe (not concentration level)
+  // Group by base tribe — combine player+partner boards for duos
   const tribeMap = new Map();
   for (const g of games) {
-    const { tribe } = getTribeComposition(g.board);
+    let board = g.board || [];
+    if (g.is_duos) { const pm = getPartnerMinions(g); if (pm.length > 0) board = [...board, ...pm]; }
+    const { tribe } = getTribeComposition(board);
     const baseTribe = (tribe === 'NONE' || tribe === 'MIXED') ? 'Mixed' : tribe;
     if (!tribeMap.has(baseTribe)) tribeMap.set(baseTribe, { total: 0, count: 0, wins: 0 });
     const entry = tribeMap.get(baseTribe);
@@ -1106,7 +1178,10 @@ function renderBuffEfficiency(games) {
   const data = games
     .filter((g) => g.buff_sources && g.buff_sources.length > 0)
     .map((g) => {
-      const totalBuff = g.buff_sources.reduce((s, bs) => s + (bs.attack || 0) + (bs.health || 0), 0);
+      let totalBuff = g.buff_sources.reduce((s, bs) => s + (bs.attack || 0) + (bs.health || 0), 0);
+      if (g.is_duos && g.partner_buff_sources) {
+        totalBuff += g.partner_buff_sources.reduce((s, bs) => s + (bs.attack || 0) + (bs.health || 0), 0);
+      }
       return { value: [totalBuff, g.placement], gameId: g.game_id };
     });
 
@@ -1142,9 +1217,12 @@ function renderHeatmapHero(games) {
   const heroSet = new Set();
   const countMap = new Map();
   for (const g of games) {
-    const hid = heroName(g.player?.hero_card_id || 'Unknown');
-    heroSet.add(hid);
-    const key = `${g.placement}|${hid}`;
+    const playerHero = heroBaseName(g.player?.hero_card_id || 'Unknown');
+    const label = (g.is_duos && g.partner?.hero_card_id)
+      ? `${playerHero} + ${heroBaseName(g.partner.hero_card_id)}`
+      : playerHero;
+    heroSet.add(label);
+    const key = `${g.placement}|${label}`;
     countMap.set(key, (countMap.get(key) || 0) + 1);
   }
 
@@ -1225,7 +1303,9 @@ function renderHeatmapTribe(games) {
   const tribeSet = new Set();
   const countMap = new Map();
   for (const g of games) {
-    const { tribe } = getTribeComposition(g.board);
+    let board = g.board || [];
+    if (g.is_duos) { const pm = getPartnerMinions(g); if (pm.length > 0) board = [...board, ...pm]; }
+    const { tribe } = getTribeComposition(board);
     const baseTribe = (tribe === 'NONE' || tribe === 'MIXED') ? 'Mixed' : tribe;
     tribeSet.add(baseTribe);
     const key = `${g.placement}|${baseTribe}`;
@@ -1274,7 +1354,10 @@ function renderHeatmapBuff(games) {
 
   const countMap = new Map();
   for (const g of games) {
-    const total = (g.buff_sources || []).reduce((s, bs) => s + (bs.attack || 0) + (bs.health || 0), 0);
+    let total = (g.buff_sources || []).reduce((s, bs) => s + (bs.attack || 0) + (bs.health || 0), 0);
+    if (g.is_duos && g.partner_buff_sources) {
+      total += g.partner_buff_sources.reduce((s, bs) => s + (bs.attack || 0) + (bs.health || 0), 0);
+    }
     const bi = getBucket(total);
     const key = `${g.placement}|${bi}`;
     countMap.set(key, (countMap.get(key) || 0) + 1);
@@ -1337,21 +1420,35 @@ function renderGameHeader(game) {
 function renderBoardStats(turns) {
   if (!turns || turns.length === 0) return showNoData('chart-board-stats');
   const chart = getChart('chart-board-stats');
+  const isDuos = State.selectedGameID && State.fullGames.get(State.selectedGameID)?.is_duos;
 
   const turnNums = turns.map((t) => t.turn);
   const totalAtk = turns.map((t) => (t.state.board || []).reduce((s, m) => s + (m.attack || 0), 0));
   const totalHp = turns.map((t) => (t.state.board || []).reduce((s, m) => s + (m.health || 0), 0));
 
+  const legendData = ['Total ATK', 'Total HP'];
+  const series = [
+    { name: 'Total ATK', type: 'line', data: totalAtk, smooth: true, lineStyle: { color: '#ffc107' }, itemStyle: { color: '#ffc107' } },
+    { name: 'Total HP', type: 'line', data: totalHp, smooth: true, lineStyle: { color: WIN_COLOR }, itemStyle: { color: WIN_COLOR } },
+  ];
+
+  if (isDuos) {
+    const pAtk = turns.map((t) => getPartnerMinions(t.state).reduce((s, m) => s + (m.attack || 0), 0));
+    const pHp = turns.map((t) => getPartnerMinions(t.state).reduce((s, m) => s + (m.health || 0), 0));
+    legendData.push('Partner ATK', 'Partner HP');
+    series.push(
+      { name: 'Partner ATK', type: 'line', data: pAtk, smooth: true, lineStyle: { color: '#ffe082', type: 'dashed' }, itemStyle: { color: '#ffe082' } },
+      { name: 'Partner HP', type: 'line', data: pHp, smooth: true, lineStyle: { color: '#69f0ae', type: 'dashed' }, itemStyle: { color: '#69f0ae' } },
+    );
+  }
+
   chart.setOption({
     ...BASE_ANIM,
     tooltip: { trigger: 'axis' },
-    legend: { data: ['Total ATK', 'Total HP'], textStyle: { color: '#ccc' } },
+    legend: { data: legendData, textStyle: { color: '#ccc' } },
     xAxis: { type: 'category', data: turnNums, ...xName('Turn') },
     yAxis: { type: 'value' },
-    series: [
-      { name: 'Total ATK', type: 'line', data: totalAtk, smooth: true, lineStyle: { color: '#ffc107' }, itemStyle: { color: '#ffc107' } },
-      { name: 'Total HP', type: 'line', data: totalHp, smooth: true, lineStyle: { color: WIN_COLOR }, itemStyle: { color: WIN_COLOR } },
-    ],
+    series,
   }, true);
 
   setupTurnDrill(chart, turns);
@@ -1388,20 +1485,32 @@ function renderHealthArmor(turns) {
 function renderTierProg(turns) {
   if (!turns || turns.length === 0) return showNoData('chart-tier-prog');
   const chart = getChart('chart-tier-prog');
+  const isDuos = State.selectedGameID && State.fullGames.get(State.selectedGameID)?.is_duos;
 
   const turnNums = turns.map((t) => t.turn);
   const tiers = turns.map((t) => t.state.tavern_tier || t.state.player?.tavern_tier || 0);
 
+  const series = [{
+    name: 'Tavern Tier', type: 'line', data: tiers, step: 'end',
+    lineStyle: { color: '#7c4dff' }, itemStyle: { color: '#7c4dff' },
+    areaStyle: { opacity: 0.1, color: '#7c4dff' },
+  }];
+
+  if (isDuos) {
+    const partnerTiers = turns.map((t) => t.state.partner?.tavern_tier || 0);
+    series.push({
+      name: 'Partner Tier', type: 'line', data: partnerTiers, step: 'end',
+      lineStyle: { color: '#b388ff', type: 'dashed' }, itemStyle: { color: '#b388ff' },
+    });
+  }
+
   chart.setOption({
     ...BASE_ANIM,
     tooltip: { trigger: 'axis' },
+    legend: isDuos ? { data: ['Tavern Tier', 'Partner Tier'], textStyle: { color: '#ccc' } } : undefined,
     xAxis: { type: 'category', data: turnNums, ...xName('Turn') },
     yAxis: { type: 'value', min: 1, max: 7, ...yName('Tier') },
-    series: [{
-      name: 'Tavern Tier', type: 'line', data: tiers, step: 'end',
-      lineStyle: { color: '#7c4dff' }, itemStyle: { color: '#7c4dff' },
-      areaStyle: { opacity: 0.1, color: '#7c4dff' },
-    }],
+    series,
   }, true);
 
   setupTurnDrill(chart, turns);
@@ -1410,21 +1519,27 @@ function renderTierProg(turns) {
 function renderBuffAccum(turns) {
   if (!turns || turns.length === 0) return showNoData('chart-buff-accum');
   const chart = getChart('chart-buff-accum');
+  const isDuos = State.selectedGameID && State.fullGames.get(State.selectedGameID)?.is_duos;
 
-  // Collect all categories across turns
+  // Collect all categories across turns (player + partner)
   const catSet = new Set();
+  const partnerCatSet = new Set();
   for (const t of turns) {
     if (t.state.buff_sources) {
       for (const bs of t.state.buff_sources) catSet.add(bs.category);
     }
+    if (isDuos && t.state.partner_buff_sources) {
+      for (const bs of t.state.partner_buff_sources) partnerCatSet.add(bs.category);
+    }
   }
 
-  if (catSet.size === 0) return showNoData('chart-buff-accum');
+  if (catSet.size === 0 && partnerCatSet.size === 0) return showNoData('chart-buff-accum');
 
   const categories = [...catSet].sort();
   const turnNums = turns.map((t) => t.turn);
   const palette = ['#e94560', '#4fc3f7', '#ffc107', '#00c853', '#7c4dff', '#ff9800', '#26c6da', '#ab47bc', '#8d6e63', '#78909c', '#d4e157', '#ef5350', '#42a5f5'];
 
+  const legendData = [...categories];
   const series = categories.map((cat, ci) => {
     const data = turns.map((t) => {
       const bs = (t.state.buff_sources || []).find((b) => b.category === cat);
@@ -1439,10 +1554,32 @@ function renderBuffAccum(turns) {
     };
   });
 
+  // Partner buff series (separate stack, dashed, lighter)
+  if (isDuos && partnerCatSet.size > 0) {
+    const partnerCats = [...partnerCatSet].sort();
+    for (const cat of partnerCats) {
+      const ci = categories.indexOf(cat) >= 0 ? categories.indexOf(cat) : legendData.length;
+      const color = palette[ci % palette.length];
+      const label = `${cat} (Partner)`;
+      legendData.push(label);
+      const data = turns.map((t) => {
+        const bs = (t.state.partner_buff_sources || []).find((b) => b.category === cat);
+        return bs ? (bs.attack || 0) + (bs.health || 0) : 0;
+      });
+      series.push({
+        name: label, type: 'line', stack: 'partner-buffs', data,
+        areaStyle: { opacity: 0.3 },
+        lineStyle: { width: 1, color, type: 'dashed' },
+        itemStyle: { color },
+        symbol: 'none',
+      });
+    }
+  }
+
   chart.setOption({
     ...BASE_ANIM,
     tooltip: { trigger: 'axis' },
-    legend: { data: categories, textStyle: { color: '#ccc', fontSize: 10 }, type: 'scroll', bottom: 0 },
+    legend: { data: legendData, textStyle: { color: '#ccc', fontSize: 10 }, type: 'scroll', bottom: 0 },
     grid: { bottom: 40 },
     xAxis: { type: 'category', data: turnNums, ...xName('Turn') },
     yAxis: { type: 'value', ...yName('Buff Total') },
@@ -1478,20 +1615,32 @@ function renderGoldEcon(turns) {
 function renderBoardSize(turns) {
   if (!turns || turns.length === 0) return showNoData('chart-board-size');
   const chart = getChart('chart-board-size');
+  const isDuos = State.selectedGameID && State.fullGames.get(State.selectedGameID)?.is_duos;
 
   const turnNums = turns.map((t) => t.turn);
   const sizes = turns.map((t) => (t.state.board || []).length);
 
+  const series = [{
+    name: 'Board Size', type: 'line', data: sizes, step: 'end',
+    areaStyle: { opacity: 0.15, color: ACCENT },
+    lineStyle: { color: ACCENT }, itemStyle: { color: ACCENT },
+  }];
+
+  if (isDuos) {
+    const partnerSizes = turns.map((t) => getPartnerMinions(t.state).length);
+    series.push({
+      name: 'Partner Board', type: 'line', data: partnerSizes, step: 'end',
+      lineStyle: { color: '#ff8a80', type: 'dashed' }, itemStyle: { color: '#ff8a80' },
+    });
+  }
+
   chart.setOption({
     ...BASE_ANIM,
     tooltip: { trigger: 'axis' },
+    legend: isDuos ? { data: ['Board Size', 'Partner Board'], textStyle: { color: '#ccc' } } : undefined,
     xAxis: { type: 'category', data: turnNums, ...xName('Turn') },
     yAxis: { type: 'value', min: 0, max: 7, ...yName('Minions') },
-    series: [{
-      name: 'Board Size', type: 'line', data: sizes, step: 'end',
-      areaStyle: { opacity: 0.15, color: ACCENT },
-      lineStyle: { color: ACCENT }, itemStyle: { color: ACCENT },
-    }],
+    series,
   }, true);
 
   setupTurnDrill(chart, turns);
@@ -1557,6 +1706,33 @@ function renderTurnDetail(snapshot) {
         </div>`;
       })
       .join('');
+  }
+
+  // Partner board (duos)
+  const partnerMinions = getPartnerMinions(s);
+  if (partnerMinions.length > 0) {
+    const partnerTier = s.partner?.tavern_tier ? ` (T${s.partner.tavern_tier})` : '';
+    board.innerHTML += `
+      <div style="width:100%;margin-top:1rem;padding-top:0.75rem;border-top:1px solid var(--border);">
+        <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:0.5rem;">Partner Board${partnerTier}</div>
+        <div style="display:flex;gap:0.75rem;flex-wrap:wrap;justify-content:center;">
+          ${partnerMinions.map((m) => {
+            const typeBadge = m.minion_type && m.minion_type !== 'INVALID' && m.minion_type !== ''
+              ? `<div style="font-size:0.65rem;color:var(--text-muted);margin-top:0.25rem;">${m.minion_type}</div>`
+              : '';
+            return `
+            <div class="minion-card" style="border-color:#4fc3f7;">
+              <div class="name" title="${m.name || m.card_id || ''}">${m.name || m.card_id || '???'}</div>
+              <div class="stats">
+                <span class="atk">${m.attack || 0}</span>
+                <span style="color:var(--text-muted);"> / </span>
+                <span class="hp">${m.health || 0}</span>
+              </div>
+              ${typeBadge}
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`;
   }
 
   // Deltas
@@ -1687,6 +1863,7 @@ async function renderLevel1() {
 
   const filtered = filterGamesByPartner(full);
   renderRichCharts(filtered);
+  updatePartnerStats(filtered);
 
   // Duration uses metas (has timestamps)
   renderDuration(State.games);
