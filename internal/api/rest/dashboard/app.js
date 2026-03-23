@@ -89,7 +89,6 @@ function getChart(containerId) {
     div = document.createElement('div');
     div.className = CHART_DIV_CLASS;
     div.style.width = '100%';
-    div.style.height = 'calc(100% - 28px)';
     container.appendChild(div);
   }
 
@@ -654,7 +653,7 @@ function renderSummaryCards(agg, compareAgg) {
 function updatePartnerStats(fullGames) {
   const el = document.getElementById('summary-cards');
   if (!el) return;
-  // Only show in duos or all mode when duos games exist
+  if (State.mode === 'solo') return;
   const duosGames = fullGames.filter((g) => g.is_duos && g.partner?.name);
   if (duosGames.length === 0) return;
 
@@ -727,12 +726,18 @@ function renderTribeLegend(containerId) {
   container.appendChild(legend);
 }
 
+function removeVariantTabs(containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  const tabs = container.querySelector('.variant-tabs');
+  if (tabs) tabs.remove();
+}
+
 function renderTripleVariant(containerId, games, renderFn) {
   const container = document.getElementById(containerId);
   if (!container) return;
   let tabs = container.querySelector('.variant-tabs');
   if (!tabs) {
-    container.classList.add('has-variants');
     tabs = document.createElement('div');
     tabs.className = 'variant-tabs';
     tabs.innerHTML = `
@@ -999,12 +1004,13 @@ function heroName(heroCardId) {
 
 function renderHeroPerf(games) {
   addChartHelp('chart-hero-perf', 'Average placement per hero, sorted best to worst. Shows game count in parentheses.');
-  if (!games || games.length === 0) return showNoData('chart-hero-perf');
+  if (!games || games.length === 0) { removeVariantTabs('chart-hero-perf'); return showNoData('chart-hero-perf'); }
 
   const anyDuos = games.some((g) => g.is_duos);
-  if (anyDuos) {
+  if (anyDuos && State.mode !== 'solo') {
     renderTripleVariant('chart-hero-perf', games, renderHeroPerfInner);
   } else {
+    removeVariantTabs('chart-hero-perf');
     renderHeroPerfInner(games, 'player');
   }
 }
@@ -1180,13 +1186,14 @@ function renderAnomalyPerf(games) {
 
 function renderTribeWinrate(games) {
   addChartHelp('chart-tribe-winrate', 'Average placement per dominant board tribe. Green = winning (>50% WR), red = losing. Shows game count and win rate.');
-  if (!games || games.length === 0) return showNoData('chart-tribe-winrate');
+  if (!games || games.length === 0) { removeVariantTabs('chart-tribe-winrate'); return showNoData('chart-tribe-winrate'); }
 
   const anyDuos = games.some((g) => g.is_duos);
-  if (anyDuos) {
+  if (anyDuos && State.mode !== 'solo') {
     renderTripleVariant('chart-tribe-winrate', games, renderTribeWinrateInner);
     renderTribeLegend('chart-tribe-winrate');
   } else {
+    removeVariantTabs('chart-tribe-winrate');
     renderTribeWinrateInner(games, 'player');
     renderTribeLegend('chart-tribe-winrate');
   }
@@ -1292,12 +1299,13 @@ function renderBuffEfficiency(games) {
 
 function renderHeatmapHero(games) {
   addChartHelp('chart-heatmap-hero', 'Frequency of each placement per hero. Brighter = more games at that placement.');
-  if (!games || games.length === 0) return showNoData('chart-heatmap-hero');
+  if (!games || games.length === 0) { removeVariantTabs('chart-heatmap-hero'); return showNoData('chart-heatmap-hero'); }
 
   const anyDuos = games.some((g) => g.is_duos);
-  if (anyDuos) {
+  if (anyDuos && State.mode !== 'solo') {
     renderTripleVariant('chart-heatmap-hero', games, renderHeatmapHeroInner);
   } else {
+    removeVariantTabs('chart-heatmap-hero');
     renderHeatmapHeroInner(games, 'player');
   }
 }
@@ -1397,13 +1405,14 @@ function renderHeatmapTierTurn(games) {
 
 function renderHeatmapTribe(games) {
   addChartHelp('chart-heatmap-tribe', 'Frequency of each placement per dominant tribe.');
-  if (!games || games.length === 0) return showNoData('chart-heatmap-tribe');
+  if (!games || games.length === 0) { removeVariantTabs('chart-heatmap-tribe'); return showNoData('chart-heatmap-tribe'); }
 
   const anyDuos = games.some((g) => g.is_duos);
-  if (anyDuos) {
+  if (anyDuos && State.mode !== 'solo') {
     renderTripleVariant('chart-heatmap-tribe', games, renderHeatmapTribeInner);
     renderTribeLegend('chart-heatmap-tribe');
   } else {
+    removeVariantTabs('chart-heatmap-tribe');
     renderHeatmapTribeInner(games, 'player');
     renderTribeLegend('chart-heatmap-tribe');
   }
@@ -1449,12 +1458,13 @@ function renderHeatmapTribeInner(games, variant) {
 
 function renderHeatmapBuff(games) {
   addChartHelp('chart-heatmap-buff', 'Frequency of each placement bucketed by total buff amount.');
-  if (!games || games.length === 0) return showNoData('chart-heatmap-buff');
+  if (!games || games.length === 0) { removeVariantTabs('chart-heatmap-buff'); return showNoData('chart-heatmap-buff'); }
 
   const anyDuos = games.some((g) => g.is_duos);
-  if (anyDuos) {
+  if (anyDuos && State.mode !== 'solo') {
     renderTripleVariant('chart-heatmap-buff', games, renderHeatmapBuffInner);
   } else {
+    removeVariantTabs('chart-heatmap-buff');
     renderHeatmapBuffInner(games, 'player');
   }
 }

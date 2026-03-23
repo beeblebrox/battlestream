@@ -357,15 +357,23 @@ main {
   flex-wrap: wrap;
 }
 
+.chart-container {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .echart-root {
   width: 100%;
-  height: calc(100% - 28px);
+  flex: 1;
+  min-height: 0;
 }
 
 .variant-tabs {
   display: flex;
   gap: 0.25rem;
   margin-bottom: 0.25rem;
+  flex-shrink: 0;
 }
 
 .variant-btn {
@@ -396,15 +404,12 @@ main {
   text-align: center;
   padding: 0.15rem 0;
   line-height: 1.4;
+  flex-shrink: 0;
 }
 
 .tribe-legend span {
   margin: 0 0.25rem;
   white-space: nowrap;
-}
-
-.chart-container.has-variants .echart-root {
-  height: calc(100% - 48px);
 }
 
 .loading {
