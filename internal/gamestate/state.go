@@ -22,15 +22,15 @@ const (
 
 // BGGameState is the current state of a Battlegrounds game.
 type BGGameState struct {
-	GameID        string
-	Phase         GamePhase
-	Turn          int // The BG turn the player sees (from player TURN tag)
-	TavernTier    int
-	Player        PlayerState
-	Opponent      *PlayerState
-	Board         []MinionState
-	OpponentBoard []MinionState
-	Modifications []StatMod
+	GameID        string        `json:"game_id"`
+	Phase         GamePhase     `json:"phase"`
+	Turn          int           `json:"turn"`          // The BG turn the player sees (from player TURN tag)
+	TavernTier    int           `json:"tavern_tier"`
+	Player        PlayerState   `json:"player"`
+	Opponent      *PlayerState  `json:"opponent,omitempty"`
+	Board         []MinionState `json:"board,omitempty"`
+	OpponentBoard []MinionState `json:"opponent_board,omitempty"`
+	Modifications []StatMod     `json:"modifications,omitempty"`
 	BuffSources     []BuffSource     `json:"buff_sources,omitempty"`
 	AbilityCounters []AbilityCounter `json:"ability_counters,omitempty"`
 	Enchantments    []Enchantment    `json:"enchantments,omitempty"`
@@ -38,9 +38,9 @@ type BGGameState struct {
 	AnomalyCardID      string           `json:"anomaly_card_id,omitempty"`
 	AnomalyName        string           `json:"anomaly_name,omitempty"`
 	AnomalyDescription string           `json:"anomaly_description,omitempty"`
-	StartTime     time.Time
-	EndTime       *time.Time
-	Placement     int
+	StartTime     time.Time  `json:"start_time"`
+	EndTime       *time.Time `json:"end_time,omitempty"`
+	Placement     int        `json:"placement"`
 
 	// Duos fields
 	IsDuos                 bool             `json:"is_duos,omitempty"`
