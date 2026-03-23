@@ -671,6 +671,11 @@ function xNameHeatmap(label) {
 function yName(label) {
   return { name: label, nameLocation: 'end', nameTextStyle: AXIS_NAME_STYLE };
 }
+// For inverted y-axes (inverse: true), 'end' is visually at the bottom.
+// Use 'start' to place the label at the visual top.
+function yNameInverse(label) {
+  return { name: label, nameLocation: 'start', nameTextStyle: AXIS_NAME_STYLE };
+}
 
 function isWin(placement, isDuos) {
   return isDuos ? placement <= 2 : placement <= 4;
@@ -726,7 +731,7 @@ function renderPlacementTrend(metas) {
       tooltip: { trigger: 'item' },
       legend: { data: ['Solo', 'Duos'], textStyle: { color: '#ccc' } },
       xAxis: { type: 'time', ...xName('Date') },
-      yAxis: { type: 'value', inverse: true, min: 1, max: 8, ...yName('Placement') },
+      yAxis: { type: 'value', inverse: true, min: 1, max: 8, ...yNameInverse('Placement') },
       series: [
         { name: 'Solo', type: 'line', data: soloData, smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { color: ACCENT }, itemStyle: { color: ACCENT } },
         { name: 'Duos', type: 'line', data: duosData, smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { color: '#4fc3f7' }, itemStyle: { color: '#4fc3f7' } },
@@ -744,7 +749,7 @@ function renderPlacementTrend(metas) {
       tooltip: { trigger: 'item' },
       legend: { data: ['Placement', 'Trend'], textStyle: { color: '#ccc' } },
       xAxis: { type: 'time', ...xName('Date') },
-      yAxis: { type: 'value', inverse: true, min: 1, max: 8, ...yName('Placement') },
+      yAxis: { type: 'value', inverse: true, min: 1, max: 8, ...yNameInverse('Placement') },
       series: [
         {
           name: 'Placement', type: 'line', data, smooth: true, symbol: 'circle', symbolSize: 6,
@@ -985,7 +990,7 @@ function renderDuration(metas) {
     ...BASE_ANIM,
     tooltip: { trigger: 'item', formatter: (p) => `Duration: ${p.data.value[0]} min<br/>Placement: ${p.data.value[1]}` },
     xAxis: { type: 'value', ...xName('Minutes') },
-    yAxis: { type: 'value', inverse: true, min: 1, max: 8, ...yName('Placement') },
+    yAxis: { type: 'value', inverse: true, min: 1, max: 8, ...yNameInverse('Placement') },
     series: [{
       type: 'scatter', data,
       symbolSize: 8,
@@ -1106,7 +1111,7 @@ function renderBuffEfficiency(games) {
     ...BASE_ANIM,
     tooltip: { trigger: 'item', formatter: (p) => `Total Buffs: ${p.data.value[0]}<br/>Placement: ${p.data.value[1]}` },
     xAxis: { type: 'value', ...xName('Total Buff (ATK+HP)') },
-    yAxis: { type: 'value', inverse: true, min: 1, max: 8, ...yName('Placement') },
+    yAxis: { type: 'value', inverse: true, min: 1, max: 8, ...yNameInverse('Placement') },
     series: [{
       type: 'scatter', data,
       symbolSize: 8,
