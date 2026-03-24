@@ -305,7 +305,7 @@ function renderTimelineScrubber(allMetas, globalMetas) {
   scrubberMaxTs = rangeSorted[rangeSorted.length - 1].start_time_unix * 1000;
 
   timelineChart.setOption({
-    grid: { left: 10, right: 20, top: 5, bottom: 22 },
+    grid: { left: 10, right: 20, top: 2, bottom: 36 },
     xAxis: {
       type: 'time',
       axisLabel: {
@@ -316,14 +316,14 @@ function renderTimelineScrubber(allMetas, globalMetas) {
       },
       axisTick: { show: true, lineStyle: { color: '#444' } },
       axisLine: { show: true, lineStyle: { color: '#444' } },
-      splitLine: { show: true, lineStyle: { color: '#222', type: 'dashed' } },
+      splitLine: { show: false },
     },
     yAxis: {
       type: 'value', min: 1, max: 8, show: false, inverse: true,
     },
     series: [{
       type: 'scatter',
-      symbolSize: 10,
+      symbolSize: 8,
       data,
       z: 10,
     }],
@@ -340,8 +340,8 @@ function renderTimelineScrubber(allMetas, globalMetas) {
         xAxisIndex: 0,
         start: 0,
         end: 100,
-        height: '100%',
-        top: 0,
+        height: 16,
+        bottom: 0,
         borderColor: '#444',
         backgroundColor: 'transparent',
         fillerColor: 'rgba(233, 69, 96, 0.15)',
