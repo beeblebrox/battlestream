@@ -134,22 +134,22 @@ This check validates axis naming, positioning, and styling for all charts.
 
 **Axis requirements table:**
 
-| Chart ID                | X-axis name         | Y-axis name    | Y inverted? |
-|-------------------------|---------------------|----------------|-------------|
-| chart-placement-trend   | Date                | Placement      | yes         |
-| chart-placement-dist    | Placement           | Games          | no          |
-| chart-winrate-trend     | Game #              | %              | no          |
-| chart-hero-perf         | Avg Placement       | (none)         | n/a         |
-| chart-tavern-tier       | Tier                | Games          | no          |
-| chart-buff-breakdown    | Category            | Total          | no          |
-| chart-duration          | Minutes             | Placement      | yes         |
-| chart-anomaly-perf      | Avg Placement       | (none)         | n/a         |
-| chart-tribe-winrate     | Avg Placement       | (none)         | n/a         |
-| chart-buff-efficiency   | Total Buff (ATK+HP) | Placement      | yes         |
-| chart-heatmap-hero      | Placement           | Hero           | no          |
-| chart-heatmap-tier-turn | Turn                | Tier           | no          |
-| chart-heatmap-tribe     | Placement           | Tribe          | no          |
-| chart-heatmap-buff      | Placement           | Buff Total     | no          |
+| Chart ID                | X-axis name         | Y-axis name    | Y inverted? | Notes                          |
+|-------------------------|---------------------|----------------|-------------|--------------------------------|
+| chart-placement-trend   | Date                | Placement      | yes         |                                |
+| chart-placement-dist    | Placement           | Games          | no          |                                |
+| chart-winrate-trend     | Game #              | %              | no          |                                |
+| chart-hero-perf         | Avg Placement       | (none)         | yes         | Horizontal bar, y sorts heroes |
+| chart-tavern-tier       | Tier                | Games          | no          |                                |
+| chart-buff-breakdown    | Game                | Category       | no          | Per-game heatmap, nameGap=35   |
+| chart-duration          | Duration            | Games          | no          | Histogram by time bucket       |
+| chart-anomaly-perf      | Avg Placement       | (none)         | yes         | Horizontal bar, y sorts anomalies |
+| chart-tribe-winrate     | Avg Placement       | (none)         | yes         | Horizontal bar, y sorts tribes |
+| chart-buff-efficiency   | Total Buff (ATK+HP) | Avg Placement  | yes         |                                |
+| chart-heatmap-hero      | Placement           | Hero           | no          |                                |
+| chart-heatmap-tier-turn | Turn                | Tier           | no          |                                |
+| chart-heatmap-tribe     | Placement           | Tribe          | no          |                                |
+| chart-heatmap-buff      | Placement           | Buff Total     | no          |                                |
 
 **Steps:**
 1. For each chart in the table above, evaluate:
@@ -175,7 +175,7 @@ This check validates axis naming, positioning, and styling for all charts.
 2. Verify per chart:
    - **X-axis name** matches table (if listed)
    - **X-axis nameLocation** is `'center'` for all charts with a named x-axis
-   - **X-axis nameGap**: `35` for heatmap charts (IDs containing "heatmap"), `25` for others
+   - **X-axis nameGap**: `35` for heatmap charts (IDs containing "heatmap") and `chart-buff-breakdown`, `25` for others
    - **Y-axis nameLocation**: `'start'` if `inverse: true`, `'end'` if not inverted
    - **nameTextStyle** on all named axes: `{ color: '#888', fontSize: 11 }`
    - Charts with `(none)` for Y-axis may omit the y-axis name entirely
@@ -782,30 +782,22 @@ and accessibility. Scatter series use a different symbol shape (diamond) instead
    ```
 3. Verify: `colorsMatch === true` (partner uses same color as player)
 4. Verify: `hasDecal === true` (partner has decal pattern)
-5. Evaluate buff breakdown partner series:
+5. Evaluate buff breakdown heatmap player/partner row styling:
    ```javascript
    (() => {
      const opts = Charts['chart-buff-breakdown'].getOption();
      const series = opts.series || [];
-     const pAtk = series.find(s => s.name === 'Player ATK');
-     const partAtk = series.find(s => s.name === 'Partner ATK');
-     const pHp = series.find(s => s.name === 'Player HP');
-     const partHp = series.find(s => s.name === 'Partner HP');
-     if (!partAtk) return { hasPartner: false };
-     return {
-       hasPartner: true,
-       atkColorsMatch: pAtk?.itemStyle?.color === partAtk?.itemStyle?.color,
-       hpColorsMatch: pHp?.itemStyle?.color === partHp?.itemStyle?.color,
-       partAtkDecal: !!partAtk?.itemStyle?.decal,
-       partHpDecal: !!partHp?.itemStyle?.decal,
-       playerAtkDecal: !!pAtk?.itemStyle?.decal,
-       playerHpDecal: !!pHp?.itemStyle?.decal
-     };
+     // Buff breakdown is a heatmap — player rows use blue tones, partner rows use orange tones.
+     // Check that the visualMap or series encoding distinguishes player from partner.
+     const yData = opts.yAxis?.[0]?.data || [];
+     const hasPlayerRows = yData.some(l => typeof l === 'string' && !l.includes('*'));
+     const hasPartnerRows = yData.some(l => typeof l === 'string' && l.includes('*'));
+     return { hasPlayerRows, hasPartnerRows, yLabels: yData };
    })()
    ```
-6. Verify: `atkColorsMatch === true` and `hpColorsMatch === true`
-7. Verify: `partAtkDecal === true` and `partHpDecal === true` (partner has decals)
-8. Verify: `playerAtkDecal === false` and `playerHpDecal === false` (player has no decals)
+6. Verify: `hasPlayerRows === true` (player buff category rows present)
+7. Verify: `hasPartnerRows === true` when duos games exist (partner rows marked with `*` suffix)
+8. Visual: player rows should use blue color scale, partner rows should use orange color scale
 9. Evaluate buff efficiency bar mode partner series:
    ```javascript
    (() => {
