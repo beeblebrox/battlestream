@@ -4,6 +4,8 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -291,6 +293,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "l":
 			m.showLastResult = !m.showLastResult
+		case "o":
+			if url := m.dashboardURL(); url != "" {
+				openBrowser(url)
+			}
 		}
 
 	case tea.WindowSizeMsg:
@@ -591,9 +597,9 @@ func (m *Model) View() string {
 	rowSession := m.renderSessionBar(m.width - 2)
 
 	// ── Help bar ──
-	helpText := "  [r] Refresh game  [R] Refresh stats  [d] Anomaly desc  [l] Last result  [q] Quit  scroll: mouse wheel"
+	helpText := "  [r] Refresh game  [R] Refresh stats  [d] Anomaly desc  [l] Last result  [o] Dashboard  [q] Quit  scroll: mouse wheel"
 	if m.game != nil && m.game.IsDuos {
-		helpText = "  [r] Refresh  [R] Stats  [d] Anomaly desc  [l] Last result  [q] Quit  scroll: mouse wheel"
+		helpText = "  [r] Refresh  [R] Stats  [d] Anomaly desc  [l] Last result  [o] Dashboard  [q] Quit  scroll: mouse wheel"
 	}
 	help := styleHelp.Render(helpText)
 
@@ -1106,7 +1112,39 @@ func (m *Model) renderSessionBar(w int) string {
 		}
 	}
 
+	// Append dashboard link with graceful truncation.
+	if url := m.dashboardURL(); url != "" {
+		full := styleLabel.Render("  Dashboard ") + styleDim.Render(url) + styleLabel.Render(" [o]")
+		short := styleLabel.Render("  [o]") + styleDim.Render(" Open Dashboard")
+		remaining := w - lipgloss.Width(b.String())
+		if remaining >= lipgloss.Width(full) {
+			b.WriteString(full)
+		} else if remaining >= lipgloss.Width(short) {
+			b.WriteString(short)
+		}
+	}
+
 	return styleBorder.Width(w).Render(b.String())
+}
+
+func (m *Model) dashboardURL() string {
+	if m.cfg != nil && m.cfg.API.RESTAddr != "" {
+		return "http://" + m.cfg.API.RESTAddr + "/dashboard/"
+	}
+	return ""
+}
+
+func openBrowser(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("cmd", "/c", "start", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	_ = cmd.Start()
 }
 
 // ============================================================
