@@ -266,7 +266,7 @@ function syncScrubberToFiltered() {
 
 // Build the timeline scrubber from all game metas (unfiltered).
 // This is an ECharts scatter chart with dataZoom slider showing game dots.
-function renderTimelineScrubber(allMetas) {
+function renderTimelineScrubber(allMetas, globalMetas) {
   const el = document.getElementById('timeline-scrubber');
   if (!el) return;
 
@@ -283,7 +283,9 @@ function renderTimelineScrubber(allMetas) {
 
   // Only re-render chart data when the game set changes (avoid resetting zoom)
   const newHash = allMetas.map((g) => g.game_id).join(',');
-  if (newHash === scrubberDataHash) return;
+  // Include global range in hash so axis updates when global set changes
+  const globalHash = globalMetas ? globalMetas.map((g) => g.game_id).join(',') : '';
+  if (newHash === scrubberDataHash && globalHash === '') return;
   scrubberDataHash = newHash;
 
   const sorted = [...allMetas].sort((a, b) => a.start_time_unix - b.start_time_unix);
@@ -295,8 +297,12 @@ function renderTimelineScrubber(allMetas) {
     };
   });
 
-  scrubberMinTs = sorted[0].start_time_unix * 1000;
-  scrubberMaxTs = sorted[sorted.length - 1].start_time_unix * 1000;
+  // Use global (all-modes) range for the axis so scrubber position is stable across mode switches.
+  // Fall back to current mode's games if no global set provided.
+  const rangeMetas = (globalMetas && globalMetas.length > 0) ? globalMetas : allMetas;
+  const rangeSorted = (rangeMetas === allMetas) ? sorted : [...rangeMetas].sort((a, b) => a.start_time_unix - b.start_time_unix);
+  scrubberMinTs = rangeSorted[0].start_time_unix * 1000;
+  scrubberMaxTs = rangeSorted[rangeSorted.length - 1].start_time_unix * 1000;
 
   timelineChart.setOption({
     grid: { left: 10, right: 20, top: 5, bottom: 22 },
@@ -473,6 +479,11 @@ function initModeToggle() {
       // Always return to overview when changing mode
       State.selectedGameID = null;
       State.selectedTurn = null;
+      // Reset scrubber state so stale date range from previous mode doesn't
+      // filter out the new mode's games (e.g. duos zoom → solo switch).
+      scrubberManual = false;
+      State.dateFrom = null;
+      State.dateTo = null;
       showLevel(1);
       refreshDashboard();
     });
@@ -2389,10 +2400,13 @@ async function refreshDashboard() {
   showLoading();
   try {
     const mode = State.mode === 'compare' ? 'all' : State.mode;
-    allUnfilteredGames = await API.getAllGames(mode);
+    // Fetch global (all-modes) games for the scrubber axis range so it stays
+    // stable across mode switches. Only needed when viewing a specific mode.
+    const globalGames = (mode !== 'all') ? await API.getAllGames('all') : null;
+    allUnfilteredGames = (mode === 'all') ? (globalGames || await API.getAllGames('all')) : await API.getAllGames(mode);
 
-    // Render scrubber with ALL games (unfiltered) so user can see full timeline
-    renderTimelineScrubber(allUnfilteredGames);
+    // Render scrubber: dots show current mode's games, axis spans all games
+    renderTimelineScrubber(allUnfilteredGames, globalGames);
 
     State.games = applyGameFilters(allUnfilteredGames);
 
