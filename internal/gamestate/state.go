@@ -647,6 +647,10 @@ func (m *Machine) SetDuosMode(isDuos bool) {
 	if isDuos && m.state.Partner == nil {
 		m.state.Partner = &PlayerState{}
 	}
+	if !isDuos {
+		m.state.Partner = nil
+		m.state.PartnerBoard = nil
+	}
 }
 
 // UpdatePartnerTag applies a tag change to the partner player state.

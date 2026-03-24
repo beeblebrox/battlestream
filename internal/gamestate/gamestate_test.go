@@ -2242,8 +2242,8 @@ func TestDuosDetectionViaPunishLeavers(t *testing.T) {
 	})
 
 	s := m.State()
-	if !s.IsDuos {
-		t.Error("expected IsDuos=true from BACON_DUOS_PUNISH_LEAVERS")
+	if s.IsDuos {
+		t.Error("expected IsDuos=false — PUNISH_LEAVERS alone is no longer sufficient for duos detection")
 	}
 	// Partner ID not yet known
 	if p.partnerPlayerID != 0 {
@@ -2267,14 +2267,130 @@ func TestDuosDetectionViaDuoPassable(t *testing.T) {
 		t.Fatal("should not be duos yet")
 	}
 
-	// BACON_DUO_PASSABLE on a card entity triggers duos detection
+	// BACON_DUO_PASSABLE on a card entity — alone is no longer sufficient
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 1143,
+		Tags: map[string]string{"BACON_DUO_PASSABLE": "1"},
+	})
+
+	if m.State().IsDuos {
+		t.Error("expected IsDuos=false — DUO_PASSABLE alone is no longer sufficient for duos detection")
+	}
+}
+
+func TestDuosDetectionCombinedPunishLeaversAndPassable(t *testing.T) {
+	m, p := newProc()
+	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+	// GameEntity tags with PUNISH_LEAVERS
+	p.Handle(parser.GameEvent{
+		Type: parser.EventGameEntityTags,
+		Tags: map[string]string{"BACON_DUOS_PUNISH_LEAVERS": "1"},
+	})
+	// Local player (no TEAMMATE tag)
+	p.Handle(parser.GameEvent{
+		Type: parser.EventPlayerDef, EntityID: 14, PlayerID: 5,
+		Tags: map[string]string{"hi": "144115193835963207", "lo": "30722021", "PLAYER_ID": "5"},
+	})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventPlayerDef, EntityID: 15, PlayerID: 13,
+		Tags: map[string]string{"hi": "0", "lo": "0", "PLAYER_ID": "13"},
+	})
+
+	if m.State().IsDuos {
+		t.Fatal("should not be duos after PUNISH_LEAVERS alone")
+	}
+
+	// DUO_PASSABLE arrives — combined with PUNISH_LEAVERS, should trigger duos
 	p.Handle(parser.GameEvent{
 		Type: parser.EventTagChange, EntityID: 1143,
 		Tags: map[string]string{"BACON_DUO_PASSABLE": "1"},
 	})
 
 	if !m.State().IsDuos {
-		t.Error("expected IsDuos=true from BACON_DUO_PASSABLE")
+		t.Error("expected IsDuos=true from combined PUNISH_LEAVERS + DUO_PASSABLE")
+	}
+}
+
+func TestDuosUnsetViaPunishLeaversZero(t *testing.T) {
+	m, p := newProc()
+	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+	// Set up combined signals
+	p.Handle(parser.GameEvent{
+		Type: parser.EventGameEntityTags,
+		Tags: map[string]string{"BACON_DUOS_PUNISH_LEAVERS": "1"},
+	})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventPlayerDef, EntityID: 14, PlayerID: 5,
+		Tags: map[string]string{"hi": "144115193835963207", "lo": "30722021", "PLAYER_ID": "5"},
+	})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventPlayerDef, EntityID: 15, PlayerID: 13,
+		Tags: map[string]string{"hi": "0", "lo": "0", "PLAYER_ID": "13"},
+	})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 1143,
+		Tags: map[string]string{"BACON_DUO_PASSABLE": "1"},
+	})
+
+	if !m.State().IsDuos {
+		t.Fatal("expected IsDuos=true from combined signals")
+	}
+
+	// PUNISH_LEAVERS=0 should clear duos (backup-only detection)
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 1,
+		EntityName: "GameEntity",
+		Tags: map[string]string{"BACON_DUOS_PUNISH_LEAVERS": "0"},
+	})
+
+	if m.State().IsDuos {
+		t.Error("expected IsDuos=false after PUNISH_LEAVERS changed to 0")
+	}
+}
+
+func TestDuosNotUnsetWhenFromTeammate(t *testing.T) {
+	m, p := newProc()
+	setupDuosGame(p)
+
+	if !m.State().IsDuos {
+		t.Fatal("expected IsDuos=true from TEAMMATE_PLAYER_ID")
+	}
+
+	// PUNISH_LEAVERS=0 should NOT clear duos when set via authoritative source
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 1,
+		EntityName: "GameEntity",
+		Tags: map[string]string{"BACON_DUOS_PUNISH_LEAVERS": "0"},
+	})
+
+	if !m.State().IsDuos {
+		t.Error("expected IsDuos to remain true — duos was set via authoritative TEAMMATE_PLAYER_ID")
+	}
+}
+
+func TestSetDuosModeFalseClearsPartner(t *testing.T) {
+	m, _ := newProc()
+	m.SetDuosMode(true)
+
+	s := m.State()
+	if !s.IsDuos {
+		t.Fatal("expected IsDuos=true after SetDuosMode(true)")
+	}
+	if s.Partner == nil {
+		t.Fatal("expected Partner to be initialized")
+	}
+
+	m.SetDuosMode(false)
+
+	s = m.State()
+	if s.IsDuos {
+		t.Error("expected IsDuos=false after SetDuosMode(false)")
+	}
+	if s.Partner != nil {
+		t.Error("expected Partner=nil after SetDuosMode(false)")
+	}
+	if s.PartnerBoard != nil {
+		t.Error("expected PartnerBoard=nil after SetDuosMode(false)")
 	}
 }
 

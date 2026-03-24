@@ -76,7 +76,9 @@ type Processor struct {
 	partnerPlayerID   int    // CONTROLLER value for the partner (from BACON_DUO_TEAMMATE_PLAYER_ID)
 	partnerPlayerName string
 	partnerHeroID     int    // entity ID of the partner's hero card
-	isDuos            bool
+	isDuos              bool
+	punishLeaversActive bool // BACON_DUOS_PUNISH_LEAVERS=1 seen (not sufficient alone)
+	duosFromTeammate    bool // duos confirmed via BACON_DUO_TEAMMATE_PLAYER_ID (authoritative)
 
 	// Partner combat tracking
 	partnerCombatActive    bool          // true while partner's combat is in progress
@@ -163,6 +165,8 @@ func (p *Processor) Handle(e parser.GameEvent) {
 		p.partnerPlayerName = ""
 		p.partnerHeroID = 0
 		p.isDuos = false
+		p.punishLeaversActive = false
+		p.duosFromTeammate = false
 		p.partnerCombatActive = false
 		p.partnerCombatHeroCtrl = 0
 		p.partnerCombatMinions = nil
@@ -234,11 +238,8 @@ func (p *Processor) Handle(e parser.GameEvent) {
 	case parser.EventGameEntityTags:
 		for tag, value := range e.Tags {
 			if tag == "BACON_DUOS_PUNISH_LEAVERS" && value == "1" {
-				if !p.isDuos {
-					p.isDuos = true
-					p.machine.SetDuosMode(true)
-					slog.Info("Duos detected from GameEntity tag", "tag", tag)
-				}
+				p.punishLeaversActive = true
+				slog.Info("PUNISH_LEAVERS flag recorded (not sufficient alone for duos)", "tag", tag)
 			}
 		}
 
@@ -297,6 +298,7 @@ func (p *Processor) handlePlayerDef(e parser.GameEvent) {
 		if duoStr := e.Tags["BACON_DUO_TEAMMATE_PLAYER_ID"]; duoStr != "" {
 			if partnerID, err := strconv.Atoi(duoStr); err == nil && partnerID > 0 {
 				p.isDuos = true
+				p.duosFromTeammate = true
 				p.partnerPlayerID = partnerID
 				p.machine.SetDuosMode(true)
 				slog.Info("Duos detected from player def", "partnerPlayerID", partnerID)
@@ -370,10 +372,18 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 	for tag, value := range e.Tags {
 		switch tag {
 		case "BACON_DUO_PASSABLE":
-			if value == "1" && !p.isDuos {
+			if value == "1" && !p.isDuos && p.punishLeaversActive {
 				p.isDuos = true
 				p.machine.SetDuosMode(true)
-				slog.Info("Duos detected from BACON_DUO_PASSABLE")
+				slog.Info("Duos detected from combined PUNISH_LEAVERS + DUO_PASSABLE")
+			}
+
+		case "BACON_DUOS_PUNISH_LEAVERS":
+			if value == "0" && p.isDuos && !p.duosFromTeammate {
+				p.isDuos = false
+				p.punishLeaversActive = false
+				p.machine.SetDuosMode(false)
+				slog.Info("Duos cleared — PUNISH_LEAVERS changed to 0 (backup-only detection)")
 			}
 
 		case "BACON_CURRENT_COMBAT_PLAYER_ID":
