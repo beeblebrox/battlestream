@@ -45,6 +45,7 @@ D 22:59:04.3224368 GameState.DebugPrintPower() -     Player EntityID=14 PlayerID
 D 22:59:04.3224368 GameState.DebugPrintPower() -         tag=CONTROLLER value=5
 D 22:59:04.3224368 GameState.DebugPrintPower() -         tag=CARDTYPE value=PLAYER
 D 22:59:04.3224368 GameState.DebugPrintPower() -         tag=PLAYER_ID value=5
+D 22:59:04.3224368 GameState.DebugPrintPower() -         tag=BACON_DUO_TEAMMATE_PLAYER_ID value=6
 D 22:59:04.3224368 GameState.DebugPrintPower() -         tag=LAST_AFFECTED_BY value=14
 D 22:59:04.3224368 GameState.DebugPrintPower() -         tag=HERO_ENTITY value=33
 D 22:59:04.3224368 GameState.DebugPrintPower() -         tag=MAXHANDSIZE value=10
@@ -67,6 +68,13 @@ D 22:59:04.3224368 GameState.DebugPrintPower() -         tag=BACON_MAX_PLAYER_TE
 D 22:59:04.3224368 GameState.DebugPrintPower() -         tag=SPAWN_TIME_COUNT value=1
 D 22:59:04.3224368 GameState.DebugPrintPower() -         tag=MAX_EXCAVATE_TIER value=2
 D 22:59:04.3224368 GameState.DebugPrintPower() -         tag=BACON_PREMIUM_FREE_REROLLS value=1
+D 22:59:04.3224368 GameState.DebugPrintPower() -     Player EntityID=16 PlayerID=6 GameAccountId=[hi=144115193835963208 lo=30722022]
+D 22:59:04.3224368 GameState.DebugPrintPower() -         tag=CONTROLLER value=6
+D 22:59:04.3224368 GameState.DebugPrintPower() -         tag=CARDTYPE value=PLAYER
+D 22:59:04.3224368 GameState.DebugPrintPower() -         tag=PLAYER_ID value=6
+D 22:59:04.3224368 GameState.DebugPrintPower() -         tag=HERO_ENTITY value=59
+D 22:59:04.3224368 GameState.DebugPrintPower() -         tag=ZONE value=PLAY
+D 22:59:04.3224368 GameState.DebugPrintPower() -         tag=ENTITY_ID value=16
 D 22:59:04.3224368 GameState.DebugPrintPower() -     Player EntityID=15 PlayerID=13 GameAccountId=[hi=0 lo=0]
 D 22:59:04.3224368 GameState.DebugPrintPower() -         tag=CONTROLLER value=13
 D 22:59:04.3224368 GameState.DebugPrintPower() -         tag=CARDTYPE value=PLAYER

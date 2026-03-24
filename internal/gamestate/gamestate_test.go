@@ -1959,6 +1959,12 @@ func TestDeferredPartnerResolution(t *testing.T) {
 	// Player names
 	p.Handle(parser.GameEvent{Type: parser.EventPlayerName, PlayerID: 5, EntityName: "Moch#1358"})
 
+	// DUO_PASSABLE confirms duos when combined with PUNISH_LEAVERS
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 1143,
+		Tags: map[string]string{"BACON_DUO_PASSABLE": "1"},
+	})
+
 	// Partner hero appears with PLAYER_ID=6 via FULL_ENTITY
 	p.Handle(parser.GameEvent{
 		Type: parser.EventEntityUpdate, EntityID: 146, CardID: "BG32_HERO_002",
