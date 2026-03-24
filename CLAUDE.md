@@ -81,10 +81,10 @@ Mappings live in `internal/gamestate/categories.go`. Reference implementations i
 
 ## Duos Support
 
-Multi-signal duos detection (checked in order):
-1. `BACON_DUO_TEAMMATE_PLAYER_ID` in CREATE_GAME Player block (preferred — identifies partner immediately)
-2. `BACON_DUOS_PUNISH_LEAVERS` in GameEntity block tags (new — `EventGameEntityTags`)
-3. `BACON_DUO_PASSABLE` TAG_CHANGE on card entities (fallback)
+Duos detection signal hierarchy (HS patch 2026-03 changed `BACON_DUOS_PUNISH_LEAVERS` to appear in ALL BG games):
+1. `BACON_DUO_TEAMMATE_PLAYER_ID` in CREATE_GAME Player block — **authoritative**, immediately sets duos
+2. `BACON_DUOS_PUNISH_LEAVERS=1` + `BACON_DUO_PASSABLE=1` combined — backup; neither alone is sufficient
+3. `BACON_DUOS_PUNISH_LEAVERS=0` TAG_CHANGE — clears duos if set only via backup path (not TEAMMATE_PLAYER_ID)
 
 Partner hero identified by `PLAYER_ID` tag in FULL_ENTITY (not CONTROLLER, which is a shared bot ID). Health/armor are shared (team pool).
 
