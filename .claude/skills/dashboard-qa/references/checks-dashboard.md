@@ -29,6 +29,7 @@ step-by-step validation instructions using Playwright browser tools.
 | 20    | Scrubber Handle Stability | scrubber  |
 | 21    | Scrubber Zoom Proportional | scrubber |
 | 22    | Duos-Aware Grouping    | duos         |
+| 23    | Partner Decal Styling  | duos         |
 
 ---
 
@@ -744,3 +745,97 @@ Validates that charts use duos-appropriate grouping when games are duos.
     })()
     ```
 14. Verify: `hasPartnerCard === true` (when duos games exist)
+
+---
+
+### Check 23: Partner Decal Styling
+**Group:** duos
+
+Partner series on Level-1 charts must use the same base colors as their player counterparts,
+distinguished by a diagonal stripe decal pattern overlay. This ensures aesthetic consistency
+and accessibility. Scatter series use a different symbol shape (diamond) instead of decals.
+
+**Charts with partner series:**
+- `chart-tavern-tier` — Partner bar uses same purple (#7c4dff) + decal
+- `chart-buff-breakdown` — Partner ATK uses same yellow (#ffc107) + decal, Partner HP uses same green (#00c853) + decal
+- `chart-buff-efficiency` (Bar mode) — Partner bars use same win/loss colors + decal
+- `chart-buff-efficiency` (Scatter mode) — Partner uses same purple (#ab47bc) + diamond symbol
+
+**Steps:**
+1. Ensure mode is All or Duos (so partner series appear)
+2. Evaluate tavern tier partner series:
+   ```javascript
+   (() => {
+     const opts = Charts['chart-tavern-tier'].getOption();
+     const series = opts.series || [];
+     const partner = series.find(s => s.name === 'Partner');
+     const player = series.find(s => s.name === 'Player' || s.name === 'Games');
+     if (!partner) return { hasPartner: false };
+     return {
+       hasPartner: true,
+       partnerColor: partner.itemStyle?.color,
+       playerColor: player?.itemStyle?.color,
+       colorsMatch: partner.itemStyle?.color === player?.itemStyle?.color,
+       hasDecal: !!partner.itemStyle?.decal
+     };
+   })()
+   ```
+3. Verify: `colorsMatch === true` (partner uses same color as player)
+4. Verify: `hasDecal === true` (partner has decal pattern)
+5. Evaluate buff breakdown partner series:
+   ```javascript
+   (() => {
+     const opts = Charts['chart-buff-breakdown'].getOption();
+     const series = opts.series || [];
+     const pAtk = series.find(s => s.name === 'Player ATK');
+     const partAtk = series.find(s => s.name === 'Partner ATK');
+     const pHp = series.find(s => s.name === 'Player HP');
+     const partHp = series.find(s => s.name === 'Partner HP');
+     if (!partAtk) return { hasPartner: false };
+     return {
+       hasPartner: true,
+       atkColorsMatch: pAtk?.itemStyle?.color === partAtk?.itemStyle?.color,
+       hpColorsMatch: pHp?.itemStyle?.color === partHp?.itemStyle?.color,
+       partAtkDecal: !!partAtk?.itemStyle?.decal,
+       partHpDecal: !!partHp?.itemStyle?.decal,
+       playerAtkDecal: !!pAtk?.itemStyle?.decal,
+       playerHpDecal: !!pHp?.itemStyle?.decal
+     };
+   })()
+   ```
+6. Verify: `atkColorsMatch === true` and `hpColorsMatch === true`
+7. Verify: `partAtkDecal === true` and `partHpDecal === true` (partner has decals)
+8. Verify: `playerAtkDecal === false` and `playerHpDecal === false` (player has no decals)
+9. Evaluate buff efficiency bar mode partner series:
+   ```javascript
+   (() => {
+     const opts = Charts['chart-buff-efficiency'].getOption();
+     const series = opts.series || [];
+     const partner = series.find(s => s.name === 'Partner');
+     if (!partner) return { hasPartner: false };
+     const partnerData = partner.data || [];
+     const hasDecal = partnerData.some(d => d?.itemStyle?.decal);
+     return { hasPartner: true, hasDecal };
+   })()
+   ```
+10. Verify: `hasDecal === true` (partner bars have decal in bar mode)
+11. Switch buff efficiency to Scatter mode (click Scatter toggle)
+12. Evaluate scatter partner series:
+    ```javascript
+    (() => {
+      const opts = Charts['chart-buff-efficiency'].getOption();
+      const series = opts.series || [];
+      const player = series.find(s => s.name === 'Player' || s.name === 'Games');
+      const partner = series.find(s => s.name === 'Partner');
+      if (!partner) return { hasPartner: false };
+      return {
+        hasPartner: true,
+        playerSymbol: player?.symbol || 'circle',
+        partnerSymbol: partner?.symbol || 'circle',
+        symbolsDiffer: (player?.symbol || 'circle') !== (partner?.symbol || 'circle'),
+        colorsMatch: player?.itemStyle?.color === partner?.itemStyle?.color
+      };
+    })()
+    ```
+13. Verify: `symbolsDiffer === true` (partner uses different symbol, e.g. diamond)
+14. Verify: `colorsMatch === true` (same base color for both)

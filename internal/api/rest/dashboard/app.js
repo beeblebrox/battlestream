@@ -701,6 +701,24 @@ function updatePartnerStats(fullGames) {
 const ACCENT = '#e94560';
 const WIN_COLOR = '#00c853';
 const LOSS_COLOR = '#ff5252';
+const PARTNER_DECAL = { symbol: 'rect', symbolSize: 0.8, dashArrayX: [6, 3], dashArrayY: [6, 0], rotation: 0.7, color: 'rgba(255,255,255,0.25)' };
+
+function lerpColor(a, b, t) {
+  const ah = parseInt(a.slice(1), 16), bh = parseInt(b.slice(1), 16);
+  const ar = (ah >> 16) & 0xff, ag = (ah >> 8) & 0xff, ab = ah & 0xff;
+  const br = (bh >> 16) & 0xff, bg = (bh >> 8) & 0xff, bb = bh & 0xff;
+  const r = Math.round(ar + (br - ar) * t), g = Math.round(ag + (bg - ag) * t), bl = Math.round(ab + (bb - ab) * t);
+  return '#' + ((1 << 24) + (r << 16) + (g << 8) + bl).toString(16).slice(1);
+}
+function buffHeatColor(val, p90, isPartner) {
+  const t = Math.min(1, Math.max(0, val / p90));
+  if (isPartner) return t < 0.5 ? lerpColor('#2e1a0d', '#e65100', t * 2) : lerpColor('#e65100', '#ffab40', (t - 0.5) * 2);
+  return t < 0.5 ? lerpColor('#111d3a', '#1565c0', t * 2) : lerpColor('#1565c0', '#4fc3f7', (t - 0.5) * 2);
+}
+function buffHeatLabelColor(val, p90) { return Math.min(1, Math.max(0, val / p90)) > 0.55 ? '#111' : '#fff'; }
+function titleCase(s) { return s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()); }
+const NO_DECAL = { symbol: 'none' };
+const ARIA_DECAL = { aria: { enabled: true, decal: { show: true } } };
 const BASE_ANIM = { animationDuration: 800, animationEasing: 'cubicOut' };
 const AXIS_NAME_STYLE = { color: '#888', fontSize: 11 };
 
@@ -742,10 +760,13 @@ function autoSizeChart(containerId, rowCount) {
   const container = document.getElementById(containerId);
   if (!container) return;
   const minRowHeight = 28;
-  const overhead = 100; // title + tabs + legend + padding
+  const isWide = container.classList.contains('wide');
+  const overhead = isWide ? 140 : 100; // wide (heatmaps): title + tabs + visualMap + x-axis + padding
   const needed = rowCount * minRowHeight + overhead;
-  const defaultHeight = container.classList.contains('wide') ? 300 : 350;
+  const defaultHeight = isWide ? 340 : 350;
   container.style.height = Math.max(defaultHeight, needed) + 'px';
+  // Resize cached chart instance so ECharts picks up new container dimensions
+  if (Charts[containerId]) Charts[containerId].resize();
 }
 
 function removeVariantTabs(containerId) {
@@ -900,12 +921,16 @@ function renderPlacementDist(metas) {
   if (!metas || metas.length === 0) return showNoData('chart-placement-dist');
   const chart = getChart('chart-placement-dist');
 
+  const isDuosOnly = State.mode === 'duos';
+
   if (State.mode === 'compare') {
     const soloCounts = new Array(8).fill(0);
-    const duosCounts = new Array(8).fill(0);
+    const duosCounts = new Array(4).fill(0);
     metas.forEach((g) => {
-      if (g.placement >= 1 && g.placement <= 8) {
-        (g.is_duos ? duosCounts : soloCounts)[g.placement - 1]++;
+      if (g.is_duos) {
+        if (g.placement >= 1 && g.placement <= 4) duosCounts[g.placement - 1]++;
+      } else {
+        if (g.placement >= 1 && g.placement <= 8) soloCounts[g.placement - 1]++;
       }
     });
 
@@ -917,17 +942,19 @@ function renderPlacementDist(metas) {
       yAxis: { type: 'value', ...yName('Games') },
       series: [
         { name: 'Solo', type: 'bar', data: soloCounts, itemStyle: { color: ACCENT } },
-        { name: 'Duos', type: 'bar', data: duosCounts, itemStyle: { color: '#4fc3f7' } },
+        { name: 'Duos', type: 'bar', data: duosCounts.concat(new Array(4).fill(0)), itemStyle: { color: '#4fc3f7' } },
       ],
     }, true);
   } else {
-    const counts = new Array(8).fill(0);
+    const maxPlace = isDuosOnly ? 4 : 8;
+    const labels = isDuosOnly ? ['1st', '2nd', '3rd', '4th'] : ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th'];
+    const counts = new Array(maxPlace).fill(0);
     metas.forEach((g) => {
-      if (g.placement >= 1 && g.placement <= 8) counts[g.placement - 1]++;
+      if (g.placement >= 1 && g.placement <= maxPlace) counts[g.placement - 1]++;
     });
 
     const duosCount = metas.filter((g) => g.is_duos).length;
-    const threshold = (State.mode === 'duos' || (State.mode === 'all' && duosCount > metas.length / 2)) ? 2 : 4;
+    const threshold = (isDuosOnly || (State.mode === 'all' && duosCount > metas.length / 2)) ? 2 : 4;
     const colors = counts.map((_, i) => {
       const p = i + 1;
       return p <= threshold ? WIN_COLOR : LOSS_COLOR;
@@ -936,7 +963,7 @@ function renderPlacementDist(metas) {
     chart.setOption({
       ...BASE_ANIM,
       tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th'], ...xName('Placement') },
+      xAxis: { type: 'category', data: labels, ...xName('Placement') },
       yAxis: { type: 'value', ...yName('Games') },
       series: [{
         type: 'bar',
@@ -1050,14 +1077,15 @@ function renderHeroPerfInner(games, variant) {
     } else {
       label = heroBaseName(g.player?.hero_card_id);
     }
-    if (!heroMap.has(label)) heroMap.set(label, { total: 0, count: 0 });
+    if (!heroMap.has(label)) heroMap.set(label, { total: 0, count: 0, wins: 0 });
     const entry = heroMap.get(label);
     entry.total += g.placement || 0;
     entry.count++;
+    if (isWin(g.placement, g.is_duos)) entry.wins++;
   }
 
   const entries = [...heroMap.entries()]
-    .map(([name, v]) => ({ name, avg: v.total / v.count, count: v.count }))
+    .map(([name, v]) => ({ name, avg: v.total / v.count, count: v.count, winRate: v.wins / v.count }))
     .sort((a, b) => a.avg - b.avg);
 
   autoSizeChart('chart-hero-perf', entries.length);
@@ -1072,8 +1100,7 @@ function renderHeroPerfInner(games, variant) {
     xAxis: { type: 'value', min: 1, max: Math.min(8, Math.ceil(Math.max(...entries.map((e) => e.avg)) + 1)), ...xName('Avg Placement') },
     series: [{
       type: 'bar',
-      data: entries.map((e) => ({ value: parseFloat(e.avg.toFixed(2)), count: e.count })),
-      itemStyle: { color: ACCENT },
+      data: entries.map((e) => ({ value: parseFloat(e.avg.toFixed(2)), count: e.count, itemStyle: { color: e.winRate >= 0.5 ? WIN_COLOR : LOSS_COLOR } })),
       label: { show: true, position: 'right', formatter: (p) => `${p.data.value} (${entries[p.dataIndex].count}g)`, color: '#ccc', fontSize: 11 },
     }],
   }, true);
@@ -1084,58 +1111,208 @@ function renderTavernTier(games) {
   if (!games || games.length === 0) return showNoData('chart-tavern-tier');
   const chart = getChart('chart-tavern-tier');
 
-  const tiers = new Array(8).fill(0); // index 0 unused, 1-7
+  const playerTiers = new Array(8).fill(0); // index 0 unused, 1-7
+  const partnerTiers = new Array(8).fill(0);
+  let hasDuos = false;
   for (const g of games) {
     const t = g.tavern_tier || g.player?.tavern_tier || 0;
-    if (t >= 1 && t <= 7) tiers[t]++;
+    if (t >= 1 && t <= 7) playerTiers[t]++;
+    if (g.is_duos && g.partner?.tavern_tier) {
+      hasDuos = true;
+      const pt = g.partner.tavern_tier;
+      if (pt >= 1 && pt <= 7) partnerTiers[pt]++;
+    }
+  }
+
+  const showPartner = hasDuos && State.mode !== 'solo';
+  const series = [{
+    name: showPartner ? 'Player' : 'Games',
+    type: 'bar',
+    data: playerTiers.slice(1, 8),
+    itemStyle: { color: '#7c4dff', decal: NO_DECAL },
+  }];
+  if (showPartner) {
+    series.push({
+      name: 'Partner',
+      type: 'bar',
+      data: partnerTiers.slice(1, 8),
+      itemStyle: { color: '#7c4dff', decal: PARTNER_DECAL },
+    });
   }
 
   chart.setOption({
     ...BASE_ANIM,
+    ...(showPartner ? ARIA_DECAL : {}),
     tooltip: { trigger: 'axis' },
+    legend: showPartner ? { data: ['Player', 'Partner'], textStyle: { color: '#ccc' } } : undefined,
     xAxis: { type: 'category', data: ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'], ...xName('Tier') },
     yAxis: { type: 'value', ...yName('Games') },
-    series: [{
-      type: 'bar',
-      data: tiers.slice(1, 8),
-      itemStyle: { color: '#7c4dff' },
-    }],
+    series,
   }, true);
 }
 
 function renderBuffBreakdown(games) {
-  addChartHelp('chart-buff-breakdown', 'Total attack and health buffs accumulated across games, broken down by buff source category.');
+  addChartHelp('chart-buff-breakdown', 'Per-game buff sources as a heatmap. Color intensity = total buff (ATK+HP). Player rows in blue, partner rows in orange. Hover for ATK/HP split.');
   if (!games || games.length === 0) return showNoData('chart-buff-breakdown');
-  const chart = getChart('chart-buff-breakdown');
+  removeLayoutToggle('chart-buff-breakdown');
 
-  const catMap = new Map();
-  for (const g of games) {
-    const allBuffs = [...(g.buff_sources || [])];
-    if (g.is_duos && g.partner_buff_sources) allBuffs.push(...g.partner_buff_sources);
-    for (const bs of allBuffs) {
-      if (!catMap.has(bs.category)) catMap.set(bs.category, { atk: 0, hp: 0 });
-      const entry = catMap.get(bs.category);
-      entry.atk += bs.attack || 0;
-      entry.hp += bs.health || 0;
+  const chart = getChart('chart-buff-breakdown');
+  const sorted = [...games].sort((a, b) => (a.start_time_unix || 0) - (b.start_time_unix || 0));
+  const hasDuos = sorted.some((g) => g.is_duos) && State.mode !== 'solo';
+
+  // Collect all buff categories
+  const catSet = new Set();
+  for (const g of sorted) {
+    for (const bs of (g.buff_sources || [])) catSet.add(bs.category);
+    if (hasDuos && g.partner_buff_sources) for (const bs of g.partner_buff_sources) catSet.add(bs.category);
+  }
+  const allCats = [...catSet];
+
+  // Sort categories by total buff value descending
+  const catTotals = {};
+  for (const cat of allCats) {
+    catTotals[cat] = sorted.reduce((sum, g) => {
+      const p = (g.buff_sources || []).filter((b) => b.cat === cat || b.category === cat);
+      const pt = (g.partner_buff_sources || []).filter((b) => b.cat === cat || b.category === cat);
+      return sum + p.reduce((s, b) => s + Math.max(0, b.attack || 0) + Math.max(0, b.health || 0), 0)
+                 + pt.reduce((s, b) => s + Math.max(0, b.attack || 0) + Math.max(0, b.health || 0), 0);
+    }, 0);
+  }
+  const sortedCats = allCats.sort((a, b) => catTotals[b] - catTotals[a]);
+
+  // Check which categories have partner data
+  const hasPartner = (cat) => hasDuos && sorted.some((g) => {
+    const b = (g.partner_buff_sources || []).find((bs) => (bs.cat || bs.category) === cat);
+    return b && (Math.max(0, b.attack || 0) + Math.max(0, b.health || 0)) > 0;
+  });
+
+  // Build y-axis rows
+  const yLabels = [];
+  const yMeta = [];
+  for (const cat of sortedCats) {
+    yLabels.push(titleCase(cat));
+    yMeta.push({ cat, who: 'Player' });
+    if (hasPartner(cat)) {
+      yLabels.push('\u2514 Partner');
+      yMeta.push({ cat, who: 'Partner' });
     }
   }
 
-  if (catMap.size === 0) return showNoData('chart-buff-breakdown');
+  // Game labels
+  const gameLabels = sorted.map((g, i) => `#${i + 1} (${isWin(g.placement, g.is_duos) ? g.placement + 'W' : g.placement + 'L'})`);
+  const xAxisColors = sorted.map((g) => isWin(g.placement, g.is_duos) ? WIN_COLOR : LOSS_COLOR);
 
-  const categories = [...catMap.keys()].sort();
+  // Build heatmap data
+  function getBuffVal(g, cat, field, partner) {
+    const src = partner ? (g.partner_buff_sources || []) : (g.buff_sources || []);
+    const bs = src.find((b) => (b.cat || b.category) === cat);
+    return bs ? (bs[field] || bs[field === 'atk' ? 'attack' : 'health'] || 0) : 0;
+  }
+
+  const heatData = [];
+  const totals = [];
+  for (let gi = 0; gi < sorted.length; gi++) {
+    for (let yi = 0; yi < yMeta.length; yi++) {
+      const { cat, who } = yMeta[yi];
+      const isP = who === 'Partner';
+      const atk = Math.max(0, getBuffVal(sorted[gi], cat, 'atk', isP));
+      const hp = Math.max(0, getBuffVal(sorted[gi], cat, 'hp', isP));
+      const total = atk + hp;
+      totals.push(total);
+      heatData.push([gi, yi, total, atk, hp, who]);
+    }
+  }
+
+  // P90 percentile cap
+  const nonZero = totals.filter((v) => v > 0).sort((a, b) => a - b);
+  const p90 = nonZero.length > 0 ? nonZero[Math.floor(nonZero.length * 0.9)] : 1;
+
+  // Color each cell
+  const coloredData = heatData.map((d) => {
+    const [gi, yi, total, atk, hp, who] = d;
+    const isP = who === 'Partner';
+    return {
+      value: [gi, yi, total], atk, hp, who,
+      itemStyle: { color: buffHeatColor(total, p90, isP) },
+      label: { color: buffHeatLabelColor(total, p90) },
+    };
+  });
+
+  // Auto-size chart height
+  autoSizeChart('chart-buff-breakdown', yLabels.length);
 
   chart.setOption({
     ...BASE_ANIM,
-    tooltip: { trigger: 'axis' },
-    legend: { data: ['Attack', 'Health'], textStyle: { color: '#ccc' } },
-    grid: { bottom: 80 },
-    xAxis: { type: 'category', data: categories, axisLabel: { rotate: 45, fontSize: 10, interval: 0 }, ...xName('Category'), nameGap: 55 },
-    yAxis: { type: 'value', min: 0, ...yName('Total') },
-    series: [
-      { name: 'Attack', type: 'bar', stack: 'total', data: categories.map((c) => catMap.get(c).atk), itemStyle: { color: '#ffc107' } },
-      { name: 'Health', type: 'bar', stack: 'total', data: categories.map((c) => catMap.get(c).hp), itemStyle: { color: WIN_COLOR } },
-    ],
+    tooltip: {
+      formatter: (p) => {
+        if (p.seriesType !== 'heatmap') return '';
+        const d = p.data;
+        const yi = d.value[1];
+        return `Game ${gameLabels[d.value[0]]}<br/>${titleCase(yMeta[yi].cat)} (${d.who})<br/>ATK: +${d.atk}  /  HP: +${d.hp}<br/>Total: ${d.value[2]}`;
+      },
+    },
+    grid: { left: 170, right: 50, bottom: 100, top: 10 },
+    xAxis: {
+      type: 'category', data: gameLabels,
+      axisLabel: { rotate: 45, fontSize: 10, color: (val, idx) => xAxisColors[idx] || '#ccc' },
+      ...xNameHeatmap('Game'),
+    },
+    yAxis: {
+      type: 'category', data: yLabels,
+      axisLabel: { fontSize: 10, interval: 0, color: (val, idx) => yMeta[idx]?.who === 'Partner' ? '#ff9800' : '#ccc' },
+      splitLine: { show: false },
+      axisTick: { show: false },
+      ...yName('Category'),
+    },
+    visualMap: { show: false },
+    series: [{
+      type: 'heatmap', data: coloredData,
+      itemStyle: { borderColor: '#3a3a5a', borderWidth: 1 },
+      label: {
+        show: true, fontSize: 10,
+        formatter: (p) => {
+          const d = p.data;
+          if (d.value[2] === 0) return '';
+          const { atk, hp } = d;
+          if (atk === 0) return `+${hp} HP`;
+          if (hp === 0) return `+${atk} ATK`;
+          return `+${atk}\n/+${hp}`;
+        },
+        lineHeight: 13,
+      },
+    }],
   }, true);
+}
+
+function renderLayoutToggle(containerId, games, renderFn, labels, defaultLabel) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  let tabs = container.querySelector('.layout-toggle');
+  if (!tabs) {
+    tabs = document.createElement('div');
+    tabs.className = 'variant-tabs layout-toggle';
+    tabs.innerHTML = labels.map((l) =>
+      `<button class="variant-btn${l === defaultLabel ? ' active' : ''}" data-layout="${l}">${l}</button>`
+    ).join('');
+    const h3 = container.querySelector('h3');
+    if (h3) h3.after(tabs);
+    tabs.querySelectorAll('.variant-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        tabs.querySelectorAll('.variant-btn').forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+        renderFn(games, btn.dataset.layout);
+      });
+    });
+  }
+  const activeLayout = tabs.querySelector('.variant-btn.active')?.dataset.layout || defaultLabel;
+  renderFn(games, activeLayout);
+}
+
+function removeLayoutToggle(containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  const tabs = container.querySelector('.layout-toggle');
+  if (tabs) tabs.remove();
 }
 
 function renderDuration(metas) {
@@ -1186,7 +1363,7 @@ function renderDuration(metas) {
       type: 'bar',
       data: buckets.map((b) => ({
         value: b.count,
-        itemStyle: { color: b.count > 0 && b.avgPlacement <= 2.5 ? WIN_COLOR : b.count > 0 ? ACCENT : '#333' },
+        itemStyle: { color: b.count > 0 && b.avgPlacement <= 2.5 ? WIN_COLOR : b.count > 0 ? LOSS_COLOR : '#333' },
       })),
       label: {
         show: true, position: 'top', color: '#ccc', fontSize: 10,
@@ -1205,14 +1382,15 @@ function renderAnomalyPerf(games) {
   for (const g of games) {
     const name = g.anomaly_name || g.anomaly_card_id;
     if (!name) continue;
-    if (!anomMap.has(name)) anomMap.set(name, { total: 0, count: 0 });
+    if (!anomMap.has(name)) anomMap.set(name, { total: 0, count: 0, wins: 0 });
     const entry = anomMap.get(name);
     entry.total += g.placement || 0;
     entry.count++;
+    if (isWin(g.placement, g.is_duos)) entry.wins++;
   }
 
   const entries = [...anomMap.entries()]
-    .map(([name, v]) => ({ name, avg: v.total / v.count, count: v.count }))
+    .map(([name, v]) => ({ name, avg: v.total / v.count, count: v.count, winRate: v.wins / v.count }))
     .sort((a, b) => a.avg - b.avg);
 
   if (entries.length === 0) return showNoData('chart-anomaly-perf');
@@ -1226,8 +1404,7 @@ function renderAnomalyPerf(games) {
     xAxis: { type: 'value', min: 1, max: Math.min(8, Math.ceil(Math.max(...entries.map((e) => e.avg)) + 1)), ...xName('Avg Placement') },
     series: [{
       type: 'bar',
-      data: entries.map((e) => parseFloat(e.avg.toFixed(2))),
-      itemStyle: { color: '#ff9800' },
+      data: entries.map((e) => ({ value: parseFloat(e.avg.toFixed(2)), count: e.count, itemStyle: { color: e.winRate >= 0.5 ? WIN_COLOR : LOSS_COLOR } })),
       label: { show: true, position: 'right', formatter: (p) => `${p.value} (${entries[p.dataIndex].count}g)`, color: '#ccc', fontSize: 11 },
     }],
   }, true);
@@ -1314,37 +1491,156 @@ function renderTribeWinrateInner(games, variant) {
 
 function renderBuffEfficiency(games) {
   addChartHelp('chart-buff-efficiency', 'Total buff stats vs placement. Shows whether bigger buffs correlate with better finishes.');
-  if (!games || games.length === 0) return showNoData('chart-buff-efficiency');
+  if (!games || games.length === 0) { removeLayoutToggle('chart-buff-efficiency'); return showNoData('chart-buff-efficiency'); }
+
+  renderLayoutToggle('chart-buff-efficiency', games, renderBuffEfficiencyInner, ['Bar', 'Scatter'], 'Bar');
+}
+
+function renderBuffEfficiencyInner(games, layout) {
   const chart = getChart('chart-buff-efficiency');
+  const hasDuos = games.some((g) => g.is_duos) && State.mode !== 'solo';
 
-  const data = games
-    .filter((g) => g.buff_sources && g.buff_sources.length > 0)
-    .map((g) => {
-      let totalBuff = g.buff_sources.reduce((s, bs) => s + (bs.attack || 0) + (bs.health || 0), 0);
-      if (g.is_duos && g.partner_buff_sources) {
-        totalBuff += g.partner_buff_sources.reduce((s, bs) => s + (bs.attack || 0) + (bs.health || 0), 0);
+  const validGames = games.filter((g) => g.buff_sources && g.buff_sources.length > 0);
+  if (validGames.length === 0) return showNoData('chart-buff-efficiency');
+
+  if (layout === 'Scatter') {
+    // Scatter plot: individual games, player vs partner colored dots
+    const playerData = [];
+    const partnerData = [];
+    for (const g of validGames) {
+      const pBuff = g.buff_sources.reduce((s, bs) => s + (bs.attack || 0) + (bs.health || 0), 0);
+      const win = isWin(g.placement, g.is_duos);
+      playerData.push({ value: [pBuff, g.placement], gameId: g.game_id, itemStyle: { color: win ? WIN_COLOR : LOSS_COLOR, opacity: 0.7 } });
+      if (hasDuos && g.is_duos && g.partner_buff_sources) {
+        const partBuff = g.partner_buff_sources.reduce((s, bs) => s + (bs.attack || 0) + (bs.health || 0), 0);
+        partnerData.push({ value: [partBuff, g.placement], gameId: g.game_id, itemStyle: { color: win ? WIN_COLOR : LOSS_COLOR, opacity: 0.5 } });
       }
-      return { value: [totalBuff, g.placement], gameId: g.game_id };
-    });
+    }
 
-  if (data.length === 0) return showNoData('chart-buff-efficiency');
-
-  chart.setOption({
-    ...BASE_ANIM,
-    tooltip: { trigger: 'item', formatter: (p) => `Total Buffs: ${p.data.value[0]}<br/>Placement: ${p.data.value[1]}` },
-    xAxis: { type: 'value', ...xName('Total Buff (ATK+HP)') },
-    yAxis: { type: 'value', inverse: true, min: 1, max: 8, ...yNameInverse('Placement') },
-    series: [{
-      type: 'scatter', data,
+    const series = [{
+      name: hasDuos ? 'Player' : 'Games',
+      type: 'scatter', data: playerData,
       symbolSize: 8,
-      itemStyle: { color: '#ab47bc', opacity: 0.7 },
-    }],
-  }, true);
+    }];
+    if (hasDuos && partnerData.length > 0) {
+      series.push({
+        name: 'Partner',
+        type: 'scatter', data: partnerData,
+        symbolSize: 10, symbol: 'diamond',
+      });
+    }
 
-  chart.off('click');
-  chart.on('click', (params) => {
-    if (params.data && params.data.gameId) drillToGame(params.data.gameId);
-  });
+    const maxPlacement = hasDuos ? 4 : 8;
+    chart.setOption({
+      ...BASE_ANIM,
+      tooltip: { trigger: 'item', formatter: (p) => `${p.seriesName}<br/>Total Buffs: ${p.data.value[0]}<br/>Placement: ${p.data.value[1]}` },
+      legend: hasDuos ? { data: ['Player', 'Partner'], textStyle: { color: '#ccc' } } : undefined,
+      xAxis: { type: 'value', ...xName('Total Buff (ATK+HP)') },
+      yAxis: { type: 'value', inverse: true, min: 1, max: maxPlacement, ...yNameInverse('Placement') },
+      series,
+    }, true);
+
+    chart.off('click');
+    chart.on('click', (params) => {
+      if (params.data && params.data.gameId) drillToGame(params.data.gameId);
+    });
+  } else {
+    // Bar chart: avg placement per buff bucket
+    const bucketDefs = [
+      { label: '0-10', min: 0, max: 10 },
+      { label: '10-25', min: 10, max: 25 },
+      { label: '25-50', min: 25, max: 50 },
+      { label: '50-100', min: 50, max: 100 },
+      { label: '100+', min: 100, max: Infinity },
+    ];
+
+    function getBucketIdx(total) {
+      for (let i = 0; i < bucketDefs.length; i++) {
+        if (total >= bucketDefs[i].min && total < bucketDefs[i].max) return i;
+      }
+      return bucketDefs.length - 1;
+    }
+
+    const playerBuckets = bucketDefs.map(() => ({ sum: 0, count: 0 }));
+    const partnerBuckets = bucketDefs.map(() => ({ sum: 0, count: 0 }));
+
+    for (const g of validGames) {
+      const pBuff = g.buff_sources.reduce((s, bs) => s + (bs.attack || 0) + (bs.health || 0), 0);
+      const bi = getBucketIdx(pBuff);
+      playerBuckets[bi].sum += g.placement;
+      playerBuckets[bi].count++;
+
+      if (hasDuos && g.is_duos && g.partner_buff_sources) {
+        const partBuff = g.partner_buff_sources.reduce((s, bs) => s + (bs.attack || 0) + (bs.health || 0), 0);
+        const pbi = getBucketIdx(partBuff);
+        partnerBuckets[pbi].sum += g.placement;
+        partnerBuckets[pbi].count++;
+      }
+    }
+
+    const winThreshold = hasDuos ? 2 : 4;
+    const playerAvg = playerBuckets.map((b) => b.count > 0 ? parseFloat((b.sum / b.count).toFixed(2)) : null);
+    const partnerAvg = partnerBuckets.map((b) => b.count > 0 ? parseFloat((b.sum / b.count).toFixed(2)) : null);
+
+    const series = [{
+      name: hasDuos ? 'Player' : 'Avg Placement',
+      type: 'bar',
+      data: playerAvg.map((v, i) => ({
+        value: v,
+        itemStyle: v !== null ? { color: v <= winThreshold ? WIN_COLOR : LOSS_COLOR, decal: NO_DECAL } : undefined,
+      })),
+      label: {
+        show: true, position: 'top', color: '#ccc', fontSize: 11,
+        formatter: (p) => {
+          const b = playerBuckets[p.dataIndex];
+          return b.count > 0 ? `${p.value} (${b.count}g)` : '';
+        },
+      },
+    }];
+
+    if (hasDuos) {
+      series.push({
+        name: 'Partner',
+        type: 'bar',
+        data: partnerAvg.map((v, i) => ({
+          value: v,
+          itemStyle: v !== null ? { color: v <= winThreshold ? WIN_COLOR : LOSS_COLOR, decal: PARTNER_DECAL } : undefined,
+        })),
+        label: {
+          show: true, position: 'top', color: '#ccc', fontSize: 11,
+          formatter: (p) => {
+            const b = partnerBuckets[p.dataIndex];
+            return b.count > 0 ? `${p.value} (${b.count}g)` : '';
+          },
+        },
+      });
+    }
+
+    const maxPlacement = hasDuos ? 4 : 8;
+    chart.setOption({
+      ...BASE_ANIM,
+      ...(hasDuos ? ARIA_DECAL : {}),
+      tooltip: {
+        trigger: 'axis',
+        formatter: (params) => {
+          let html = `Buff Range: ${params[0].name}<br/>`;
+          for (const p of params) {
+            if (p.value !== null) {
+              const buckets = p.seriesName === 'Partner' ? partnerBuckets : playerBuckets;
+              html += `${p.seriesName}: ${p.value} avg (${buckets[p.dataIndex].count} games)<br/>`;
+            }
+          }
+          return html;
+        },
+      },
+      legend: hasDuos ? { data: ['Player', 'Partner'], textStyle: { color: '#ccc' } } : undefined,
+      xAxis: { type: 'category', data: bucketDefs.map((b) => b.label), ...xName('Total Buff (ATK+HP)') },
+      yAxis: { type: 'value', inverse: true, min: 1, max: maxPlacement, ...yNameInverse('Avg Placement') },
+      series,
+    }, true);
+
+    chart.off('click');
+  }
 }
 
 // ============================================================================
@@ -1402,10 +1698,10 @@ function renderHeatmapHeroInner(games, variant) {
   chart.setOption({
     ...BASE_ANIM,
     tooltip: { formatter: (p) => `${heroes[p.data[1]]}<br/>Placement: ${placements[p.data[0]]}<br/>Games: ${p.data[2]}` },
-    grid: { left: heatGridLeft, right: 60, bottom: 40 },
+    grid: { left: heatGridLeft, right: 60, bottom: 60 },
     xAxis: { type: 'category', data: placements.map(String), splitArea: { show: true }, ...xNameHeatmap('Placement') },
     yAxis: { type: 'category', data: heroes, splitArea: { show: true }, ...yName('Hero'), axisLabel: { fontSize: 10, interval: 0 } },
-    visualMap: { min: 0, max: maxVal || 1, calculable: true, orient: 'horizontal', left: 'center', bottom: 0, inRange: { color: ['#1a1a2e', '#304ffe', '#e94560', '#ff5252'] } },
+    visualMap: { min: 0, max: maxVal || 1, calculable: true, orient: 'horizontal', left: 'center', bottom: 0, inRange: { color: ['#1a1a2e', '#1565c0', '#4fc3f7'] } },
     series: [{
       type: 'heatmap', data,
       label: { show: true, color: '#fff', fontSize: 10 },
@@ -1416,43 +1712,85 @@ function renderHeatmapHeroInner(games, variant) {
 
 function renderHeatmapTierTurn(games) {
   addChartHelp('chart-heatmap-tier-turn', 'How many games reached each tavern tier by each turn number.');
-  if (!games || games.length === 0) return showNoData('chart-heatmap-tier-turn');
+  if (!games || games.length === 0) { removeVariantTabs('chart-heatmap-tier-turn'); return showNoData('chart-heatmap-tier-turn'); }
+
+  const anyDuos = games.some((g) => g.is_duos);
+  if (anyDuos && State.mode !== 'solo') {
+    renderTripleVariant('chart-heatmap-tier-turn', games, renderHeatmapTierTurnInner);
+  } else {
+    removeVariantTabs('chart-heatmap-tier-turn');
+    renderHeatmapTierTurnInner(games, 'player');
+  }
+}
+
+function renderHeatmapTierTurnInner(games, variant) {
   const chart = getChart('chart-heatmap-tier-turn');
 
   const countMap = new Map();
   let maxTurn = 0;
-  for (const g of games) {
-    const turn = g.turn || 0;
-    const tier = g.tavern_tier || g.player?.tavern_tier || 0;
-    if (turn > maxTurn) maxTurn = turn;
-    const key = `${turn}|${tier}`;
-    countMap.set(key, (countMap.get(key) || 0) + 1);
-    // Include partner's final tier for duos games
-    if (g.is_duos && g.partner?.tavern_tier) {
-      const pKey = `${turn}|${g.partner.tavern_tier}`;
-      countMap.set(pKey, (countMap.get(pKey) || 0) + 1);
+  let yLabelSet;
+
+  if (variant === 'paired') {
+    yLabelSet = new Set();
+    for (const g of games) {
+      const turn = g.turn || 0;
+      if (turn > maxTurn) maxTurn = turn;
+      const pTier = g.tavern_tier || g.player?.tavern_tier || 0;
+      const partTier = (g.is_duos && g.partner?.tavern_tier) ? g.partner.tavern_tier : pTier;
+      const label = `T${pTier} / T${partTier}`;
+      yLabelSet.add(label);
+      const key = `${turn}|${label}`;
+      countMap.set(key, (countMap.get(key) || 0) + 1);
+    }
+  } else {
+    for (const g of games) {
+      const turn = g.turn || 0;
+      if (turn > maxTurn) maxTurn = turn;
+      let tier;
+      if (variant === 'partner' && g.is_duos && g.partner?.tavern_tier) {
+        tier = g.partner.tavern_tier;
+      } else {
+        tier = g.tavern_tier || g.player?.tavern_tier || 0;
+      }
+      const key = `${turn}|${tier}`;
+      countMap.set(key, (countMap.get(key) || 0) + 1);
     }
   }
 
   const turns = [];
   for (let i = 1; i <= Math.min(maxTurn, 20); i++) turns.push(i);
-  const tiers = [1, 2, 3, 4, 5, 6, 7];
+
+  let yLabels;
+  if (variant === 'paired') {
+    yLabels = [...yLabelSet].sort();
+  } else {
+    yLabels = [1, 2, 3, 4, 5, 6, 7];
+  }
+
+  autoSizeChart('chart-heatmap-tier-turn', yLabels.length);
+
   const data = [];
   let maxVal = 0;
   for (let xi = 0; xi < turns.length; xi++) {
-    for (let yi = 0; yi < tiers.length; yi++) {
-      const val = countMap.get(`${turns[xi]}|${tiers[yi]}`) || 0;
+    for (let yi = 0; yi < yLabels.length; yi++) {
+      const key = variant === 'paired'
+        ? `${turns[xi]}|${yLabels[yi]}`
+        : `${turns[xi]}|${yLabels[yi]}`;
+      const val = countMap.get(key) || 0;
       if (val > maxVal) maxVal = val;
       data.push([xi, yi, val]);
     }
   }
 
+  const yDisplay = variant === 'paired' ? yLabels : yLabels.map((t) => `T${t}`);
+  const gridLeft = variant === 'paired' ? 100 : 60;
+
   chart.setOption({
     ...BASE_ANIM,
-    tooltip: { formatter: (p) => `Turn ${turns[p.data[0]]}<br/>Tier ${tiers[p.data[1]]}<br/>Games: ${p.data[2]}` },
-    grid: { left: 60, right: 60, bottom: 40 },
+    tooltip: { formatter: (p) => `Turn ${turns[p.data[0]]}<br/>Tier ${yDisplay[p.data[1]]}<br/>Games: ${p.data[2]}` },
+    grid: { left: gridLeft, right: 60, bottom: 60 },
     xAxis: { type: 'category', data: turns.map(String), ...xNameHeatmap('Turn') },
-    yAxis: { type: 'category', data: tiers.map((t) => `T${t}`), ...yName('Tier') },
+    yAxis: { type: 'category', data: yDisplay, axisLabel: { interval: 0, fontSize: 10 }, ...yName('Tier') },
     visualMap: { min: 0, max: maxVal || 1, calculable: true, orient: 'horizontal', left: 'center', bottom: 0, inRange: { color: ['#1a1a2e', '#1565c0', '#4fc3f7'] } },
     series: [{
       type: 'heatmap', data,
@@ -1504,10 +1842,10 @@ function renderHeatmapTribeInner(games, variant) {
   chart.setOption({
     ...BASE_ANIM,
     tooltip: { formatter: (p) => `${tribes[p.data[1]]}<br/>Placement: ${placements[p.data[0]]}<br/>Games: ${p.data[2]}` },
-    grid: { left: Math.min(140, Math.max(60, Math.max(...tribes.map(t => t.length)) * 7 + 10)), right: 60, bottom: 40 },
+    grid: { left: Math.min(140, Math.max(60, Math.max(...tribes.map(t => t.length)) * 7 + 10)), right: 60, bottom: 60 },
     xAxis: { type: 'category', data: placements.map(String), ...xNameHeatmap('Placement') },
     yAxis: { type: 'category', data: tribes, ...yName('Tribe'), axisLabel: { interval: 0, fontSize: 10 } },
-    visualMap: { min: 0, max: maxVal || 1, calculable: true, orient: 'horizontal', left: 'center', bottom: 0, inRange: { color: ['#1a1a2e', '#2e7d32', '#00c853'] } },
+    visualMap: { min: 0, max: maxVal || 1, calculable: true, orient: 'horizontal', left: 'center', bottom: 0, inRange: { color: ['#1a1a2e', '#1565c0', '#4fc3f7'] } },
     series: [{
       type: 'heatmap', data,
       label: { show: true, color: '#fff', fontSize: 10 },
@@ -1590,10 +1928,10 @@ function renderHeatmapBuffInner(games, variant) {
   chart.setOption({
     ...BASE_ANIM,
     tooltip: { formatter: (p) => `Buff: ${yLabels[p.data[1]]}<br/>Placement: ${placements[p.data[0]]}<br/>Games: ${p.data[2]}` },
-    grid: { left: variant === 'paired' ? 120 : 80, right: 60, bottom: 40 },
+    grid: { left: variant === 'paired' ? 120 : 80, right: 60, bottom: 60 },
     xAxis: { type: 'category', data: placements.map(String), ...xNameHeatmap('Placement') },
     yAxis: { type: 'category', data: yLabels, axisLabel: { interval: 0, fontSize: 10 }, ...yName('Buff Total') },
-    visualMap: { min: 0, max: maxVal || 1, calculable: true, orient: 'horizontal', left: 'center', bottom: 0, inRange: { color: ['#1a1a2e', '#6a1b9a', '#e94560'] } },
+    visualMap: { min: 0, max: maxVal || 1, calculable: true, orient: 'horizontal', left: 'center', bottom: 0, inRange: { color: ['#1a1a2e', '#1565c0', '#4fc3f7'] } },
     series: [{
       type: 'heatmap', data,
       label: { show: true, color: '#fff', fontSize: 10 },
@@ -1650,8 +1988,8 @@ function renderBoardStats(turns) {
     const pHp = turns.map((t) => getPartnerMinions(t.state).reduce((s, m) => s + (m.health || 0), 0));
     legendData.push('Partner ATK', 'Partner HP');
     series.push(
-      { name: 'Partner ATK', type: 'line', data: pAtk, smooth: true, lineStyle: { color: '#ffe082', type: 'dashed' }, itemStyle: { color: '#ffe082' } },
-      { name: 'Partner HP', type: 'line', data: pHp, smooth: true, lineStyle: { color: '#69f0ae', type: 'dashed' }, itemStyle: { color: '#69f0ae' } },
+      { name: 'Partner ATK', type: 'line', data: pAtk, smooth: true, lineStyle: { color: '#ffc107', type: 'dashed' }, itemStyle: { color: '#ffc107' } },
+      { name: 'Partner HP', type: 'line', data: pHp, smooth: true, lineStyle: { color: '#00c853', type: 'dashed' }, itemStyle: { color: '#00c853' } },
     );
   }
 
@@ -1713,7 +2051,7 @@ function renderTierProg(turns) {
     const partnerTiers = turns.map((t) => t.state.partner?.tavern_tier || 0);
     series.push({
       name: 'Partner Tier', type: 'line', data: partnerTiers, step: 'end',
-      lineStyle: { color: '#b388ff', type: 'dashed' }, itemStyle: { color: '#b388ff' },
+      lineStyle: { color: '#7c4dff', type: 'dashed' }, itemStyle: { color: '#7c4dff' },
     });
   }
 
@@ -1760,7 +2098,7 @@ function renderBuffAccum(turns) {
     });
     return {
       name: cat, type: 'line', stack: 'buffs', data,
-      areaStyle: { opacity: 0.6 },
+      areaStyle: { opacity: 0.3 },
       lineStyle: { width: 1, color: palette[ci % palette.length] },
       itemStyle: { color: palette[ci % palette.length] },
       symbol: 'none',
@@ -1781,7 +2119,7 @@ function renderBuffAccum(turns) {
       });
       series.push({
         name: label, type: 'line', stack: 'partner-buffs', data,
-        areaStyle: { opacity: 0.3 },
+        areaStyle: { opacity: 0.15 },
         lineStyle: { width: 1, color, type: 'dashed' },
         itemStyle: { color },
         symbol: 'none',
@@ -1818,7 +2156,7 @@ function renderGoldEcon(turns) {
     yAxis: { type: 'value', ...yName('Gold') },
     series: [
       { name: 'Max Gold', type: 'line', data: maxGold, lineStyle: { color: '#ffc107' }, itemStyle: { color: '#ffc107' } },
-      { name: 'Current Gold', type: 'line', data: curGold, lineStyle: { color: '#ff9800', type: 'dashed' }, itemStyle: { color: '#ff9800' } },
+      { name: 'Current Gold', type: 'line', data: curGold, lineStyle: { color: '#4fc3f7', type: 'dashed' }, itemStyle: { color: '#4fc3f7' } },
     ],
   }, true);
 
@@ -1843,7 +2181,7 @@ function renderBoardSize(turns) {
     const partnerSizes = turns.map((t) => getPartnerMinions(t.state).length);
     series.push({
       name: 'Partner Board', type: 'line', data: partnerSizes, step: 'end',
-      lineStyle: { color: '#ff8a80', type: 'dashed' }, itemStyle: { color: '#ff8a80' },
+      lineStyle: { color: '#e94560', type: 'dashed' }, itemStyle: { color: '#e94560' },
     });
   }
 

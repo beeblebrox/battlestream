@@ -59,6 +59,32 @@ even when the underlying data is correct.
 if one tooltip says "Avg Placement" and another says "Average", if date formats differ
 between charts — flag it.
 
+**Question analytical usefulness.** A chart can render correctly but show the wrong
+*kind* of data. For every aggregate chart, ask: is this metric actionable? Does the
+aggregation method (total vs average vs median) actually help the user make decisions?
+
+Common traps to watch for:
+- **Totals that should be averages.** A bar chart showing "total buffs across all games"
+  penalizes categories that appear in fewer games. Per-game averages are almost always
+  more useful — they answer "when this happens, how impactful is it?" rather than "how
+  many games had this?"
+- **Counts without normalization.** A placement distribution with raw counts is fine, but
+  a "hero performance" chart showing total wins (not win rate) would be misleading for
+  heroes with different game counts.
+- **Averages that hide variance.** An avg placement of 3.0 could mean "always 3rd" or
+  "half 1st, half 5th" — if the chart doesn't show spread or game count, flag it.
+- **Misleading axis labels.** If the y-axis says "Total" but the data would be more useful
+  as "Avg per Game", the label is technically correct but the chart is unhelpful.
+- **Cross-game aggregates vs per-game snapshots.** Level 1 charts aggregate across games;
+  Level 2 charts show a single game. Make sure the aggregation method on Level 1 produces
+  insights you can't get from just scrolling through Level 2 views.
+
+When you find a metric that's technically correct but analytically weak, report it as a
+**DATA** severity finding (distinct from BUG/UX/SUGGESTION):
+- **DATA**: The chart renders correctly but the underlying metric or aggregation method
+  reduces its analytical value. Include what the current metric is, why it's weak, and
+  what would be more useful.
+
 ### Exploratory Analysis Phase
 
 After running the numbered checks, do an exploratory pass:
@@ -79,6 +105,7 @@ Report exploratory findings in a separate "Observations" section of the report, 
 from the pass/fail checks. Use severity levels:
 - **BUG**: Something is clearly broken (empty data that should exist, wrong colors, JS errors)
 - **UX**: Works but is confusing or unhelpful to users (overlapping labels, misleading charts)
+- **DATA**: Chart renders correctly but the metric or aggregation method is analytically weak
 - **SUGGESTION**: Ideas for improvement (missing features, better layouts)
 
 ### Duos-Specific Expectations
@@ -301,9 +328,9 @@ relative `<img src="...">` paths in the HTML.
 </html>
 ```
 
-Use CSS classes for severity: `.bug` gets red-left-border, `.ux` gets orange, `.suggestion`
-gets blue. The observations section is where the QA mindset findings go — things you noticed
-that aren't covered by numbered checks.
+Use CSS classes for severity: `.bug` gets red-left-border, `.ux` gets orange, `.data` gets
+yellow, `.suggestion` gets blue. The observations section is where the QA mindset findings
+go — things you noticed that aren't covered by numbered checks.
 
 Tell the user the report path when done so they can open it in a browser.
 
