@@ -129,7 +129,9 @@ function updateBreadcrumb() {
   const parts = [{ label: 'Overview', level: 1 }];
 
   if (State.level >= 2 && State.selectedGameID) {
-    parts.push({ label: `Game ${State.selectedGameID.slice(0, 8)}`, level: 2 });
+    const g = State.fullGames.get(State.selectedGameID);
+    const gameLabel = g ? `${heroBaseName(g.player?.hero_card_id)} #${g.placement}` : `Game ${State.selectedGameID.slice(-6)}`;
+    parts.push({ label: gameLabel, level: 2 });
   }
   if (State.level >= 3 && State.selectedTurn != null) {
     parts.push({ label: `Turn ${State.selectedTurn}`, level: 3 });
@@ -297,7 +299,7 @@ function renderTimelineScrubber(allMetas) {
   scrubberMaxTs = sorted[sorted.length - 1].start_time_unix * 1000;
 
   timelineChart.setOption({
-    grid: { left: 50, right: 20, top: 5, bottom: 22 },
+    grid: { left: 10, right: 20, top: 5, bottom: 22 },
     xAxis: {
       type: 'time',
       axisLabel: {
@@ -555,6 +557,14 @@ function buildPartnerFilter(fullGames) {
 
     pf.appendChild(tag);
   }
+
+  // Add usage hint if not already present
+  if (!pf.querySelector('.partner-hint')) {
+    const hint = document.createElement('div');
+    hint.className = 'partner-hint';
+    hint.textContent = 'Click = solo-select \u00b7 Shift+click = toggle \u00b7 Right-click = exclude';
+    pf.appendChild(hint);
+  }
 }
 
 function refreshPartnerTags() {
@@ -629,13 +639,22 @@ function renderSummaryCards(agg, compareAgg) {
   ];
 
   if (compareAgg) {
+    if (agg.games_played === 0) {
+      cards[0].value = '\u2014'; cards[1].value = '\u2014'; cards[1].sub = '';
+      cards[2].value = '\u2014'; cards[3].value = '\u2014'; cards[4].value = '\u2014';
+      cards[0].sub = 'No solo games in range';
+    }
     const cWR = compareAgg.games_played > 0 ? ((compareAgg.wins / compareAgg.games_played) * 100).toFixed(1) : '0.0';
-    cards[0].sub = `Duos: ${compareAgg.games_played}`;
-    cards[1].sub += ` | Duos: ${cWR}%`;
-    const avgDelta = agg.avg_placement && compareAgg.avg_placement
-      ? (compareAgg.avg_placement - agg.avg_placement).toFixed(2)
-      : '';
-    if (avgDelta) cards[2].sub = `Duos diff: ${avgDelta > 0 ? '+' : ''}${avgDelta}`;
+    if (compareAgg.games_played === 0) {
+      cards[0].sub = (cards[0].sub || '') + (cards[0].sub ? ' | ' : '') + 'No duos games in range';
+    } else {
+      cards[0].sub = (cards[0].sub || '') + (cards[0].sub ? ' | ' : '') + `Duos: ${compareAgg.games_played}`;
+      cards[1].sub += ` | Duos: ${cWR}%`;
+      const avgDelta = agg.avg_placement && compareAgg.avg_placement
+        ? (compareAgg.avg_placement - agg.avg_placement).toFixed(2)
+        : '';
+      if (avgDelta) cards[2].sub = `Duos diff: ${avgDelta > 0 ? '+' : ''}${avgDelta}`;
+    }
   }
 
   el.innerHTML = cards
@@ -688,7 +707,7 @@ function updatePartnerStats(fullGames) {
     el.innerHTML += `
       <div class="summary-card">
         <div class="label">Best Partner</div>
-        <div class="value" style="font-size:1.1rem;">${best.name}</div>
+        <div class="value partner-value">${best.name}</div>
         <div class="sub">${best.avg.toFixed(2)} avg, ${best.count}g, ${best.winRate}% WR</div>
       </div>`;
   }
@@ -895,6 +914,8 @@ function renderPlacementTrend(metas) {
         {
           name: 'Placement', type: 'line', data, smooth: true, symbol: 'circle', symbolSize: 6,
           lineStyle: { color: ACCENT }, itemStyle: { color: ACCENT },
+          emphasis: { itemStyle: { borderColor: '#fff', borderWidth: 2, shadowBlur: 8, shadowColor: ACCENT } },
+          cursor: 'pointer',
         },
         {
           name: 'Trend', type: 'line', data: trendData, smooth: false, symbol: 'none',
@@ -1090,7 +1111,7 @@ function renderHeroPerfInner(games, variant) {
 
   autoSizeChart('chart-hero-perf', entries.length);
   const maxNameLen = Math.max(...entries.map((e) => e.name.length));
-  const gridLeft = Math.min(260, Math.max(140, maxNameLen * 7));
+  const gridLeft = Math.min(360, Math.max(140, maxNameLen * 7.5));
 
   chart.setOption({
     ...BASE_ANIM,
@@ -1363,7 +1384,7 @@ function renderDuration(metas) {
       type: 'bar',
       data: buckets.map((b) => ({
         value: b.count,
-        itemStyle: { color: b.count > 0 && b.avgPlacement <= 2.5 ? WIN_COLOR : b.count > 0 ? LOSS_COLOR : '#333' },
+        itemStyle: { color: b.count > 0 && b.wins / b.count >= 0.5 ? WIN_COLOR : b.count > 0 ? LOSS_COLOR : '#333' },
       })),
       label: {
         show: true, position: 'top', color: '#ccc', fontSize: 10,
@@ -1693,7 +1714,7 @@ function renderHeatmapHeroInner(games, variant) {
   }
 
   const maxLen = Math.max(...heroes.map((h) => h.length));
-  const heatGridLeft = Math.min(280, Math.max(120, maxLen * 6.5 + 10));
+  const heatGridLeft = Math.min(360, Math.max(120, maxLen * 7.5 + 10));
 
   chart.setOption({
     ...BASE_ANIM,
@@ -1949,22 +1970,28 @@ function renderGameHeader(game) {
 
   const p = game.placement || 0;
   const pClass = isWin(p, game.is_duos) ? 'win' : 'loss';
-  const start = game.start_time_unix ? new Date(game.start_time_unix * 1000).toLocaleString() : '';
+  const startDate = game.start_time_unix ? new Date(game.start_time_unix * 1000) : null;
+  const dateShort = startDate ? startDate.toLocaleDateString() + ', ' + startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
   const dur = (game.end_time_unix && game.start_time_unix)
     ? `${((game.end_time_unix - game.start_time_unix) / 60).toFixed(0)} min`
     : '';
   const heroLabel = heroName(game.player?.hero_card_id);
   const modeBadge = game.is_duos ? '<span style="color:#4fc3f7;margin-left:0.5rem;">[Duos]</span>' : '<span style="color:#aaa;margin-left:0.5rem;">[Solo]</span>';
-  const anomaly = game.anomaly_name ? `<span style="color:#ff9800;margin-left:0.5rem;">${game.anomaly_name}</span>` : '';
+  const anomaly = game.anomaly_name ? `<span style="color:#ff9800;">${game.anomaly_name}</span>` : '';
   const partnerLabel = getPartnerLabel(game);
-  const partner = partnerLabel ? `<span style="color:#4fc3f7;margin-left:0.5rem;">w/ ${partnerLabel}</span>` : '';
+  const partner = partnerLabel ? `<span style="color:#4fc3f7;">w/ ${partnerLabel}</span>` : '';
+  const metaParts = [dateShort, dur, anomaly, partner].filter(Boolean).join(' &middot; ');
 
   el.innerHTML = `
     <button onclick="navigateTo(1)" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:0.4rem 0.8rem;cursor:pointer;font-size:0.85rem;">&#8592; Back</button>
-    <h2>${heroLabel}</h2>
-    <span class="placement ${pClass}">#${p}</span>
-    <span style="color:var(--text-muted);font-size:0.85rem;">${start} &middot; ${dur}</span>
-    ${modeBadge}${anomaly}${partner}
+    <div style="display:flex;flex-direction:column;gap:0.15rem;">
+      <div style="display:flex;align-items:center;gap:0.5rem;">
+        <h2>${heroLabel}</h2>
+        <span class="placement ${pClass}">#${p}</span>
+        ${modeBadge}
+      </div>
+      <div class="game-header-meta">${metaParts}</div>
+    </div>
   `;
 }
 
@@ -2025,8 +2052,14 @@ function renderHealthArmor(turns) {
     yAxis: { type: 'value', ...yName(hpLabel) },
     series: [{
       name: hpLabel, type: 'line', data: effHP, smooth: true,
-      areaStyle: { opacity: 0.15, color: WIN_COLOR },
+      areaStyle: { opacity: 0.25, color: WIN_COLOR },
       lineStyle: { color: WIN_COLOR }, itemStyle: { color: WIN_COLOR },
+      markLine: {
+        silent: true, symbol: 'none',
+        data: [{ yAxis: 0 }],
+        lineStyle: { color: LOSS_COLOR, type: 'dashed', width: 1 },
+        label: { show: false },
+      },
     }],
   }, true);
 
@@ -2111,7 +2144,7 @@ function renderBuffAccum(turns) {
     for (const cat of partnerCats) {
       const ci = categories.indexOf(cat) >= 0 ? categories.indexOf(cat) : legendData.length;
       const color = palette[ci % palette.length];
-      const label = `${cat} (Partner)`;
+      const label = `${cat}*`;
       legendData.push(label);
       const data = turns.map((t) => {
         const bs = (t.state.partner_buff_sources || []).find((b) => b.category === cat);
