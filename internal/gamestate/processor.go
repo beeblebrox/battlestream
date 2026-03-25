@@ -1033,7 +1033,9 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 			p.machine.UpdatePlayerTag("PLAYER_TRIPLES", triples)
 		}
 		if e.CardID != "" && !strings.HasPrefix(e.CardID, "TB_BaconShop_HERO_PH") {
-			p.machine.UpdateHeroCardID(e.CardID)
+			if !p.isReconnect || p.machine.State().Player.HeroCardID == "" {
+				p.machine.UpdateHeroCardID(e.CardID)
+			}
 		}
 		return
 	}
@@ -1064,7 +1066,9 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 						p.machine.UpdatePartnerTag("PLAYER_TRIPLES", triples)
 					}
 					if e.CardID != "" && !strings.HasPrefix(e.CardID, "TB_BaconShop_HERO_PH") {
-						p.machine.UpdatePartnerHeroCardID(e.CardID)
+						if !p.isReconnect || (p.machine.State().Partner == nil || p.machine.State().Partner.HeroCardID == "") {
+							p.machine.UpdatePartnerHeroCardID(e.CardID)
+						}
 					}
 					if e.EntityName != "" && p.partnerPlayerName == "" {
 						p.partnerPlayerName = cleanEntityName(e.EntityName)
@@ -1096,7 +1100,9 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 			p.machine.UpdatePartnerTag("PLAYER_TRIPLES", triples)
 		}
 		if e.CardID != "" && !strings.HasPrefix(e.CardID, "TB_BaconShop_HERO_PH") {
-			p.machine.UpdatePartnerHeroCardID(e.CardID)
+			if !p.isReconnect || (p.machine.State().Partner == nil || p.machine.State().Partner.HeroCardID == "") {
+				p.machine.UpdatePartnerHeroCardID(e.CardID)
+			}
 		}
 		return
 	}

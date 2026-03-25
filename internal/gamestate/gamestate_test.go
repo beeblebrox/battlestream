@@ -3114,3 +3114,22 @@ func TestReconnectDetectionAndRestore(t *testing.T) {
 		t.Error("expected reconnectStash to be nil after restore")
 	}
 }
+
+func TestReconnectFlagClearedOnNewGame(t *testing.T) {
+	m := New()
+	p := NewProcessor(m)
+
+	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Date(2026, 3, 24, 19, 0, 0, 0, time.UTC)})
+	m.SetTurn(5)
+	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Date(2026, 3, 24, 19, 30, 0, 0, time.UTC)})
+	p.Handle(parser.GameEvent{Type: parser.EventGameEntityTags, Tags: map[string]string{"STATE": "RUNNING", "TURN": "10"}})
+	if !p.isReconnect {
+		t.Fatal("should be reconnect")
+	}
+	p.Handle(parser.GameEvent{Type: parser.EventGameEnd, Timestamp: time.Date(2026, 3, 24, 20, 0, 0, 0, time.UTC), Tags: map[string]string{}})
+	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Date(2026, 3, 24, 20, 5, 0, 0, time.UTC)})
+	p.Handle(parser.GameEvent{Type: parser.EventGameEntityTags, Tags: map[string]string{"STATE": "RUNNING", "TURN": "1"}})
+	if p.isReconnect {
+		t.Error("isReconnect should be false for fresh game")
+	}
+}
