@@ -3133,3 +3133,32 @@ func TestReconnectFlagClearedOnNewGame(t *testing.T) {
 		t.Error("isReconnect should be false for fresh game")
 	}
 }
+
+func TestFreshGameNotTreatedAsReconnect(t *testing.T) {
+	m := New()
+	p := NewProcessor(m)
+
+	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Date(2026, 3, 24, 19, 0, 0, 0, time.UTC)})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventGameEntityTags,
+		Tags: map[string]string{"STATE": "RUNNING", "TURN": "1"},
+	})
+
+	if p.isReconnect {
+		t.Error("fresh game with TURN=1 should not be treated as reconnect")
+	}
+	if p.reconnectStash != nil {
+		t.Error("stash should be cleared after GameEntityTags")
+	}
+}
+
+func TestNoStashFromIdlePhase(t *testing.T) {
+	m := New()
+	p := NewProcessor(m)
+
+	// First EventGameStart from idle — should NOT stash (no prior game state)
+	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Date(2026, 3, 24, 19, 0, 0, 0, time.UTC)})
+	if p.reconnectStash != nil {
+		t.Error("should not stash when starting from idle phase")
+	}
+}
