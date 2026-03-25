@@ -61,6 +61,34 @@ func newBuffTracker() buffTracker {
 	}
 }
 
+// reconnectStash holds game-level state saved before an EventGameStart reset.
+// If the subsequent EventGameEntityTags confirms a reconnect (STATE=RUNNING,
+// TURN > 1), this state is restored. Otherwise it is discarded.
+type reconnectStash struct {
+	gameID              string
+	startTime           time.Time
+	turn                int
+	tavernTier          int
+	isDuos              bool
+	partnerPlayerID     int
+	partnerPlayerName   string
+	heroCardID          string
+	partnerHeroCardID   string
+	turnSnapshots       []TurnSnapshot
+	buffSources         []BuffSource
+	abilityCounters     []AbilityCounter
+	partnerBuffSources  []BuffSource
+	partnerAbilityCtrs  []AbilityCounter
+	modifications       []StatMod
+	prevBuffSources     []BuffSource
+	prevAbilityCtrs     []AbilityCounter
+	prevModCount        int
+	anomalyCardID       string
+	anomalyName         string
+	anomalyDescription  string
+	availableTribes     []string
+}
+
 // Processor consumes parser.GameEvents and updates a Machine.
 type Processor struct {
 	machine          *Machine
@@ -122,6 +150,10 @@ type Processor struct {
 	// Staleness tracking
 	lastEventTime time.Time
 
+	// Reconnect state preservation
+	reconnectStash *reconnectStash
+	isReconnect    bool
+
 	// Available tribes detected from BACON_SUBSET_* tags.
 	seenTribes        map[string]bool
 	entityTribeReg    map[int]string  // entityID → tribe provisionally registered via TAG_CHANGE
@@ -156,6 +188,42 @@ func (p *Processor) Handle(e parser.GameEvent) {
 	switch e.Type {
 	case parser.EventGameStart:
 		p.flushPendingStatChanges()
+		p.isReconnect = false
+		// Stash game-level state before reset — if the next EventGameEntityTags
+		// confirms a reconnect, this state will be restored.
+		if phase := p.machine.Phase(); phase != PhaseIdle && phase != PhaseGameOver {
+			s := p.machine.State()
+			turnSnaps, prevBS, prevAC, prevMC := p.machine.ReconnectStashData()
+			p.reconnectStash = &reconnectStash{
+				gameID:              s.GameID,
+				startTime:           s.StartTime,
+				turn:                s.Turn,
+				tavernTier:          s.TavernTier,
+				isDuos:              s.IsDuos,
+				partnerPlayerID:     p.partnerPlayerID,
+				partnerPlayerName:   p.partnerPlayerName,
+				heroCardID:          s.Player.HeroCardID,
+				partnerHeroCardID:   "",
+				turnSnapshots:       turnSnaps,
+				buffSources:         append([]BuffSource(nil), s.BuffSources...),
+				abilityCounters:     append([]AbilityCounter(nil), s.AbilityCounters...),
+				partnerBuffSources:  append([]BuffSource(nil), s.PartnerBuffSources...),
+				partnerAbilityCtrs:  append([]AbilityCounter(nil), s.PartnerAbilityCounters...),
+				modifications:       append([]StatMod(nil), s.Modifications...),
+				prevBuffSources:     prevBS,
+				prevAbilityCtrs:     prevAC,
+				prevModCount:        prevMC,
+				anomalyCardID:       s.AnomalyCardID,
+				anomalyName:         s.AnomalyName,
+				anomalyDescription:  s.AnomalyDescription,
+				availableTribes:     append([]string(nil), s.AvailableTribes...),
+			}
+			if s.Partner != nil {
+				p.reconnectStash.partnerHeroCardID = s.Partner.HeroCardID
+			}
+		} else {
+			p.reconnectStash = nil
+		}
 		p.gameSeq++
 		p.pendingPlacement = 0
 		p.localPlayerID = 0
@@ -236,6 +304,33 @@ func (p *Processor) Handle(e parser.GameEvent) {
 		}
 
 	case parser.EventGameEntityTags:
+		// Check for reconnect: STATE=RUNNING + TURN > 1 means mid-game reconnect.
+		if p.reconnectStash != nil {
+			state := e.Tags["STATE"]
+			turn, _ := strconv.Atoi(e.Tags["TURN"])
+			if state == "RUNNING" && turn > 1 {
+				slog.Info("reconnect detected, restoring game state",
+					"origGameID", p.reconnectStash.gameID,
+					"origTurn", p.reconnectStash.turn,
+					"reconnectTurn", turn)
+				rs := p.reconnectStash
+				p.machine.RestoreFromReconnect(
+					rs.gameID, rs.startTime, rs.turn, rs.tavernTier,
+					rs.isDuos, rs.heroCardID, rs.partnerHeroCardID, rs.partnerPlayerName,
+					rs.buffSources, rs.abilityCounters,
+					rs.partnerBuffSources, rs.partnerAbilityCtrs,
+					rs.modifications, rs.turnSnapshots,
+					rs.prevBuffSources, rs.prevAbilityCtrs, rs.prevModCount,
+					rs.anomalyCardID, rs.anomalyName, rs.anomalyDescription,
+					rs.availableTribes,
+				)
+				p.isDuos = rs.isDuos
+				p.partnerPlayerID = rs.partnerPlayerID
+				p.partnerPlayerName = rs.partnerPlayerName
+				p.isReconnect = true
+			}
+			p.reconnectStash = nil
+		}
 		for tag, value := range e.Tags {
 			if tag == "BACON_DUOS_PUNISH_LEAVERS" && value == "1" {
 				p.punishLeaversActive = true
@@ -460,11 +555,13 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 				p.machine.UpdatePartnerTag(tag, value)
 			} else if e.EntityID > 0 && controllerID == p.localPlayerID {
 				p.updateMinionStat(e, "HEALTH", value)
+				p.updatePartnerCombatMinion(e.EntityID, "HEALTH", parseInt(value))
 			}
 
 		case "ATK":
 			if e.EntityID > 0 && controllerID == p.localPlayerID {
 				p.updateMinionStat(e, "ATK", value)
+				p.updatePartnerCombatMinion(e.EntityID, "ATK", parseInt(value))
 			}
 
 		case "PROPOSED_ATTACKER":
@@ -569,8 +666,12 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 			}
 
 		case "PLAYER_LEADERBOARD_PLACE":
-			// Only track placement for the local player.
-			if p.isLocalPlayerEntity(e) {
+			// Track placement for the local player. In duos, the placement tag
+			// may fire on a newly-created hero copy (not the original Player entity),
+			// so also accept hero entities controlled by the local player.
+			isLocal := p.isLocalPlayerEntity(e) ||
+				(controllerID == p.localPlayerID && p.localPlayerID > 0 && p.heroEntities[e.EntityID])
+			if isLocal {
 				if pl, err := strconv.Atoi(value); err == nil && pl > 0 {
 					p.pendingPlacement = pl
 				}
@@ -1108,6 +1209,28 @@ func (p *Processor) isPartnerHero(e parser.GameEvent, controllerID int) bool {
 	return p.heroEntities[e.EntityID]
 }
 
+// updatePartnerCombatMinion updates a partner combat minion's stat if it was
+// collected before the board setup cutoff. Combat copies arrive via FULL_ENTITY
+// with base stats, then receive buffed stats via TAG_CHANGE before combat starts.
+// After PROPOSED_ATTACKER fires (partnerBoardSetupDone), stat changes are combat
+// damage or post-combat resets — ignore those.
+func (p *Processor) updatePartnerCombatMinion(entityID int, stat string, val int) {
+	if !p.partnerCombatActive || p.partnerBoardSetupDone {
+		return
+	}
+	for i := range p.partnerCombatMinions {
+		if p.partnerCombatMinions[i].EntityID == entityID {
+			switch stat {
+			case "ATK":
+				p.partnerCombatMinions[i].Attack = val
+			case "HEALTH":
+				p.partnerCombatMinions[i].Health = val
+			}
+			return
+		}
+	}
+}
+
 // finalizePartnerCombat snapshots the collected partner combat minions.
 func (p *Processor) finalizePartnerCombat() {
 	p.partnerCombatActive = false
@@ -1325,13 +1448,13 @@ func (p *Processor) updateMinionStat(e parser.GameEvent, stat, value string) {
 
 	// Update board minion stats if it's on the board.
 	onBoard := p.machine.UpdateMinionStat(e.EntityID, stat, newVal)
-	if onBoard && p.machine.Phase() == PhaseRecruit {
+	phase := p.machine.Phase()
+	if onBoard && phase == PhaseRecruit {
 		p.machine.UpdateBoardSnapshot()
 	}
 
 	// Buffer stat changes during recruit phase for board-wide buff detection.
 	// Skip during combat (simulation noise).
-	phase := p.machine.Phase()
 	if oldVal > 0 && newVal != oldVal && (onBoard || info.Zone == "PLAY") && phase != PhaseCombat {
 		delta := newVal - oldVal
 		name := info.Name

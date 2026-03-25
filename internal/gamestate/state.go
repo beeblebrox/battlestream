@@ -816,6 +816,54 @@ func (m *Machine) deepCopyState() BGGameState {
 	return s
 }
 
+// ReconnectStashData returns Machine-internal state needed for reconnect stashing.
+func (m *Machine) ReconnectStashData() (turnSnapshots []TurnSnapshot, prevBuffSources []BuffSource, prevAbilityCtrs []AbilityCounter, prevModCount int) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return append([]TurnSnapshot(nil), m.turnSnapshots...),
+		append([]BuffSource(nil), m.prevBuffSources...),
+		append([]AbilityCounter(nil), m.prevAbilityCtrs...),
+		m.prevModCount
+}
+
+// RestoreFromReconnect restores game-level state preserved across a mid-game reconnect.
+func (m *Machine) RestoreFromReconnect(gameID string, startTime time.Time, turn int, tavernTier int,
+	isDuos bool, heroCardID string, partnerHeroCardID string, partnerPlayerName string,
+	buffSources []BuffSource, abilityCounters []AbilityCounter,
+	partnerBuffSources []BuffSource, partnerAbilityCtrs []AbilityCounter,
+	modifications []StatMod, turnSnapshots []TurnSnapshot,
+	prevBuffSources []BuffSource, prevAbilityCtrs []AbilityCounter, prevModCount int,
+	anomalyCardID, anomalyName, anomalyDescription string, availableTribes []string,
+) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.state.GameID = gameID
+	m.state.StartTime = startTime
+	m.state.Turn = turn
+	m.state.TavernTier = tavernTier
+	m.state.IsDuos = isDuos
+	m.state.Player.HeroCardID = heroCardID
+	m.state.BuffSources = buffSources
+	m.state.AbilityCounters = abilityCounters
+	m.state.PartnerBuffSources = partnerBuffSources
+	m.state.PartnerAbilityCounters = partnerAbilityCtrs
+	m.state.Modifications = modifications
+	m.state.AnomalyCardID = anomalyCardID
+	m.state.AnomalyName = anomalyName
+	m.state.AnomalyDescription = anomalyDescription
+	m.state.AvailableTribes = availableTribes
+	if partnerHeroCardID != "" {
+		if m.state.Partner == nil {
+			m.state.Partner = &PlayerState{}
+		}
+		m.state.Partner.HeroCardID = partnerHeroCardID
+	}
+	m.turnSnapshots = turnSnapshots
+	m.prevBuffSources = prevBuffSources
+	m.prevAbilityCtrs = prevAbilityCtrs
+	m.prevModCount = prevModCount
+}
+
 // TurnSnapshots returns the accumulated per-turn snapshots for the current game.
 func (m *Machine) TurnSnapshots() []TurnSnapshot {
 	m.mu.RLock()

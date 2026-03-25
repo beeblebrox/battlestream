@@ -3044,3 +3044,73 @@ func TestSoloBeetleDntUnchanged(t *testing.T) {
 	}
 	t.Error("expected beetle buff source in solo game")
 }
+
+func TestReconnectStashFieldExists(t *testing.T) {
+	m := New()
+	p := NewProcessor(m)
+	if p.reconnectStash != nil {
+		t.Error("expected nil reconnectStash on fresh processor")
+	}
+	if p.isReconnect {
+		t.Error("expected isReconnect=false on fresh processor")
+	}
+}
+
+func TestReconnectStashPopulated(t *testing.T) {
+	m := New()
+	p := NewProcessor(m)
+
+	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Date(2026, 3, 24, 19, 46, 45, 0, time.UTC)})
+	m.SetTurn(5)
+	m.SetTavernTier(3)
+	m.UpdateHeroCardID("BG25_HERO_103_SKIN_D")
+
+	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Date(2026, 3, 24, 20, 6, 46, 0, time.UTC)})
+
+	if p.reconnectStash == nil {
+		t.Fatal("expected reconnectStash to be populated after second EventGameStart")
+	}
+	if p.reconnectStash.heroCardID != "BG25_HERO_103_SKIN_D" {
+		t.Errorf("stashed heroCardID: expected BG25_HERO_103_SKIN_D, got %q", p.reconnectStash.heroCardID)
+	}
+	if p.reconnectStash.turn != 5 {
+		t.Errorf("stashed turn: expected 5, got %d", p.reconnectStash.turn)
+	}
+	if p.reconnectStash.tavernTier != 3 {
+		t.Errorf("stashed tavernTier: expected 3, got %d", p.reconnectStash.tavernTier)
+	}
+}
+
+func TestReconnectDetectionAndRestore(t *testing.T) {
+	m := New()
+	p := NewProcessor(m)
+
+	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Date(2026, 3, 24, 19, 46, 45, 0, time.UTC)})
+	m.SetTurn(9)
+	m.SetTavernTier(4)
+	m.UpdateHeroCardID("BG25_HERO_103_SKIN_D")
+	origGameID := m.State().GameID
+
+	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Date(2026, 3, 24, 20, 6, 46, 0, time.UTC)})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventGameEntityTags,
+		Tags: map[string]string{"STATE": "RUNNING", "TURN": "19"},
+	})
+
+	s := m.State()
+	if s.GameID != origGameID {
+		t.Errorf("GameID: expected %q, got %q", origGameID, s.GameID)
+	}
+	if s.Player.HeroCardID != "BG25_HERO_103_SKIN_D" {
+		t.Errorf("HeroCardID: expected BG25_HERO_103_SKIN_D, got %q", s.Player.HeroCardID)
+	}
+	if s.TavernTier != 4 {
+		t.Errorf("TavernTier: expected 4, got %d", s.TavernTier)
+	}
+	if !p.isReconnect {
+		t.Error("expected isReconnect=true after reconnect detection")
+	}
+	if p.reconnectStash != nil {
+		t.Error("expected reconnectStash to be nil after restore")
+	}
+}
