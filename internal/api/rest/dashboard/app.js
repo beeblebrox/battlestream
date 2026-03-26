@@ -288,7 +288,7 @@ function renderTimelineScrubber(allMetas, globalMetas) {
   if (newHash === scrubberDataHash && globalHash === '') return;
   scrubberDataHash = newHash;
 
-  const sorted = [...allMetas].sort((a, b) => a.start_time_unix - b.start_time_unix);
+  const sorted = [...allMetas].filter((g) => g.placement > 0).sort((a, b) => a.start_time_unix - b.start_time_unix);
   const data = sorted.map((g) => {
     const ts = g.start_time_unix * 1000;
     return {
@@ -418,7 +418,8 @@ async function refreshDashboardFromScrubber() {
 // Apply lastN, lastDays, and date range filters to game metas.
 // Games are assumed to be sorted newest-first from the API.
 function applyGameFilters(metas) {
-  let filtered = metas;
+  // Exclude incomplete/stale games (placement=0 means the game timed out without finishing)
+  let filtered = metas.filter((g) => g.placement > 0);
 
   // Last N days filter (sets dateFrom)
   if (State.lastDays > 0 && !State.dateFrom) {

@@ -140,7 +140,7 @@ func (s *Server) handleGetAggregate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	filtered := filterMetasByMode(metas, mode)
+	filtered := filterMetasByMode(filterCompleteGames(metas), mode)
 	results := make([]stats.GameResult, len(filtered))
 	for i, m := range filtered {
 		results[i] = stats.GameResult{
@@ -172,7 +172,7 @@ func (s *Server) handleListGames(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	filtered := filterMetasByMode(allGames, mode)
+	filtered := filterMetasByMode(filterCompleteGames(allGames), mode)
 	total := len(filtered)
 
 	// Apply pagination.
@@ -209,6 +209,17 @@ func (s *Server) handleGetTurnSnapshots(w http.ResponseWriter, r *http.Request) 
 		snapshots = []gamestate.TurnSnapshot{}
 	}
 	s.writeJSON(w, snapshots)
+}
+
+// filterCompleteGames excludes stale/incomplete games (placement=0) from results.
+func filterCompleteGames(metas []store.GameMeta) []store.GameMeta {
+	out := make([]store.GameMeta, 0, len(metas))
+	for _, m := range metas {
+		if m.Placement > 0 {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // filterMetasByMode filters game metas by mode: "solo", "duos", or "all"/empty.
@@ -297,7 +308,7 @@ func (s *Server) handleGetPlayer(w http.ResponseWriter, r *http.Request) {
 	}
 	p := playerProfile{Name: name, BestPlacement: 8}
 	var total int
-	for _, m := range metas {
+	for _, m := range filterCompleteGames(metas) {
 		p.GamesPlayed++
 		p.GameIDs = append(p.GameIDs, m.GameID)
 		total += m.Placement

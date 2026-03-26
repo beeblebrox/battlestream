@@ -172,6 +172,9 @@ func (s *Server) GetPlayerProfile(_ context.Context, req *bspb.GetPlayerRequest)
 	best := int32(8)
 
 	for _, m := range metas {
+		if m.Placement <= 0 {
+			continue // skip stale/incomplete games
+		}
 		// Filter by player name stored in meta. For now include all — player
 		// filtering will be enhanced once per-player keys are added to store.
 		profile.GamesPlayed++

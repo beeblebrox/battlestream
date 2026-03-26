@@ -35,7 +35,12 @@ func Compute(results []GameResult) AggregateStats {
 	}
 
 	totalPlacement := 0
+	counted := 0
 	for _, r := range results {
+		if r.Placement <= 0 {
+			continue // skip stale/incomplete games
+		}
+		counted++
 		totalPlacement += r.Placement
 		// Duos: 1-4 placements, top 2 is a win.
 		// Solo: 1-8 placements, top 4 is a win.
@@ -56,8 +61,9 @@ func Compute(results []GameResult) AggregateStats {
 		}
 	}
 
-	if len(results) > 0 {
-		stats.AvgPlacement = float64(totalPlacement) / float64(len(results))
+	stats.GamesPlayed = counted
+	if counted > 0 {
+		stats.AvgPlacement = float64(totalPlacement) / float64(counted)
 	}
 
 	return stats
