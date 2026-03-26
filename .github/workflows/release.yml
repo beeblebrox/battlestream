@@ -60,3 +60,75 @@ jobs:
           MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
           WIN_CERT_PFX: ${{ secrets.WIN_CERT_PFX }}
           WIN_CERT_PASSWORD: ${{ secrets.WIN_CERT_PASSWORD }}
+
+  source-formula:
+    name: Update Source Formula
+    needs: release
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Download source tarball and compute sha256
+        id: sha
+        run: |
+          curl -sL -o source.tar.gz "https://github.com/beeblebrox/battlestream/archive/refs/tags/${{ steps.tag.outputs.tag }}.tar.gz"
+          SHA=$(sha256sum source.tar.gz | awk '{print $1}')
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Generate source formula
+        run: |
+          cat > battlestream-source.rb <<'FORMULA'
+          # typed: false
+          # frozen_string_literal: true
+
+          class BattlestreamSource < Formula
+            desc "Hearthstone Battlegrounds stat tracker (built from source)"
+            homepage "https://github.com/beeblebrox/battlestream"
+            url "https://github.com/beeblebrox/battlestream/archive/refs/tags/TAG_PLACEHOLDER.tar.gz"
+            sha256 "SHA_PLACEHOLDER"
+            version "VERSION_PLACEHOLDER"
+            license "MIT"
+
+            depends_on "go" => :build
+
+            conflicts_with "battlestream", because: "both install a `battlestream` binary"
+
+            def install
+              system "go", "build", *std_go_args(ldflags: "-s -w -X main.version=#{version}"), "./cmd/battlestream"
+            end
+
+            test do
+              system "#{bin}/battlestream", "version"
+            end
+          end
+          FORMULA
+          sed -i "s|TAG_PLACEHOLDER|${{ steps.tag.outputs.tag }}|g" battlestream-source.rb
+          sed -i "s|SHA_PLACEHOLDER|${{ steps.sha.outputs.sha256 }}|g" battlestream-source.rb
+          sed -i "s|VERSION_PLACEHOLDER|${{ steps.tag.outputs.version }}|g" battlestream-source.rb
+          # Remove leading whitespace from heredoc
+          sed -i 's/^          //' battlestream-source.rb
+
+      - name: Push to homebrew-tap
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/beeblebrox/homebrew-tap.git" tap
+          cp battlestream-source.rb tap/battlestream-source.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add battlestream-source.rb
+          git diff --cached --quiet && echo "No changes" && exit 0
+          git commit -m "Update battlestream-source formula to ${{ steps.tag.outputs.tag }}"
+          git push
