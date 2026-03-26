@@ -105,7 +105,7 @@ jobs:
             conflicts_with "battlestream", because: "both install a `battlestream` binary"
 
             def install
-              system "go", "build", *std_go_args(ldflags: "-s -w -X main.version=#{version}"), "./cmd/battlestream"
+              system "go", "build", *std_go_args(output: bin/"battlestream", ldflags: "-s -w -X main.version=#{version}"), "./cmd/battlestream"
             end
 
             test do
