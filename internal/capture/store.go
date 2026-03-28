@@ -33,6 +33,9 @@ func NewStore(dataDir string, jpegQuality int) FrameStore {
 }
 
 func (s *sqliteStore) InitGame(gameID string) error {
+	if s.db != nil {
+		s.db.Close()
+	}
 	s.gameID = gameID
 	s.frameCount = 0
 	s.startTime = time.Now()
@@ -50,6 +53,9 @@ func (s *sqliteStore) InitGame(gameID string) error {
 	}
 	s.db = db
 
+	db.Exec("PRAGMA journal_mode=WAL")
+	db.Exec("PRAGMA busy_timeout=5000")
+
 	if err := ensureSchema(db); err != nil {
 		return fmt.Errorf("ensure schema: %w", err)
 	}
@@ -65,6 +71,9 @@ func (s *sqliteStore) InitGame(gameID string) error {
 }
 
 func (s *sqliteStore) SaveFrame(f Frame) error {
+	if s.db == nil {
+		return fmt.Errorf("store not initialized: call InitGame first")
+	}
 	// Write JPEG to disk.
 	filename := fmt.Sprintf("%06d.jpg", f.Sequence)
 	relPath := filepath.Join("frames", filename)
