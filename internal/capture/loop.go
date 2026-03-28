@@ -103,9 +103,13 @@ func (l *Loop) Run(ctx context.Context) error {
 				continue
 			}
 
-			// Game started.
+			// Game started — wait until GameID is populated to avoid
+			// creating files at the root data dir.
 			if inGame && !capturing {
 				snap := l.tracker.Snapshot()
+				if snap.GameID == "" {
+					continue // processor hasn't finished CREATE_GAME yet
+				}
 				slog.Info("game detected, starting capture", "game_id", snap.GameID)
 				if err := l.store.InitGame(snap.GameID); err != nil {
 					slog.Error("failed to init game store", "err", err)

@@ -53,8 +53,12 @@ func (s *sqliteStore) InitGame(gameID string) error {
 	}
 	s.db = db
 
-	db.Exec("PRAGMA journal_mode=WAL")
-	db.Exec("PRAGMA busy_timeout=5000")
+	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		return fmt.Errorf("set WAL mode: %w", err)
+	}
+	if _, err := db.Exec("PRAGMA busy_timeout=5000"); err != nil {
+		return fmt.Errorf("set busy_timeout: %w", err)
+	}
 
 	if err := ensureSchema(db); err != nil {
 		return fmt.Errorf("ensure schema: %w", err)
