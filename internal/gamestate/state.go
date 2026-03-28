@@ -160,7 +160,8 @@ type Machine struct {
 	mu              sync.RWMutex
 	state           BGGameState
 	gameEntityTurn  int           // internal doubled turn from GameEntity
-	boardSnapshot   []MinionState // board state before combat, restored on game over
+	boardSnapshot     []MinionState // board state before combat, restored on game over
+	combatCopySlotMap map[int]int   // combat copy entityID → snapshot index
 	goldTotal       int           // last RESOURCES value
 	goldUsed        int           // last RESOURCES_USED value
 
@@ -307,6 +308,7 @@ func (m *Machine) SetGameEntityTurn(turn int) {
 		// are replaced by simulation copies with base stats. The recruit
 		// board has the fully-buffed stats we want to preserve.
 		m.boardSnapshot = deepCopyBoard(m.state.Board)
+		m.combatCopySlotMap = nil
 		m.state.Phase = PhaseCombat
 	}
 }
@@ -317,6 +319,52 @@ func (m *Machine) UpdateBoardSnapshot() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.boardSnapshot = deepCopyBoard(m.state.Board)
+}
+
+// UpdateSnapshotFromCombatCopy updates a board snapshot entry's stats using
+// peak stats observed on a combat copy with the matching CardID.
+// Combat copies briefly show the real (enchantment-inclusive) stats before
+// being stripped to base. This captures stats for minions whose recruit-phase
+// buffs are purely enchantment-based (e.g. Wrath Weaver) and never appear as
+// direct ATK/HEALTH TAG_CHANGE events on the recruit entity.
+// Each combat copy entity is mapped to a distinct snapshot position so that
+// multiple copies of the same card are handled correctly.
+func (m *Machine) UpdateSnapshotFromCombatCopy(entityID int, cardID string, atk, health int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.boardSnapshot) == 0 {
+		return
+	}
+	// Check if this combat copy already has a slot assignment.
+	if idx, ok := m.combatCopySlotMap[entityID]; ok {
+		if atk > m.boardSnapshot[idx].Attack {
+			m.boardSnapshot[idx].Attack = atk
+		}
+		if health > m.boardSnapshot[idx].Health {
+			m.boardSnapshot[idx].Health = health
+		}
+		return
+	}
+	// Find the first unassigned snapshot entry matching this CardID.
+	claimed := make(map[int]bool)
+	for _, idx := range m.combatCopySlotMap {
+		claimed[idx] = true
+	}
+	for i := range m.boardSnapshot {
+		if m.boardSnapshot[i].CardID == cardID && !claimed[i] {
+			if atk > m.boardSnapshot[i].Attack {
+				m.boardSnapshot[i].Attack = atk
+			}
+			if health > m.boardSnapshot[i].Health {
+				m.boardSnapshot[i].Health = health
+			}
+			if m.combatCopySlotMap == nil {
+				m.combatCopySlotMap = make(map[int]int)
+			}
+			m.combatCopySlotMap[entityID] = i
+			return
+		}
+	}
 }
 
 // deepCopyBoard returns a deep copy of a board slice, including Enchantment slices.

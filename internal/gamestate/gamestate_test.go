@@ -1817,6 +1817,138 @@ func TestBoardSnapshotPhaseGate(t *testing.T) {
 	}
 }
 
+// TestTavernBuffedMinionStats verifies that when a minion receives buffed stats
+// while still owned by the tavern (CONTROLLER=15), and then the player buys it,
+// the board shows the buffed stats — not the base stats from SHOW_ENTITY.
+// Regression test for: Wrath Weaver showing 1/4 instead of 25/65.
+func TestTavernBuffedMinionStats(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+	p.localPlayerID = 7
+
+	m.SetGameEntityTurn(1) // recruit
+
+	// ── Tavern creates minion with base stats (SHOW_ENTITY) ─────────────
+	// CONTROLLER=15 (tavern), so this is NOT the local player's entity yet.
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventEntityUpdate,
+		EntityID:   18706,
+		CardID:     "BGS_004",
+		EntityName: "Wrath Weaver",
+		PlayerID:   15,
+		Tags: map[string]string{
+			"CONTROLLER": "15",
+			"CARDTYPE":   "MINION",
+			"ZONE":       "PLAY",
+			"ATK":        "1",
+			"HEALTH":     "4",
+			"CARDRACE":   "DEMON",
+		},
+	})
+
+	// ── Tavern applies shop buff enchantment → real stats ───────────────
+	// TAG_CHANGE ATK=25, HEALTH=65 while CONTROLLER is still 15.
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventTagChange,
+		EntityID:   18706,
+		EntityName: "Wrath Weaver",
+		PlayerID:   15,
+		Tags:       map[string]string{"HEALTH": "65"},
+	})
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventTagChange,
+		EntityID:   18706,
+		EntityName: "Wrath Weaver",
+		PlayerID:   15,
+		Tags:       map[string]string{"ATK": "25"},
+	})
+
+	// ── CONTROLLER changes to local player (buy) ────────────────────────
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventTagChange,
+		EntityID:   18706,
+		EntityName: "Wrath Weaver",
+		PlayerID:   15,
+		Tags:       map[string]string{"CONTROLLER": "7"},
+	})
+
+	// ── Minion placed on board (ZONE=PLAY after buy) ────────────────────
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventTagChange,
+		EntityID:   18706,
+		EntityName: "Wrath Weaver",
+		PlayerID:   7,
+		Tags:       map[string]string{"ZONE": "PLAY"},
+	})
+
+	board := m.State().Board
+	if len(board) != 1 {
+		t.Fatalf("expected 1 minion on board, got %d", len(board))
+	}
+	if board[0].Attack != 25 {
+		t.Errorf("Attack: want 25, got %d (entity registry missed tavern-phase TAG_CHANGE)", board[0].Attack)
+	}
+	if board[0].Health != 65 {
+		t.Errorf("Health: want 65, got %d (entity registry missed tavern-phase TAG_CHANGE)", board[0].Health)
+	}
+}
+
+// TestCombatCopyStatRecovery verifies that peak stats from combat copies
+// (SETASIDE entities during combat) update the board snapshot.
+// This is a secondary safety net for enchantment-only stat changes.
+func TestCombatCopyStatRecovery(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+	p.localPlayerID = 7
+
+	m.SetGameEntityTurn(1) // recruit
+	p.entityProps[300] = &entityInfo{
+		Name: "Wrath Weaver", CardID: "BGS_004", CardType: "MINION",
+		Attack: 1, Health: 4, Zone: "PLAY",
+	}
+	p.entityController[300] = 7
+	m.UpsertMinion(MinionState{EntityID: 300, CardID: "BGS_004", Name: "Wrath Weaver", Attack: 1, Health: 4})
+	m.UpdateBoardSnapshot()
+
+	m.SetGameEntityTurn(2) // combat
+
+	// Combat copy in SETASIDE shows real stats then strips to base.
+	p.Handle(parser.GameEvent{
+		Type: parser.EventEntityUpdate, EntityID: 500, CardID: "BGS_004",
+		EntityName: "Wrath Weaver", PlayerID: 7,
+		Tags: map[string]string{"CONTROLLER": "7", "CARDTYPE": "MINION", "ZONE": "SETASIDE", "ATK": "1", "HEALTH": "4"},
+	})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 500, PlayerID: 7,
+		Tags: map[string]string{"ATK": "25"},
+	})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 500, PlayerID: 7,
+		Tags: map[string]string{"HEALTH": "65"},
+	})
+	// Stripped back to base.
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 500, PlayerID: 7,
+		Tags: map[string]string{"ATK": "1"},
+	})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 500, PlayerID: 7,
+		Tags: map[string]string{"HEALTH": "4"},
+	})
+
+	m.GameEnd(3, time.Now())
+	restored := m.State().Board
+	if len(restored) != 1 {
+		t.Fatalf("expected 1 minion, got %d", len(restored))
+	}
+	if restored[0].Attack != 25 {
+		t.Errorf("Attack: want 25, got %d", restored[0].Attack)
+	}
+	if restored[0].Health != 65 {
+		t.Errorf("Health: want 65, got %d", restored[0].Health)
+	}
+}
+
 // ── Duos detection and partner tracking tests ────────────────────────────────
 
 // setupDuosGame sends a game start sequence with Duos tags to identify both

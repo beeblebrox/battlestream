@@ -43,6 +43,15 @@ type pendingStatChange struct {
 	delta    int
 }
 
+// combatCopyPeak tracks peak ATK/HEALTH observed on a combat copy.
+// During combat setup, copies briefly show real (enchantment-inclusive) stats
+// before being stripped to base. The peak values represent the recruit board stats.
+type combatCopyPeak struct {
+	CardID string
+	ATK    int
+	Health int
+}
+
 // buffTracker holds buff source tracking state for the local player.
 // Encapsulates buff source state, Dnt counters, and economy counters.
 type buffTracker struct {
@@ -154,6 +163,12 @@ type Processor struct {
 	reconnectStash *reconnectStash
 	isReconnect    bool
 
+	// Combat copy peak stats — tracks the max ATK/HEALTH seen on each
+	// local-player combat copy (SETASIDE minions during combat). Used to
+	// recover real stats for minions whose recruit-phase buffs are purely
+	// enchantment-based and never appear as direct TAG_CHANGE events.
+	combatCopies map[int]*combatCopyPeak // entityID → peak stats
+
 	// Available tribes detected from BACON_SUBSET_* tags.
 	seenTribes        map[string]bool
 	entityTribeReg    map[int]string  // entityID → tribe provisionally registered via TAG_CHANGE
@@ -241,6 +256,7 @@ func (p *Processor) Handle(e parser.GameEvent) {
 		p.partnerBoardSetupDone = false
 		p.combatPhaseActive = false
 		p.combatPhaseEntityIDs = nil
+		p.combatCopies = nil
 		p.entityController = make(map[int]int)
 		p.heroEntities = make(map[int]bool)
 		p.entityProps = make(map[int]*entityInfo)
@@ -300,6 +316,7 @@ func (p *Processor) Handle(e parser.GameEvent) {
 			// Prune dead entities on recruit phase transition (odd GameEntity turn).
 			if turn%2 == 1 {
 				p.pruneStaleEntities()
+				p.combatCopies = nil
 			}
 		}
 
@@ -549,6 +566,15 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 			}
 
 		case "HEALTH":
+			// Always update entity registry — tavern/shop minions receive
+			// buffed stats (e.g. from BG_ShopBuff enchantments) while
+			// CONTROLLER is still the tavern player. Without this, buying
+			// a buffed minion would show base stats on the board.
+			if e.EntityID > 0 {
+				if info := p.entityProps[e.EntityID]; info != nil {
+					info.Health = parseInt(value)
+				}
+			}
 			if p.isLocalHero(e, controllerID) {
 				p.machine.UpdatePlayerTag(tag, value)
 			} else if p.isPartnerHero(e, controllerID) {
@@ -556,12 +582,20 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 			} else if e.EntityID > 0 && controllerID == p.localPlayerID {
 				p.updateMinionStat(e, "HEALTH", value)
 				p.updatePartnerCombatMinion(e.EntityID, "HEALTH", parseInt(value))
+				p.updateCombatCopyPeak(e.EntityID, "HEALTH", parseInt(value))
 			}
 
 		case "ATK":
+			// Always update entity registry (see HEALTH comment above).
+			if e.EntityID > 0 {
+				if info := p.entityProps[e.EntityID]; info != nil {
+					info.Attack = parseInt(value)
+				}
+			}
 			if e.EntityID > 0 && controllerID == p.localPlayerID {
 				p.updateMinionStat(e, "ATK", value)
 				p.updatePartnerCombatMinion(e.EntityID, "ATK", parseInt(value))
+				p.updateCombatCopyPeak(e.EntityID, "ATK", parseInt(value))
 			}
 
 		case "PROPOSED_ATTACKER":
@@ -1117,6 +1151,25 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 		return
 	}
 
+	// Register local player's SETASIDE minions as combat copies during combat.
+	// Their subsequent TAG_CHANGE ATK/HEALTH events will reveal the real
+	// (enchantment-inclusive) recruit stats before being stripped to base.
+	if info.Zone == "SETASIDE" && controllerID == p.localPlayerID &&
+		p.machine.Phase() == PhaseCombat && info.CardID != "" {
+		if p.combatCopies == nil {
+			p.combatCopies = make(map[int]*combatCopyPeak)
+		}
+		p.combatCopies[e.EntityID] = &combatCopyPeak{
+			CardID: info.CardID,
+			ATK:    info.Attack,
+			Health: info.Health,
+		}
+		// If the FULL_ENTITY already has non-base stats, sync immediately.
+		if info.Attack > 0 || info.Health > 0 {
+			p.machine.UpdateSnapshotFromCombatCopy(e.EntityID, info.CardID, info.Attack, info.Health)
+		}
+	}
+
 	// Only add minions in PLAY zone to the board.
 	if info.Zone != "PLAY" {
 		return
@@ -1398,6 +1451,35 @@ func (p *Processor) isLocalHero(e parser.GameEvent, controllerID int) bool {
 	}
 	// Before the hero entity is identified, fall back to the HERO-type registry.
 	return p.heroEntities[e.EntityID]
+}
+
+// updateCombatCopyPeak updates the peak ATK/HEALTH for a tracked combat copy
+// and syncs the board snapshot when higher stats are observed. During combat
+// setup, copies briefly show the real (enchantment-inclusive) stats before
+// being stripped to base. Tracking the peak values recovers the recruit stats
+// for minions like Wrath Weaver whose buffs never appear as TAG_CHANGE on the
+// recruit entity.
+func (p *Processor) updateCombatCopyPeak(entityID int, stat string, val int) {
+	cc := p.combatCopies[entityID]
+	if cc == nil {
+		return
+	}
+	updated := false
+	switch stat {
+	case "ATK":
+		if val > cc.ATK {
+			cc.ATK = val
+			updated = true
+		}
+	case "HEALTH":
+		if val > cc.Health {
+			cc.Health = val
+			updated = true
+		}
+	}
+	if updated {
+		p.machine.UpdateSnapshotFromCombatCopy(entityID, cc.CardID, cc.ATK, cc.Health)
+	}
 }
 
 // isPlayerOrHeroEntity returns true if the event belongs to the local player
