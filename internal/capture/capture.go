@@ -14,6 +14,8 @@ type EventSource interface {
 }
 
 // StateTracker maintains game state from events.
+// Apply must be called from a single goroutine.
+// Snapshot and InGame are safe for concurrent use.
 type StateTracker interface {
 	Apply(event parser.GameEvent)
 	Snapshot() CaptureState

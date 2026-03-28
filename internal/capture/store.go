@@ -125,6 +125,11 @@ func (s *sqliteStore) SaveFrame(f Frame) error {
 		return fmt.Errorf("insert frame: %w", err)
 	}
 
+	// Update is_duos on first frame when we have actual game state.
+	if s.frameCount == 0 && f.State.IsDuos {
+		s.db.Exec(`UPDATE games SET is_duos = 1 WHERE game_id = ?`, s.gameID)
+	}
+
 	s.frameCount++
 	return nil
 }
@@ -142,7 +147,9 @@ func (s *sqliteStore) FinalizeGame(placement int) error {
 
 func (s *sqliteStore) Close() error {
 	if s.db != nil {
-		return s.db.Close()
+		err := s.db.Close()
+		s.db = nil
+		return err
 	}
 	return nil
 }

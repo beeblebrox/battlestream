@@ -70,6 +70,7 @@ func (l *Loop) Run(ctx context.Context) error {
 			if capturing {
 				snap := l.tracker.Snapshot()
 				l.store.FinalizeGame(snap.Placement)
+				l.store.Close()
 			}
 			return ctx.Err()
 
