@@ -24,7 +24,8 @@ func NewEventSource(ctx context.Context, powerLogDir string) (EventSource, error
 
 	ctx, cancel := context.WithCancel(ctx)
 	w, err := watcher.New(ctx, watcher.Config{
-		LogDir: powerLogDir,
+		LogDir:        powerLogDir,
+		ReadFromStart: true,
 	})
 	if err != nil {
 		cancel()
