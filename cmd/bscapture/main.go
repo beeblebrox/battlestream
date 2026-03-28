@@ -1,15 +1,21 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 
 	"battlestream.fixates.io/internal/capture"
+	"battlestream.fixates.io/internal/discovery"
 	"github.com/spf13/cobra"
 )
 
@@ -80,12 +86,92 @@ func cmdRun() *cobra.Command {
 	}
 }
 
+type monitorInfo struct {
+	Name        string  `json:"name"`
+	Description string  `json:"description"`
+	Width       int     `json:"width"`
+	Height      int     `json:"height"`
+	X           int     `json:"x"`
+	Y           int     `json:"y"`
+	Scale       float64 `json:"scale"`
+}
+
+func detectMonitors() ([]monitorInfo, error) {
+	out, err := exec.Command("hyprctl", "monitors", "-j").Output()
+	if err != nil {
+		return nil, fmt.Errorf("running hyprctl monitors -j: %w", err)
+	}
+	var monitors []monitorInfo
+	if err := json.Unmarshal(out, &monitors); err != nil {
+		return nil, fmt.Errorf("parsing hyprctl output: %w", err)
+	}
+	return monitors, nil
+}
+
 func cmdDetect() *cobra.Command {
 	return &cobra.Command{
 		Use:   "detect",
 		Short: "Detect monitors and Hearthstone install, update config",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("not implemented")
+			// Load existing config (OK if none exists yet).
+			cfg, err := capture.LoadConfig(cfgFile)
+			if err != nil {
+				cfg = &capture.Config{}
+			}
+
+			// Detect monitors.
+			monitors, err := detectMonitors()
+			if err != nil {
+				return fmt.Errorf("detecting monitors: %w", err)
+			}
+			if len(monitors) == 0 {
+				return fmt.Errorf("no monitors detected")
+			}
+
+			// Display numbered list.
+			fmt.Println("Detected monitors:")
+			for i, m := range monitors {
+				fmt.Printf("  %d) %s  %dx%d  %s\n", i+1, m.Name, m.Width, m.Height, m.Description)
+			}
+
+			// Prompt user to pick one.
+			reader := bufio.NewReader(os.Stdin)
+			fmt.Printf("Select monitor [1-%d]: ", len(monitors))
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				return fmt.Errorf("reading input: %w", err)
+			}
+			choice, err := strconv.Atoi(strings.TrimSpace(line))
+			if err != nil || choice < 1 || choice > len(monitors) {
+				return fmt.Errorf("invalid selection: %s", strings.TrimSpace(line))
+			}
+			selected := monitors[choice-1]
+			cfg.Monitor = selected.Name
+			fmt.Printf("Selected: %s (%dx%d)\n", selected.Name, selected.Width, selected.Height)
+
+			// Discover Power.log path.
+			info, err := discovery.Discover()
+			if err != nil {
+				return fmt.Errorf("detecting Hearthstone install: %w", err)
+			}
+			cfg.PowerLogPath = filepath.Join(info.LogPath, "Power.log")
+			fmt.Printf("Power.log: %s\n", cfg.PowerLogPath)
+
+			// Determine config path.
+			savePath := cfgFile
+			if savePath == "" {
+				home, err := os.UserHomeDir()
+				if err != nil {
+					return fmt.Errorf("finding home directory: %w", err)
+				}
+				savePath = filepath.Join(home, ".config", "bscapture", "config.yaml")
+			}
+
+			if err := capture.SaveConfig(cfg, savePath); err != nil {
+				return fmt.Errorf("saving config: %w", err)
+			}
+			fmt.Printf("Config saved to %s\n", savePath)
+			return nil
 		},
 	}
 }
