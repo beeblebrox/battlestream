@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -17,6 +18,7 @@ import (
 	"battlestream.fixates.io/internal/capture"
 	"battlestream.fixates.io/internal/discovery"
 	"github.com/spf13/cobra"
+	_ "modernc.org/sqlite"
 )
 
 var cfgFile string
@@ -181,7 +183,48 @@ func cmdList() *cobra.Command {
 		Use:   "list",
 		Short: "List captured game sessions",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("not implemented")
+			cfg, err := capture.LoadConfig(cfgFile)
+			if err != nil {
+				return err
+			}
+
+			entries, err := os.ReadDir(cfg.DataDir)
+			if err != nil {
+				if os.IsNotExist(err) {
+					fmt.Println("No captures found.")
+					return nil
+				}
+				return err
+			}
+
+			for _, entry := range entries {
+				if !entry.IsDir() {
+					continue
+				}
+				dbPath := filepath.Join(cfg.DataDir, entry.Name(), "capture.db")
+				if _, err := os.Stat(dbPath); err != nil {
+					continue
+				}
+				db, err := sql.Open("sqlite", dbPath)
+				if err != nil {
+					continue
+				}
+				var gameID, startTime string
+				var placement, frames int
+				var endTime sql.NullString
+				err = db.QueryRow(`SELECT game_id, start_time, end_time, placement, total_frames FROM games LIMIT 1`).
+					Scan(&gameID, &startTime, &endTime, &placement, &frames)
+				db.Close()
+				if err != nil {
+					continue
+				}
+				status := "in-progress"
+				if endTime.Valid {
+					status = fmt.Sprintf("#%d", placement)
+				}
+				fmt.Printf("%-40s  %s  %s  %d frames\n", gameID, startTime, status, frames)
+			}
+			return nil
 		},
 	}
 }
@@ -191,7 +234,18 @@ func cmdConfig() *cobra.Command {
 		Use:   "config",
 		Short: "Show current configuration",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("not implemented")
+			cfg, err := capture.LoadConfig(cfgFile)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("power_log_path:    %s\n", cfg.PowerLogPath)
+			fmt.Printf("monitor:           %s\n", cfg.Monitor)
+			fmt.Printf("capture_interval:  %s\n", cfg.CaptureInterval)
+			fmt.Printf("output_resolution: %dx%d\n", cfg.OutputResWidth, cfg.OutputResHeight)
+			fmt.Printf("jpeg_quality:      %d\n", cfg.JPEGQuality)
+			fmt.Printf("data_dir:          %s\n", cfg.DataDir)
+			fmt.Printf("stale_timeout:     %s\n", cfg.StaleTimeout)
+			return nil
 		},
 	}
 }
