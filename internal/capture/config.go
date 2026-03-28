@@ -28,7 +28,7 @@ func LoadConfig(cfgFile string) (*Config, error) {
 	v.SetDefault("capture_interval", "1s")
 	v.SetDefault("output_res_width", 1920)
 	v.SetDefault("output_res_height", 1080)
-	v.SetDefault("jpeg_quality", 92)
+	v.SetDefault("jpeg_quality", 75)
 	v.SetDefault("stale_timeout", "5m")
 
 	home, _ := os.UserHomeDir()
