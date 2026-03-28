@@ -118,5 +118,5 @@ func (t *machineStateTracker) Snapshot() CaptureState {
 
 func (t *machineStateTracker) InGame() bool {
 	phase := t.machine.Phase()
-	return phase != gamestate.PhaseIdle && phase != gamestate.PhaseLobby
+	return phase != gamestate.PhaseIdle && phase != gamestate.PhaseLobby && phase != gamestate.PhaseGameOver
 }
