@@ -322,13 +322,7 @@ func (p *Parser) emit(e GameEvent) {
 	if p.out == nil {
 		return
 	}
-	select {
-	case p.out <- e:
-	default:
-		// Channel full — drop event rather than blocking the log tail reader.
-		// This should be extremely rare if the channel is adequately buffered.
-		slog.Warn("parser event channel full, dropping event", "type", e.Type)
-	}
+	p.out <- e
 }
 
 func (p *Parser) extractTimestamp(line string) time.Time {

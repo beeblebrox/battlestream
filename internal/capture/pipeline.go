@@ -19,7 +19,7 @@ type logEventSource struct {
 
 // NewEventSource creates an EventSource that tails Power.log and emits parsed events.
 func NewEventSource(ctx context.Context, powerLogDir string) (EventSource, error) {
-	events := make(chan parser.GameEvent, 256)
+	events := make(chan parser.GameEvent, 16384)
 	p := parser.New(events)
 
 	ctx, cancel := context.WithCancel(ctx)
