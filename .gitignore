@@ -1,5 +1,6 @@
 # Binaries
 /battlestream
+/bscapture
 *.exe
 *.exe~
 *.dll

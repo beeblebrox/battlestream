@@ -56,7 +56,7 @@ func (m *mockStateTracker) SetInGame(v bool, gameID string) {
 type mockScreenshotter struct{}
 
 func (m *mockScreenshotter) Capture(_ context.Context) (image.Image, error) {
-	return testImage(1920, 1080), nil
+	return testImage(4, 4), nil // tiny image for fast tests
 }
 
 // mockFrameStore records calls.
@@ -100,7 +100,7 @@ func TestLoopCapturesDuringGame(t *testing.T) {
 	store := &mockFrameStore{}
 
 	loop := NewLoop(events, tracker, &mockScreenshotter{}, store,
-		50*time.Millisecond, 5*time.Second)
+		100*time.Millisecond, 5*time.Second)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -110,8 +110,8 @@ func TestLoopCapturesDuringGame(t *testing.T) {
 	tracker.SetInGame(true, "test-game")
 	events.Send(parser.GameEvent{Type: parser.EventGameStart})
 
-	// Wait for a few captures.
-	time.Sleep(200 * time.Millisecond)
+	// Wait for a few captures (generous timing for -race).
+	time.Sleep(500 * time.Millisecond)
 
 	if store.FrameCount() == 0 {
 		t.Error("expected frames to be captured during game")
@@ -119,10 +119,10 @@ func TestLoopCapturesDuringGame(t *testing.T) {
 
 	// Simulate game end.
 	tracker.SetInGame(false, "")
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
 
 	cancel()
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 
 	store.mu.Lock()
 	finalized := store.finalized
