@@ -2,6 +2,18 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Git Workflow Policy
+
+**All work must follow the branch/worktree policy in [`docs/workflow-policy.md`](docs/workflow-policy.md).** Key rules:
+
+- **Never commit directly to `main`.** All work goes on a feature branch in a dedicated `git worktree`.
+- **Every issue gets its own worktree:** `git worktree add ../battlestream-<issue-id> -b feat/<issue-id> origin/main`
+- **QA validates on the same worktree** as the developer — no re-checkout.
+- **Merge to `main` only after QA sign-off and CI green.**
+- Clean up the worktree and remote branch after merge.
+
+See the full policy for step-by-step instructions: [`docs/workflow-policy.md`](docs/workflow-policy.md)
+
 ## Build & Test Commands
 
 ```sh
