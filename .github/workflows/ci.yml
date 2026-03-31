@@ -125,6 +125,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up buf
         uses: bufbuild/buf-setup-action@v1
@@ -136,7 +138,7 @@ jobs:
         uses: bufbuild/buf-breaking-action@v1
         with:
           input: "."
-          against: "https://github.com/${{ github.repository }}.git#branch=main"
+          against: ".git#branch=main"
 
   docker:
     name: Docker build
