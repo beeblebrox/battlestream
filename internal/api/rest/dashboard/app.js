@@ -756,11 +756,18 @@ const ARIA_DECAL = { aria: { enabled: true, decal: { show: true } } };
 const BASE_ANIM = { animationDuration: 800, animationEasing: 'cubicOut' };
 const AXIS_NAME_STYLE = { color: '#888', fontSize: 11 };
 
-// Short codes for chart axis labels (ECharts canvas can't reliably render emoji)
+// Short codes for duos-combined chart labels (e.g. "ELE / MRL")
 const TRIBE_SHORT = {
   DRAGON: 'DRG', PET: 'BST', PIRATE: 'PIR', UNDEAD: 'UND',
   DEMON: 'DMN', MECHANICAL: 'MCH', NAGA: 'NGA', QUILBOAR: 'QUI',
   MURLOC: 'MRL', ELEMENTAL: 'ELE', ALL: 'ALL', Mixed: 'MIX', None: '---',
+};
+
+// Full proper-case names for solo axis labels and tooltips
+const TRIBE_NAME = {
+  DRAGON: 'Dragon', PET: 'Beast', PIRATE: 'Pirate', UNDEAD: 'Undead',
+  DEMON: 'Demon', MECHANICAL: 'Mech', NAGA: 'Naga', QUILBOAR: 'Quilboar',
+  MURLOC: 'Murloc', ELEMENTAL: 'Elemental', ALL: 'All', Mixed: 'Mixed', None: 'None',
 };
 
 // Emoji for HTML rendering (legend, minion cards)
@@ -774,6 +781,10 @@ function tribeIcon(name) {
   return TRIBE_EMOJI[name] || TRIBE_SHORT[name] || name;
 }
 
+function tribeName(name) {
+  return TRIBE_NAME[name] || name;
+}
+
 function tribeEmoji(name) {
   return TRIBE_EMOJI[name] || '';
 }
@@ -785,7 +796,7 @@ function renderTribeLegend(containerId) {
   legend.className = 'tribe-legend';
   const entries = Object.entries(TRIBE_EMOJI).filter(([k, v]) => k !== 'ALL' && k !== 'None' && v);
   legend.innerHTML = entries
-    .map(([k, v]) => `<span>${v}=${k}</span>`)
+    .map(([k, v]) => `<span>${v} ${TRIBE_NAME[k] || k}</span>`)
     .join(' ');
   container.appendChild(legend);
 }
@@ -1450,7 +1461,7 @@ function renderAnomalyPerf(games) {
 }
 
 function renderTribeWinrate(games) {
-  addChartHelp('chart-tribe-winrate', 'Average placement per dominant board tribe. Green = winning (>50% WR), red = losing. Shows game count and win rate.');
+  addChartHelp('chart-tribe-winrate', 'Average placement per dominant board tribe. Green = winning (>50% WR), red = losing. Shows game count and win rate. Tribe emoji legend shown below the chart.');
   if (!games || games.length === 0) { removeVariantTabs('chart-tribe-winrate'); return showNoData('chart-tribe-winrate'); }
 
   const anyDuos = games.some((g) => g.is_duos);
@@ -1472,11 +1483,12 @@ function resolveTribe(board) {
 
 function getGameTribeLabel(g, variant) {
   const pt = resolveTribe(g.board);
-  if (variant === 'player' || !g.is_duos) return tribeIcon(pt);
+  if (variant === 'player' || !g.is_duos) return tribeName(pt);
   const pm = getPartnerMinions(g);
   const pp = resolveTribe(pm);
-  if (variant === 'partner') return tribeIcon(pp);
-  return `${tribeIcon(pt)} / ${tribeIcon(pp)}`;
+  if (variant === 'partner') return tribeName(pp);
+  // Duos combined: short codes to keep labels readable (e.g. "ELE / MRL")
+  return `${TRIBE_SHORT[pt] || pt} / ${TRIBE_SHORT[pp] || pp}`;
 }
 
 function renderTribeWinrateInner(games, variant) {
@@ -1508,10 +1520,12 @@ function renderTribeWinrateInner(games, variant) {
       formatter: (params) => {
         const p = params[0];
         const e = entries[p.dataIndex];
-        return `<b>${e.name}</b><br/>Avg Placement: ${e.avg.toFixed(2)}<br/>Win Rate: ${e.winRate}%<br/>Games: ${e.count}`;
+        const icon = tribeEmoji(e.name) || (e.name.includes(' / ') ? '' : '');
+        const label = icon ? `${icon} ${e.name}` : e.name;
+        return `<b>${label}</b><br/>Avg Placement: ${e.avg.toFixed(2)}<br/>Win Rate: ${e.winRate}%<br/>Games: ${e.count}`;
       },
     },
-    grid: { left: Math.min(140, Math.max(60, Math.max(...entries.map(e => e.name.length)) * 8 + 10)), right: 100 },
+    grid: { left: Math.min(180, Math.max(60, Math.max(...entries.map(e => e.name.length)) * 8 + 10)), right: 100 },
     yAxis: { type: 'category', data: entries.map((e) => e.name), inverse: true, axisLabel: { interval: 0 } },
     xAxis: { type: 'value', min: 1, max: Math.min(8, Math.ceil(Math.max(...entries.map((e) => e.avg)) + 1)), ...xName('Avg Placement') },
     series: [{
