@@ -2183,6 +2183,13 @@ function _sortTh(label, col, align, width, title) {
   return `<th${t} onclick="sortRecentGames('${col}')" style="padding:0.3rem 0.5rem;text-align:${align};${w}cursor:pointer;user-select:none;${isActive ? 'color:#eee;' : ''}">${label}${arrow}</th>`;
 }
 
+let _recentHeroFilter = '';
+
+function filterRecentByHero(val) {
+  _recentHeroFilter = val.toLowerCase().trim();
+  renderRecentGamesTable(State.games, State.fullGames);
+}
+
 function sortRecentGames(col) {
   if (_recentSortCol === col) {
     _recentSortDir *= -1;
@@ -2208,7 +2215,14 @@ function renderRecentGamesTable(metas, fullGames) {
       default: return meta.start_time_unix || 0;
     }
   };
-  const sorted = [...metas].sort((a, b) => _recentSortDir * (getVal(b) - getVal(a)));
+  let sorted = [...metas].sort((a, b) => _recentSortDir * (getVal(b) - getVal(a)));
+  if (_recentHeroFilter) {
+    sorted = sorted.filter((meta) => {
+      const full = fullGames.get(meta.game_id);
+      const hero = full ? heroBaseName(full.player?.hero_card_id).toLowerCase() : '';
+      return hero.includes(_recentHeroFilter);
+    });
+  }
 
   const rows = sorted.map((meta) => {
     const full = fullGames.get(meta.game_id);
@@ -2250,10 +2264,26 @@ function renderRecentGamesTable(metas, fullGames) {
       `</tr>`;
   }).join('');
 
+  const clearBtn = _recentHeroFilter
+    ? `<button onclick="filterRecentByHero('');var i=document.getElementById('recent-hero-filter');if(i)i.value='';" ` +
+      `style="background:none;border:1px solid var(--border);border-radius:4px;color:#888;cursor:pointer;` +
+      `font-size:0.78rem;padding:0.15rem 0.4rem;margin-left:0.25rem;">✕</button>`
+    : '';
+  const totalCount = metas.length;
+  const shownLabel = _recentHeroFilter && sorted.length !== totalCount
+    ? `<span style="color:#888;font-weight:normal;">(${sorted.length} of ${totalCount})</span>`
+    : `<span style="color:#888;font-weight:normal;">(${sorted.length})</span>`;
+
   el.innerHTML =
     `<div style="margin-top:1.5rem;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:1rem;">` +
-    `<h3 style="margin:0 0 0.75rem;color:#eee;font-size:0.95rem;">Recent Games ` +
-    `<span style="color:#888;font-weight:normal;">(${sorted.length})</span></h3>` +
+    `<div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.75rem;flex-wrap:wrap;">` +
+    `<h3 style="margin:0;color:#eee;font-size:0.95rem;">Recent Games ${shownLabel}</h3>` +
+    `<div style="margin-left:auto;display:flex;align-items:center;gap:0;">` +
+    `<input id="recent-hero-filter" type="text" placeholder="Filter by hero…" ` +
+    `oninput="filterRecentByHero(this.value)" value="${_recentHeroFilter.replace(/"/g, '&quot;')}" ` +
+    `style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;` +
+    `padding:0.22rem 0.5rem;font-size:0.82rem;width:160px;outline:none;">` +
+    `${clearBtn}</div></div>` +
     `<div style="max-height:320px;overflow-y:auto;">` +
     `<table style="width:100%;border-collapse:collapse;font-size:0.88rem;">` +
     `<thead><tr style="color:#888;font-size:0.78rem;border-bottom:1px solid var(--border);">` +
