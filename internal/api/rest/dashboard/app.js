@@ -982,8 +982,11 @@ function renderPlacementDist(metas) {
       ],
     }, true);
   } else {
-    const maxPlace = isDuosOnly ? 4 : 8;
-    const labels = isDuosOnly ? ['1st', '2nd', '3rd', '4th'] : ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th'];
+    // Detect max placement from dataset to avoid empty buckets (e.g. all-Duos dataset only has 1–4)
+    const maxInData = metas.reduce((max, g) => Math.max(max, g.placement || 0), 0);
+    const maxPlace = isDuosOnly ? 4 : (maxInData <= 4 ? 4 : 8);
+    const allLabels = ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th'];
+    const labels = allLabels.slice(0, maxPlace);
     const counts = new Array(maxPlace).fill(0);
     metas.forEach((g) => {
       if (g.placement >= 1 && g.placement <= maxPlace) counts[g.placement - 1]++;
@@ -2011,6 +2014,7 @@ function renderGameHeader(game) {
 }
 
 function renderBoardStats(turns) {
+  addChartHelp('chart-board-stats', 'Total ATK and HP of your board each turn. Log scale is used when late-game values are much larger than early turns, so early turns remain visible.');
   if (!turns || turns.length === 0) return showNoData('chart-board-stats');
   const chart = getChart('chart-board-stats');
   const isDuos = State.selectedGameID && State.fullGames.get(State.selectedGameID)?.is_duos;
@@ -2035,12 +2039,19 @@ function renderBoardStats(turns) {
     );
   }
 
+  // Use log scale when data spans multiple orders of magnitude (early vs late turns)
+  const allValues = series.flatMap((s) => s.data).filter((v) => v > 0);
+  const maxVal = allValues.length ? Math.max(...allValues) : 0;
+  const useLog = maxVal > 50;
+
   chart.setOption({
     ...BASE_ANIM,
     tooltip: { trigger: 'axis' },
     legend: { data: legendData, textStyle: { color: '#ccc' } },
     xAxis: { type: 'category', data: turnNums, ...xName('Turn') },
-    yAxis: { type: 'value' },
+    yAxis: useLog
+      ? { type: 'log', logBase: 10, min: 1, ...yName('Stats (log)') }
+      : { type: 'value', ...yName('Stats') },
     series,
   }, true);
 
