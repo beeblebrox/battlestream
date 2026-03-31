@@ -1,3 +1,4 @@
+// Package capture provides screen capture and game-state correlation for bscapture.
 package capture
 
 import (
