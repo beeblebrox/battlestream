@@ -2218,7 +2218,59 @@ function renderRecentGamesTable(metas, fullGames) {
 }
 
 // ============================================================================
-// 12. Level 2 — Single Game
+// 12. Turns Summary Table (L2 bottom)
+// ============================================================================
+
+function renderTurnsSummaryTable(turns) {
+  const el = document.getElementById('turns-summary-table');
+  if (!el) return;
+  if (!turns || turns.length === 0) { el.innerHTML = ''; return; }
+
+  const rows = turns.map((t) => {
+    const board = t.state.board || [];
+    const totalAtk = board.reduce((s, m) => s + (m.attack || 0), 0);
+    const totalHp = board.reduce((s, m) => s + (m.health || 0), 0);
+    const tier = t.state.tavern_tier || '—';
+    const hp = t.state.player?.health ?? '—';
+    const armor = t.state.player?.armor ?? 0;
+    const hpStr = armor > 0 ? `${hp}+${armor}` : `${hp}`;
+    const phase = t.state.phase === 'RECRUIT' ? 'Rec' : t.state.phase === 'COMBAT' ? 'Cbt' : t.state.phase;
+    const phaseColor = t.state.phase === 'COMBAT' ? '#ff9800' : '#aaa';
+    const minionCount = board.length;
+
+    return `<tr onclick="drillToTurn(${t.turn})" style="cursor:pointer;" ` +
+      `onmouseover="this.style.background='#1e2d4e'" onmouseout="this.style.background=''">` +
+      `<td style="text-align:center;padding:0.35rem 0.5rem;color:#eee;font-weight:600;">${t.turn}</td>` +
+      `<td style="padding:0.35rem 0.5rem;color:${phaseColor};font-size:0.82rem;">${phase}</td>` +
+      `<td style="padding:0.35rem 0.5rem;color:#aaa;text-align:center;">${tier}</td>` +
+      `<td style="padding:0.35rem 0.5rem;color:#aaa;text-align:center;">${minionCount}</td>` +
+      `<td style="padding:0.35rem 0.5rem;color:#ffc107;text-align:center;">${totalAtk}</td>` +
+      `<td style="padding:0.35rem 0.5rem;color:var(--win);text-align:center;">${totalHp}</td>` +
+      `<td style="padding:0.35rem 0.5rem;color:#e57373;text-align:center;">${hpStr}</td>` +
+      `</tr>`;
+  }).join('');
+
+  el.innerHTML =
+    `<div style="margin-top:1.5rem;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:1rem;">` +
+    `<h3 style="margin:0 0 0.75rem;color:#eee;font-size:0.95rem;">Turns ` +
+    `<span style="color:#888;font-weight:normal;">(${turns.length}) — click a row to view turn detail</span></h3>` +
+    `<div style="max-height:280px;overflow-y:auto;">` +
+    `<table style="width:100%;border-collapse:collapse;font-size:0.88rem;">` +
+    `<thead><tr style="color:#888;font-size:0.78rem;border-bottom:1px solid var(--border);">` +
+    `<th style="padding:0.3rem 0.5rem;text-align:center;width:3rem;">Turn</th>` +
+    `<th style="padding:0.3rem 0.5rem;text-align:left;width:3rem;">Phase</th>` +
+    `<th style="padding:0.3rem 0.5rem;text-align:center;width:3rem;">Tier</th>` +
+    `<th style="padding:0.3rem 0.5rem;text-align:center;width:3rem;">Mnns</th>` +
+    `<th style="padding:0.3rem 0.5rem;text-align:center;width:3.5rem;">ATK</th>` +
+    `<th style="padding:0.3rem 0.5rem;text-align:center;width:3.5rem;">HP</th>` +
+    `<th style="padding:0.3rem 0.5rem;text-align:center;width:4rem;">Hero HP</th>` +
+    `</tr></thead>` +
+    `<tbody>${rows}</tbody>` +
+    `</table></div></div>`;
+}
+
+// ============================================================================
+// 13. Level 2 — Single Game
 // ============================================================================
 
 function renderGameHeader(game) {
@@ -2822,6 +2874,9 @@ async function renderLevel2() {
   renderBuffAccum(turns);
   renderGoldEcon(turns);
   renderBoardSize(turns);
+
+  // Turns summary table — quick-scan list of all turns with direct drill-to-turn
+  renderTurnsSummaryTable(turns);
 
   setTimeout(() => resizeAll(), 100);
 }
