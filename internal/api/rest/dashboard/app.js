@@ -2458,11 +2458,25 @@ function renderTurnDetail(snapshot) {
   const tier = s.tavern_tier || p.tavern_tier || '?';
   const gold = p.current_gold != null ? `${p.current_gold}/${p.max_gold || '?'}` : '';
 
+  // Turn X of Y counter + prev/next nav
+  const turns = State.selectedGameID ? (State.turnData.get(State.selectedGameID) || []) : [];
+  const turnIdx = turns.findIndex((t) => t.turn === snapshot.turn);
+  const turnCount = turns.length;
+  const hasPrev = turnIdx > 0;
+  const hasNext = turnIdx >= 0 && turnIdx < turnCount - 1;
+  const turnProgress = turnCount > 0 ? `Turn ${turnIdx + 1} of ${turnCount}` : `Turn ${snapshot.turn}`;
+
   header.innerHTML = `
     <button onclick="navigateTo(2)" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:0.4rem 0.8rem;cursor:pointer;font-size:0.85rem;">&#8592; Back</button>
     <h2>Turn ${snapshot.turn}</h2>
     <span style="color:#7c4dff;">Tier ${tier}</span>
     ${gold ? `<span style="color:#ffc107;">Gold: ${gold}</span>` : ''}
+    <div style="margin-left:auto;display:flex;align-items:center;gap:0.5rem;">
+      <button onclick="if(${hasPrev}){drillToTurn(${hasPrev ? turns[turnIdx - 1].turn : 0})}" ${hasPrev ? '' : 'disabled'} style="background:#16213e;color:${hasPrev ? '#eee' : '#444'};border:1px solid #333;border-radius:4px;padding:0.25rem 0.6rem;cursor:${hasPrev ? 'pointer' : 'default'};font-size:0.9rem;" title="Previous turn (←)">&#8592;</button>
+      <span style="color:#888;font-size:0.8rem;min-width:80px;text-align:center;">${turnProgress}</span>
+      <button onclick="if(${hasNext}){drillToTurn(${hasNext ? turns[turnIdx + 1].turn : 0})}" ${hasNext ? '' : 'disabled'} style="background:#16213e;color:${hasNext ? '#eee' : '#444'};border:1px solid #333;border-radius:4px;padding:0.25rem 0.6rem;cursor:${hasNext ? 'pointer' : 'default'};font-size:0.9rem;" title="Next turn (→)">&#8594;</button>
+    </div>
+    <span style="color:#555;font-size:0.72rem;white-space:nowrap;">← → navigate &nbsp;·&nbsp; Esc back</span>
   `;
 
   // Board minions
