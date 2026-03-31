@@ -2215,6 +2215,7 @@ function renderBoardStats(turns) {
 }
 
 function renderHealthArmor(turns) {
+  addChartHelp('chart-health-armor', 'Effective HP per turn (current health − damage taken + armor). In Duos, this is the shared team health pool. Click any point to drill into that turn.');
   if (!turns || turns.length === 0) return showNoData('chart-health-armor');
   const chart = getChart('chart-health-armor');
 
@@ -2249,6 +2250,7 @@ function renderHealthArmor(turns) {
 }
 
 function renderTierProg(turns) {
+  addChartHelp('chart-tier-prog', 'Tavern tier level each recruit phase. Shows how aggressively you upgraded — Tier 6 by turn 8 vs Tier 4 indicates very different strategies. Click any point to drill into that turn.');
   if (!turns || turns.length === 0) return showNoData('chart-tier-prog');
   const chart = getChart('chart-tier-prog');
   const isDuos = State.selectedGameID && State.fullGames.get(State.selectedGameID)?.is_duos;
@@ -2283,6 +2285,7 @@ function renderTierProg(turns) {
 }
 
 function renderBuffAccum(turns) {
+  addChartHelp('chart-buff-accum', 'Cumulative buff stats (ATK+HP) per source category over the game. Stacked area shows how much each source contributed to your total buff power. Click any point to drill into that turn.');
   if (!turns || turns.length === 0) return showNoData('chart-buff-accum');
   const chart = getChart('chart-buff-accum');
   const isDuos = State.selectedGameID && State.fullGames.get(State.selectedGameID)?.is_duos;
@@ -2390,6 +2393,7 @@ function renderGoldEcon(turns) {
 }
 
 function renderBoardSize(turns) {
+  addChartHelp('chart-board-size', 'Number of minions on your board each turn. Max is 7. A board that reaches 7 early indicates a strong tempo strategy. Click any point to drill into that turn.');
   if (!turns || turns.length === 0) return showNoData('chart-board-size');
   const chart = getChart('chart-board-size');
   const isDuos = State.selectedGameID && State.fullGames.get(State.selectedGameID)?.is_duos;
@@ -2524,7 +2528,7 @@ function renderTurnDetail(snapshot) {
           <tr style="color:var(--text-muted);"><th style="text-align:left;padding:0.25rem;">Category</th><th>ATK</th><th>HP</th></tr>
           ${buffDeltas.map((d) => `
             <tr>
-              <td style="padding:0.25rem;">${d.category}</td>
+              <td style="padding:0.25rem;">${buffCatName(d.category)}</td>
               <td style="text-align:center;color:#ffc107;">${d.attack_delta > 0 ? '+' : ''}${d.attack_delta || 0}</td>
               <td style="text-align:center;color:${WIN_COLOR};">${d.health_delta > 0 ? '+' : ''}${d.health_delta || 0}</td>
             </tr>
@@ -2542,7 +2546,7 @@ function renderTurnDetail(snapshot) {
           <tr style="color:var(--text-muted);"><th style="text-align:left;padding:0.25rem;">Category</th><th>Delta</th></tr>
           ${abilityDeltas.map((d) => `
             <tr>
-              <td style="padding:0.25rem;">${d.category}</td>
+              <td style="padding:0.25rem;">${buffCatName(d.category)}</td>
               <td style="text-align:center;color:${ACCENT};">${d.value_delta > 0 ? '+' : ''}${d.value_delta || 0}</td>
             </tr>
           `).join('')}
@@ -2832,6 +2836,31 @@ function linearRegression(points) {
 // ============================================================================
 // Init
 // ============================================================================
+
+document.addEventListener('keydown', (e) => {
+  // Don't intercept when user is typing in an input
+  if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+
+  if (State.level === 3 && State.selectedGameID) {
+    const turns = State.turnData.get(State.selectedGameID) || [];
+    const idx = turns.findIndex((t) => t.turn === State.selectedTurn);
+    if (e.key === 'ArrowLeft' && idx > 0) {
+      e.preventDefault();
+      drillToTurn(turns[idx - 1].turn);
+    } else if (e.key === 'ArrowRight' && idx >= 0 && idx < turns.length - 1) {
+      e.preventDefault();
+      drillToTurn(turns[idx + 1].turn);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      navigateTo(2);
+    }
+  } else if (State.level === 2) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      navigateTo(1);
+    }
+  }
+});
 
 document.addEventListener('DOMContentLoaded', async () => {
   initFilters();
