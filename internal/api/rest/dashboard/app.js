@@ -2181,6 +2181,10 @@ function renderRecentGamesTable(metas, fullGames) {
     const dur = (meta.end_time_unix && meta.start_time_unix)
       ? `${((meta.end_time_unix - meta.start_time_unix) / 60).toFixed(0)}m`
       : '';
+    const tierVal = full ? (full.tavern_tier || full.player?.tavern_tier || 0) : 0;
+    const tierStr = tierVal ? `T${tierVal}` : '—';
+    const tripleCount = full?.player?.triple_count || 0;
+    const tripleStr = tripleCount > 0 ? `${tripleCount}` : '—';
     const anomaly = full?.anomaly_name
       ? `<span style="color:#ff9800;font-size:0.75rem;">${full.anomaly_name}</span>` : '';
     const partner = (full && full.is_duos) ? getPartnerLabel(full) : '';
@@ -2195,6 +2199,8 @@ function renderRecentGamesTable(metas, fullGames) {
       `<td style="padding:0.35rem 0.5rem;color:${modeColor};font-size:0.82rem;">${mode}</td>` +
       `<td style="padding:0.35rem 0.5rem;color:#aaa;font-size:0.8rem;">${dateStr}</td>` +
       `<td style="padding:0.35rem 0.5rem;color:#888;font-size:0.8rem;">${dur}</td>` +
+      `<td style="padding:0.35rem 0.5rem;color:#7c4dff;font-size:0.82rem;text-align:center;">${tierStr}</td>` +
+      `<td style="padding:0.35rem 0.5rem;color:#ff9800;font-size:0.82rem;text-align:center;">${tripleStr}</td>` +
       `<td style="padding:0.35rem 0.5rem;font-size:0.8rem;">${notes}</td>` +
       `</tr>`;
   }).join('');
@@ -2211,6 +2217,8 @@ function renderRecentGamesTable(metas, fullGames) {
     `<th style="padding:0.3rem 0.5rem;text-align:left;width:4rem;">Mode</th>` +
     `<th style="padding:0.3rem 0.5rem;text-align:left;">Date</th>` +
     `<th style="padding:0.3rem 0.5rem;text-align:left;width:3.5rem;">Dur</th>` +
+    `<th style="padding:0.3rem 0.5rem;text-align:center;width:3rem;" title="Final tavern tier">Tier</th>` +
+    `<th style="padding:0.3rem 0.5rem;text-align:center;width:2.5rem;" title="Triples played">3x</th>` +
     `<th style="padding:0.3rem 0.5rem;text-align:left;">Notes</th>` +
     `</tr></thead>` +
     `<tbody>${rows}</tbody>` +
