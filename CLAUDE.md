@@ -26,6 +26,21 @@ scripts/gen-proto.sh
 
 **Before committing and pushing**, always run `go vet ./...` to catch issues like `copylocks`, `printf` format mismatches, and unreachable code. CI runs both `go vet` and `golangci-lint` — if `golangci-lint` is installed locally, run `golangci-lint run` as well. This prevents avoidable CI failures after push.
 
+## Safe Testing Workflow
+
+All unit tests are already isolated using `t.TempDir()` and do not touch `~/.battlestream/`. For extra safety during development (e.g., when running integration tests or scripts that invoke the daemon), use the safe test wrapper:
+
+```sh
+# Run all tests in an isolated temp environment
+scripts/safe-test.sh
+
+# Run a specific package or test
+scripts/safe-test.sh ./internal/gamestate/
+scripts/safe-test.sh -run TestProcessorIntegration ./internal/gamestate/
+```
+
+The wrapper copies `~/.battlestream/` to a temp directory, sets `BS_CONFIG_DIR` and `BS_DATA_DIR` env vars to that temp location, and cleans up on exit. This prevents accidental writes to the real config or database during testing.
+
 ## Architecture
 
 Hearthstone Battlegrounds stat tracker. The daemon tails `Power.log`, parses game events, maintains live state, and exposes it via multiple APIs.
@@ -104,10 +119,19 @@ Partner hero identified by `PLAYER_ID` tag in FULL_ENTITY (not CONTROLLER, which
 
 Proto definitions: `proto/battlestream/v1/*.proto`. Generated Go code: `internal/api/grpc/gen/`. CI verifies generated files are up to date. Run `scripts/gen-proto.sh` after any proto changes.
 
+## API Versioning Policy
+
+See `docs/api-versioning.md` for the full policy. Summary:
+
+- **REST**: all endpoints under `/v1/`. Breaking changes require a new prefix (e.g., `/v2/`). Prior version kept for 2 major releases.
+- **gRPC/proto**: fields are **additive only**. Never remove or renumber a field. Removed fields must have a `reserved` entry. No field renumbering.
+- **Deprecation**: deprecated items carry a warning (header for REST, `[deprecated=true]` for proto) for 1 major version before removal.
+- **CI**: `buf breaking` runs on every push/PR and compares proto files against `main`. Any breaking proto change fails the build.
+
 ## Module & Go Version
 
 Module path: `battlestream.fixates.io`. Targets Go 1.24 (per go.mod).
 
 ## CI
 
-GitHub Actions (`.github/workflows/ci.yml`): Build & Test, Lint (golangci-lint), Proto check, Docker build.
+GitHub Actions (`.github/workflows/ci.yml`): Build & Test, Lint (golangci-lint), Proto check, Proto breaking-change check (buf), Docker build.
