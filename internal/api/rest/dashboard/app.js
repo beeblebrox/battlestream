@@ -1527,7 +1527,11 @@ function renderTribeWinrate(games) {
   if (!games || games.length === 0) { removeVariantTabs('chart-tribe-winrate'); return showNoData('chart-tribe-winrate'); }
 
   const anyDuos = games.some((g) => g.is_duos);
-  if (anyDuos && State.mode !== 'solo') {
+  if (State.mode === 'compare' && anyDuos) {
+    removeVariantTabs('chart-tribe-winrate');
+    renderTribeWinrateCompare(games);
+    renderTribeLegend('chart-tribe-winrate');
+  } else if (anyDuos && State.mode !== 'solo') {
     renderTripleVariant('chart-tribe-winrate', games, renderTribeWinrateInner);
     renderTribeLegend('chart-tribe-winrate');
   } else {
@@ -1535,6 +1539,82 @@ function renderTribeWinrate(games) {
     renderTribeWinrateInner(games, 'player');
     renderTribeLegend('chart-tribe-winrate');
   }
+}
+
+function renderTribeWinrateCompare(games) {
+  const chart = getChart('chart-tribe-winrate');
+  const soloGames = games.filter((g) => !g.is_duos);
+  const duosGames = games.filter((g) => g.is_duos);
+
+  function buildMap(subset) {
+    const m = new Map();
+    for (const g of subset) {
+      const label = tribeName(resolveTribe(g.board));
+      if (!m.has(label)) m.set(label, { total: 0, count: 0, wins: 0 });
+      const e = m.get(label);
+      e.total += g.placement || 0;
+      e.count++;
+      if ((g.placement || 0) <= (g.is_duos ? 2 : 4)) e.wins++;
+    }
+    return m;
+  }
+
+  const soloMap = buildMap(soloGames);
+  const duosMap = buildMap(duosGames);
+  const allTribes = [...new Set([...soloMap.keys(), ...duosMap.keys()])].sort();
+
+  if (allTribes.length === 0) return showNoData('chart-tribe-winrate');
+  autoSizeChart('chart-tribe-winrate', allTribes.length);
+
+  function avg(m, tribe) {
+    const e = m.get(tribe);
+    return e ? parseFloat((e.total / e.count).toFixed(2)) : null;
+  }
+  function label(m, tribe) {
+    const e = m.get(tribe);
+    if (!e) return '-';
+    const wr = ((e.wins / e.count) * 100).toFixed(0);
+    return `${(e.total / e.count).toFixed(2)} (${e.count}g, ${wr}% WR)`;
+  }
+
+  const soloData = allTribes.map((t) => avg(soloMap, t));
+  const duosData = allTribes.map((t) => avg(duosMap, t));
+
+  chart.setOption({
+    ...BASE_ANIM,
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: (params) => {
+        const tribe = allTribes[params[0].dataIndex];
+        const icon = tribeEmoji(tribe) || '';
+        const lines = params
+          .filter((p) => p.data !== null)
+          .map((p) => `${p.seriesName}: ${label(p.seriesName === 'Solo' ? soloMap : duosMap, tribe)}`);
+        return `<b>${icon ? icon + ' ' : ''}${tribe}</b><br/>${lines.join('<br/>')}`;
+      },
+    },
+    legend: { data: ['Solo', 'Duos'], textStyle: { color: '#ccc' } },
+    grid: { left: Math.min(180, Math.max(60, Math.max(...allTribes.map((t) => t.length)) * 8 + 10)), right: 110 },
+    yAxis: { type: 'category', data: allTribes, inverse: false, axisLabel: { interval: 0 } },
+    xAxis: { type: 'value', min: 1, max: 8, ...xName('Avg Placement') },
+    series: [
+      {
+        name: 'Solo',
+        type: 'bar',
+        data: soloData,
+        itemStyle: { color: ACCENT, opacity: 0.85 },
+        label: { show: true, position: 'right', formatter: (p) => p.data !== null ? label(soloMap, allTribes[p.dataIndex]) : '', color: '#ccc', fontSize: 10 },
+      },
+      {
+        name: 'Duos',
+        type: 'bar',
+        data: duosData,
+        itemStyle: { color: '#4fc3f7', opacity: 0.85 },
+        label: { show: true, position: 'right', formatter: (p) => p.data !== null ? label(duosMap, allTribes[p.dataIndex]) : '', color: '#ccc', fontSize: 10 },
+      },
+    ],
+  }, true);
 }
 
 function resolveTribe(board) {
@@ -2276,6 +2356,7 @@ function renderBuffAccum(turns) {
 }
 
 function renderGoldEcon(turns) {
+  addChartHelp('chart-gold-econ', 'Gold economy per turn. Max Gold (yellow) is your income — starts at 3 and scales up each turn. Current Gold (blue dashed) is gold remaining at the end of the recruit phase. Early turns show 0 for Current Gold because gold tracking only begins once the game is fully loaded into state.');
   if (!turns || turns.length === 0) return showNoData('chart-gold-econ');
   const chart = getChart('chart-gold-econ');
 
@@ -2285,7 +2366,17 @@ function renderGoldEcon(turns) {
 
   chart.setOption({
     ...BASE_ANIM,
-    tooltip: { trigger: 'axis' },
+    tooltip: {
+      trigger: 'axis',
+      formatter: (params) => {
+        const turn = params[0].axisValue;
+        const lines = params.map((p) => {
+          const note = p.seriesName === 'Current Gold' && p.data === 0 ? ' <span style="color:#888;font-size:11px">(not yet tracked)</span>' : '';
+          return `${p.marker}${p.seriesName}: <b>${p.data}</b>${note}`;
+        });
+        return `Turn ${turn}<br/>${lines.join('<br/>')}`;
+      },
+    },
     legend: { data: ['Max Gold', 'Current Gold'], textStyle: { color: '#ccc' } },
     xAxis: { type: 'category', data: turnNums, ...xName('Turn') },
     yAxis: { type: 'value', ...yName('Gold') },
