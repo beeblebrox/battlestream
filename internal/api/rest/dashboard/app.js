@@ -756,6 +756,34 @@ const ARIA_DECAL = { aria: { enabled: true, decal: { show: true } } };
 const BASE_ANIM = { animationDuration: 800, animationEasing: 'cubicOut' };
 const AXIS_NAME_STYLE = { color: '#888', fontSize: 11 };
 
+// Friendly display names for buff source categories
+const BUFF_CATEGORY_NAMES = {
+  BLOODGEM: 'Bloodgem',
+  BLOODGEM_BARRAGE: 'Bloodgem Barrage',
+  SHOP_BUFF: 'Shop Buff',
+  TAVERN_SPELL: 'Tavern Spell',
+  TAVERN_SPELL_ATTACK_INCREASE: 'Tavern Spell (ATK)',
+  TAVERN_SPELL_HEALTH_INCREASE: 'Tavern Spell (HP)',
+  ELEMENTAL: 'Elemental Synergy',
+  UNDEAD: 'Undead Synergy',
+  NAGA_SPELLS: 'Naga Spells',
+  GENERAL: 'General',
+  LIGHTFANG: 'Lightfang',
+  NOMI: 'Nomi',
+  NOMI_ALL: 'Nomi (All)',
+  BEETLE: 'Beetle',
+  WHELP: 'Whelp',
+  CONSUMED: 'Consumed',
+  VOLUMIZER: 'Volumizer',
+  RIGHTMOST: 'Rightmost',
+  FREE_REFRESH: 'Free Refresh',
+  GOLD_NEXT_TURN: 'Gold Next Turn',
+};
+
+function buffCatName(cat) {
+  return BUFF_CATEGORY_NAMES[cat] || cat.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 // Short codes for duos-combined chart labels (e.g. "ELE / MRL")
 const TRIBE_SHORT = {
   DRAGON: 'DRG', PET: 'BST', PIRATE: 'PIR', UNDEAD: 'UND',
@@ -1029,8 +1057,42 @@ function renderWinRateTrend(metas) {
   const chart = getChart('chart-winrate-trend');
 
   const sorted = [...metas].sort((a, b) => a.start_time_unix - b.start_time_unix);
-  const windowSize = Math.min(20, sorted.length);
 
+  if (State.mode === 'compare') {
+    const soloGames = sorted.filter((g) => !g.is_duos);
+    const duosGames = sorted.filter((g) => g.is_duos);
+
+    function rollingWR(games) {
+      const w = Math.min(20, games.length);
+      return games.map((_, i) => {
+        const start = Math.max(0, i - w + 1);
+        const slice = games.slice(start, i + 1);
+        const wins = slice.filter((g) => isWin(g.placement, g.is_duos)).length;
+        return [i + 1, parseFloat(((wins / slice.length) * 100).toFixed(1))];
+      });
+    }
+
+    chart.setOption({
+      ...BASE_ANIM,
+      tooltip: {
+        trigger: 'axis',
+        formatter: (params) => {
+          const lines = params.map((p) => `${p.seriesName}: ${p.data[1]}%`).join('<br/>');
+          return `Game #${params[0].data[0]}<br/>${lines}`;
+        },
+      },
+      legend: { data: ['Solo WR%', 'Duos WR%'], textStyle: { color: '#ccc' } },
+      xAxis: { type: 'value', ...xName('Game #') },
+      yAxis: { type: 'value', min: 0, max: 100, ...yName('%') },
+      series: [
+        { name: 'Solo WR%', type: 'line', data: rollingWR(soloGames), smooth: true, symbol: 'none', lineStyle: { color: ACCENT }, areaStyle: { opacity: 0.1, color: ACCENT } },
+        { name: 'Duos WR%', type: 'line', data: rollingWR(duosGames), smooth: true, symbol: 'none', lineStyle: { color: '#4fc3f7' }, areaStyle: { opacity: 0.1, color: '#4fc3f7' } },
+      ],
+    }, true);
+    return;
+  }
+
+  const windowSize = Math.min(20, sorted.length);
   const data = [];
   for (let i = 0; i < sorted.length; i++) {
     const start = Math.max(0, i - windowSize + 1);
@@ -2163,14 +2225,14 @@ function renderBuffAccum(turns) {
   const turnNums = turns.map((t) => t.turn);
   const palette = ['#e94560', '#4fc3f7', '#ffc107', '#00c853', '#7c4dff', '#ff9800', '#26c6da', '#ab47bc', '#8d6e63', '#78909c', '#d4e157', '#ef5350', '#42a5f5'];
 
-  const legendData = [...categories];
+  const legendData = categories.map(buffCatName);
   const series = categories.map((cat, ci) => {
     const data = turns.map((t) => {
       const bs = (t.state.buff_sources || []).find((b) => b.category === cat);
       return bs ? (bs.attack || 0) + (bs.health || 0) : 0;
     });
     return {
-      name: cat, type: 'line', stack: 'buffs', data,
+      name: buffCatName(cat), type: 'line', stack: 'buffs', data,
       areaStyle: { opacity: 0.3 },
       lineStyle: { width: 1, color: palette[ci % palette.length] },
       itemStyle: { color: palette[ci % palette.length] },
@@ -2184,7 +2246,7 @@ function renderBuffAccum(turns) {
     for (const cat of partnerCats) {
       const ci = categories.indexOf(cat) >= 0 ? categories.indexOf(cat) : legendData.length;
       const color = palette[ci % palette.length];
-      const label = `${cat}*`;
+      const label = `${buffCatName(cat)}*`;
       legendData.push(label);
       const data = turns.map((t) => {
         const bs = (t.state.partner_buff_sources || []).find((b) => b.category === cat);
