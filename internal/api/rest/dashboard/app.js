@@ -633,6 +633,15 @@ function computeAgg(metas) {
   };
 }
 
+function computeResultSparkline(metas, count) {
+  if (!metas || metas.length === 0) return '';
+  const sorted = [...metas].sort((a, b) => (b.start_time_unix || 0) - (a.start_time_unix || 0));
+  return sorted.slice(0, count).map((g) => {
+    const win = isWin(g.placement || 0, g.is_duos);
+    return `<span style="color:${win ? 'var(--win)' : 'var(--loss)'};font-size:0.6rem;letter-spacing:1px;">●</span>`;
+  }).join('');
+}
+
 function computeStreak(metas) {
   if (!metas || metas.length === 0) return { count: 0, isWin: false };
   const sorted = [...metas].sort((a, b) => (b.start_time_unix || 0) - (a.start_time_unix || 0));
@@ -662,7 +671,9 @@ function renderSummaryCards(agg, compareAgg) {
   const streak = computeStreak(State.games);
   const streakValue = streak.count > 0 ? `${streak.isWin ? 'W' : 'L'}${streak.count}` : '—';
   const streakClass = streak.count > 0 ? (streak.isWin ? 'up' : 'down') : '';
-  const streakSub = streak.count > 1 ? `${streak.isWin ? 'win' : 'loss'} streak` : (streak.count === 1 ? `last game` : '');
+  const streakLabel = streak.count > 1 ? `${streak.isWin ? 'win' : 'loss'} streak` : (streak.count === 1 ? `last game` : '');
+  const sparkline = computeResultSparkline(State.games, 10);
+  const streakSub = [streakLabel, sparkline].filter(Boolean).join(' ');
 
   const cards = [
     { label: 'Games Played', value: agg.games_played, sub: '' },
