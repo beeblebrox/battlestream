@@ -2234,10 +2234,20 @@ function renderTurnsSummaryTable(turns) {
   if (!el) return;
   if (!turns || turns.length === 0) { el.innerHTML = ''; return; }
 
-  const rows = turns.map((t) => {
+  // Precompute board totals for delta calculation
+  const atkTotals = turns.map((t) => (t.state.board || []).reduce((s, m) => s + (m.attack || 0), 0));
+  const hpTotals = turns.map((t) => (t.state.board || []).reduce((s, m) => s + (m.health || 0), 0));
+
+  const rows = turns.map((t, i) => {
     const board = t.state.board || [];
-    const totalAtk = board.reduce((s, m) => s + (m.attack || 0), 0);
-    const totalHp = board.reduce((s, m) => s + (m.health || 0), 0);
+    const totalAtk = atkTotals[i];
+    const totalHp = hpTotals[i];
+    const dAtk = i > 0 ? totalAtk - atkTotals[i - 1] : 0;
+    const dHp = i > 0 ? totalHp - hpTotals[i - 1] : 0;
+    const deltaAtkStr = dAtk > 0 ? `<span style="color:var(--win)">+${dAtk}</span>`
+      : dAtk < 0 ? `<span style="color:var(--loss)">${dAtk}</span>` : '';
+    const deltaHpStr = dHp > 0 ? `<span style="color:var(--win)">+${dHp}</span>`
+      : dHp < 0 ? `<span style="color:var(--loss)">${dHp}</span>` : '';
     const tier = t.state.tavern_tier || '—';
     const hp = t.state.player?.health ?? '—';
     const armor = t.state.player?.armor ?? 0;
@@ -2253,7 +2263,9 @@ function renderTurnsSummaryTable(turns) {
       `<td style="padding:0.35rem 0.5rem;color:#aaa;text-align:center;">${tier}</td>` +
       `<td style="padding:0.35rem 0.5rem;color:#aaa;text-align:center;">${minionCount}</td>` +
       `<td style="padding:0.35rem 0.5rem;color:#ffc107;text-align:center;">${totalAtk}</td>` +
+      `<td style="padding:0.35rem 0.5rem;text-align:center;font-size:0.78rem;">${deltaAtkStr}</td>` +
       `<td style="padding:0.35rem 0.5rem;color:var(--win);text-align:center;">${totalHp}</td>` +
+      `<td style="padding:0.35rem 0.5rem;text-align:center;font-size:0.78rem;">${deltaHpStr}</td>` +
       `<td style="padding:0.35rem 0.5rem;color:#e57373;text-align:center;">${hpStr}</td>` +
       `</tr>`;
   }).join('');
@@ -2270,7 +2282,9 @@ function renderTurnsSummaryTable(turns) {
     `<th style="padding:0.3rem 0.5rem;text-align:center;width:3rem;">Tier</th>` +
     `<th style="padding:0.3rem 0.5rem;text-align:center;width:3rem;">Mnns</th>` +
     `<th style="padding:0.3rem 0.5rem;text-align:center;width:3.5rem;">ATK</th>` +
+    `<th style="padding:0.3rem 0.5rem;text-align:center;width:3rem;" title="ATK change from previous turn">ΔATK</th>` +
     `<th style="padding:0.3rem 0.5rem;text-align:center;width:3.5rem;">HP</th>` +
+    `<th style="padding:0.3rem 0.5rem;text-align:center;width:3rem;" title="HP change from previous turn">ΔHP</th>` +
     `<th style="padding:0.3rem 0.5rem;text-align:center;width:4rem;">Hero HP</th>` +
     `</tr></thead>` +
     `<tbody>${rows}</tbody>` +
