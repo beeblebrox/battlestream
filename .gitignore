@@ -51,6 +51,9 @@ config.yaml
 qa-reports/
 .playwright-mcp/
 
+# Local progress reports (board-facing, not committed)
+.progress/
+
 # Air live reload
 tmp/
 
