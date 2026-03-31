@@ -1,0 +1,43 @@
+{
+  "name": "Battlestream Dev Container",
+  "image": "mcr.microsoft.com/devcontainers/go:1.24",
+
+  "runArgs": [
+    "-v", "claude-home:/home/vscode/.claude",
+    "-v", "${localEnv:HOME}/.claude/.credentials.json:/home/vscode/.claude/.credentials.json:z",
+    "-v", "${localEnv:HOME}/.claude.json:/home/vscode/.claude.json:z",
+    "-v", "${localEnv:HOME}/.config/gh:/home/vscode/.config/gh:z",
+    "-v", "${localEnv:HOME}/.gitconfig:/home/vscode/.gitconfig:z",
+    "-v", "/chungus/battlenet:/chungus/battlenet:ro,z"
+  ],
+
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers-extra/features/protoc:1": {}
+  },
+
+  "forwardPorts": [50051, 8080],
+
+  "postCreateCommand": "go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest && go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@latest && go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2@latest && go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest && go mod download && ARCH=$(uname -m) && case \"$ARCH\" in x86_64|amd64) PLATFORM=\"linux-x64\" ;; arm64|aarch64) PLATFORM=\"linux-arm64\" ;; esac && GCS_BUCKET='https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases' && VERSION=$(curl -fsSL $GCS_BUCKET/latest) && curl -fsSL -o /tmp/claude $GCS_BUCKET/$VERSION/$PLATFORM/claude && chmod +x /tmp/claude && mkdir -p ~/.local/bin && mv /tmp/claude ~/.local/bin/claude && echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> ~/.bashrc && echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> ~/.zshrc",
+
+  "postStartCommand": "sudo chown -R vscode:vscode ~/.claude",
+
+  "remoteUser": "vscode",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "golang.go",
+        "zxh404.vscode-proto3",
+        "eamodio.gitlens",
+        "gruntfuggly.todo-tree"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "zsh",
+        "go.lintTool": "golangci-lint",
+        "go.lintOnSave": "package"
+      }
+    }
+  }
+}
