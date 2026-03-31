@@ -967,7 +967,8 @@ func cmdReparse() *cobra.Command {
 // --- db reset ---
 
 func cmdDBReset() *cobra.Command {
-	return &cobra.Command{
+	var noBackup bool
+	cmd := &cobra.Command{
 		Use:   "db-reset",
 		Short: "Clear all data in the database",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -993,6 +994,13 @@ func cmdDBReset() *cobra.Command {
 				return nil
 			}
 
+			if !noBackup {
+				backupBase := filepath.Join(filepath.Dir(filepath.Dir(profile.Storage.DBPath)), "backups")
+				if err := runBackupScript(profile.Storage.DBPath, backupBase); err != nil {
+					return fmt.Errorf("backup before reset: %w", err)
+				}
+			}
+
 			st, err := store.Open(profile.Storage.DBPath)
 			if err != nil {
 				return fmt.Errorf("opening store: %w", err)
@@ -1007,6 +1015,59 @@ func cmdDBReset() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&noBackup, "no-backup", false, "skip automatic backup before reset (for CI/testing only)")
+	return cmd
+}
+
+// runBackupScript backs up dbPath to backupBase/<timestamp> using the same
+// logic as scripts/backup-db.sh but implemented directly in Go so no external
+// shell dependency is required at runtime.
+func runBackupScript(dbPath, backupBase string) error {
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		fmt.Printf("backup: DB path not found: %s (skipping backup)\n", dbPath)
+		return nil
+	}
+	timestamp := time.Now().Format("20060102_150405")
+	dest := filepath.Join(backupBase, timestamp)
+	if _, err := os.Stat(dest); err == nil {
+		fmt.Printf("backup: destination already exists: %s (skipping)\n", dest)
+		return nil
+	}
+	if err := os.MkdirAll(backupBase, 0755); err != nil {
+		return fmt.Errorf("creating backup dir: %w", err)
+	}
+	if err := copyDir(dbPath, dest); err != nil {
+		return err
+	}
+	fmt.Printf("backup: %s -> %s\n", dbPath, dest)
+	return nil
+}
+
+// copyDir recursively copies src to dst.
+func copyDir(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if info.IsDir() {
+			return os.MkdirAll(target, info.Mode())
+		}
+		return copyFile(path, target, info.Mode())
+	})
+}
+
+// copyFile copies a single file preserving mode bits.
+func copyFile(src, dst string, mode os.FileMode) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, mode)
 }
 
 // --- version ---

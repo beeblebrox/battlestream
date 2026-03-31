@@ -10,6 +10,7 @@ import (
 	badger "github.com/dgraph-io/badger/v4"
 	"battlestream.fixates.io/internal/gamestate"
 	"battlestream.fixates.io/internal/stats"
+	"battlestream.fixates.io/internal/store/migrations"
 )
 
 const (
@@ -45,6 +46,10 @@ func Open(path string) (*Store, error) {
 	db, err := badger.Open(opts)
 	if err != nil {
 		return nil, fmt.Errorf("opening badger at %s: %w", path, err)
+	}
+	if err := migrations.Run(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("running migrations: %w", err)
 	}
 	return &Store{db: db}, nil
 }
