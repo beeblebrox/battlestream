@@ -44,12 +44,21 @@ config.yaml
 
 # Claude Code local settings
 .claude/settings.local.json
+.claude/plans/
+.claude/skills/
 
 # Generated protobuf files are committed (see internal/api/grpc/gen/)
 
 # QA reports and screenshots
 qa-reports/
 .playwright-mcp/
+qa-phase1-results.json
+# Root-level ad-hoc screenshots
+/*.png
+
+# Captured Hearthstone log/session directories
+Hearthstone_*/
+lastgames/
 
 # Local progress reports (board-facing, not committed)
 .progress/
