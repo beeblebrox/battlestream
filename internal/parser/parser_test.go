@@ -417,3 +417,79 @@ func TestCreateGameCapturesGameEntityTags(t *testing.T) {
 		t.Fatal("no EventGameEntityTags emitted")
 	}
 }
+
+// TestMidnightTimestampWrap verifies that the parser detects a midnight
+// crossing and advances the reference date so that post-midnight timestamps
+// are chronologically after pre-midnight ones, not 24 hours earlier.
+func TestMidnightTimestampWrap(t *testing.T) {
+	ch := make(chan GameEvent, 8)
+	p := New(ch)
+
+	// Reference date set to 2026-03-17 (arbitrary); last event before midnight.
+	refDay := time.Date(2026, 3, 17, 0, 0, 0, 0, time.UTC)
+	p.SetReferenceDate(refDay)
+
+	p.Feed("D 23:59:58.0000000 GameState.DebugPrintPower() - CREATE_GAME")
+	p.Feed("D 00:00:01.0000000 GameState.DebugPrintPower() - CREATE_GAME")
+	p.Flush()
+	close(ch)
+
+	var events []GameEvent
+	for e := range ch {
+		events = append(events, e)
+	}
+	if len(events) < 2 {
+		t.Fatalf("expected 2 events, got %d", len(events))
+	}
+
+	first := events[0].Timestamp
+	second := events[1].Timestamp
+
+	if !second.After(first) {
+		t.Errorf("midnight-wrap: second event (%v) should be after first (%v)", second, first)
+	}
+	// The gap should be ~3 seconds, not ~24 hours.
+	gap := second.Sub(first)
+	if gap > time.Minute {
+		t.Errorf("midnight-wrap: gap between events is %v — expected ~3s, not a day", gap)
+	}
+}
+
+// TestMidBlockNewGame verifies that a CREATE_GAME line arriving while a
+// FULL_ENTITY block is open causes the parser to discard the partial entity
+// (not emit garbage) and begin fresh game processing.
+func TestMidBlockNewGame(t *testing.T) {
+	ch := make(chan GameEvent, 16)
+	p := New(ch)
+
+	// Start a FULL_ENTITY block but don't close it.
+	p.Feed("D 10:00:00.0000000 GameState.DebugPrintPower() - FULL_ENTITY - Updating Entity=50 CardID=BG_LOE_077")
+	p.Feed("D 10:00:00.0000000 GameState.DebugPrintPower() -     tag=ATK value=3")
+	// Interrupt mid-block with a new CREATE_GAME.
+	p.Feed("D 10:00:01.0000000 GameState.DebugPrintPower() - CREATE_GAME")
+	p.Flush()
+	close(ch)
+
+	var events []GameEvent
+	for e := range ch {
+		events = append(events, e)
+	}
+
+	// The partial entity (entityID=50) must NOT be in the output.
+	for _, e := range events {
+		if e.Type == EventEntityUpdate && e.EntityID == 50 {
+			t.Errorf("mid-block new game: partial entity (id=50) should have been discarded, got %+v", e)
+		}
+	}
+
+	// A GameStart event for the new game must be present.
+	var hasGameStart bool
+	for _, e := range events {
+		if e.Type == EventGameStart {
+			hasGameStart = true
+		}
+	}
+	if !hasGameStart {
+		t.Error("mid-block new game: expected EventGameStart after CREATE_GAME, got none")
+	}
+}
