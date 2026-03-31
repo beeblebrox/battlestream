@@ -2169,12 +2169,43 @@ function renderHeatmapBuffInner(games, variant) {
 // 11. Recent Games Table (L1 bottom)
 // ============================================================================
 
+let _recentSortCol = 'date';
+let _recentSortDir = -1; // -1 = descending, 1 = ascending
+
+function _sortTh(label, col, align, width, title) {
+  const isActive = _recentSortCol === col;
+  const arrow = isActive ? (_recentSortDir < 0 ? ' ▼' : ' ▲') : '';
+  const w = width ? `width:${width};` : '';
+  const t = title ? ` title="${title}"` : '';
+  return `<th${t} onclick="sortRecentGames('${col}')" style="padding:0.3rem 0.5rem;text-align:${align};${w}cursor:pointer;user-select:none;${isActive ? 'color:#eee;' : ''}">${label}${arrow}</th>`;
+}
+
+function sortRecentGames(col) {
+  if (_recentSortCol === col) {
+    _recentSortDir *= -1;
+  } else {
+    _recentSortCol = col;
+    _recentSortDir = col === 'date' ? -1 : 1;
+  }
+  renderRecentGamesTable(State.games, State.fullGames);
+}
+
 function renderRecentGamesTable(metas, fullGames) {
   const el = document.getElementById('recent-games-table');
   if (!el) return;
   if (!metas || metas.length === 0) { el.innerHTML = ''; return; }
 
-  const sorted = [...metas].sort((a, b) => (b.start_time_unix || 0) - (a.start_time_unix || 0));
+  const getVal = (meta) => {
+    const full = fullGames.get(meta.game_id);
+    switch (_recentSortCol) {
+      case 'placement': return meta.placement || 0;
+      case 'tier': return full ? (full.tavern_tier || full.player?.tavern_tier || 0) : 0;
+      case 'triples': return full?.player?.triple_count || 0;
+      case 'dur': return (meta.end_time_unix && meta.start_time_unix) ? meta.end_time_unix - meta.start_time_unix : 0;
+      default: return meta.start_time_unix || 0;
+    }
+  };
+  const sorted = [...metas].sort((a, b) => _recentSortDir * (getVal(b) - getVal(a)));
 
   const rows = sorted.map((meta) => {
     const full = fullGames.get(meta.game_id);
@@ -2223,13 +2254,13 @@ function renderRecentGamesTable(metas, fullGames) {
     `<div style="max-height:320px;overflow-y:auto;">` +
     `<table style="width:100%;border-collapse:collapse;font-size:0.88rem;">` +
     `<thead><tr style="color:#888;font-size:0.78rem;border-bottom:1px solid var(--border);">` +
-    `<th style="padding:0.3rem 0.5rem;text-align:center;width:3rem;">#</th>` +
+    _sortTh('#', 'placement', 'center', '3rem') +
     `<th style="padding:0.3rem 0.5rem;text-align:left;">Hero</th>` +
     `<th style="padding:0.3rem 0.5rem;text-align:left;width:4rem;">Mode</th>` +
-    `<th style="padding:0.3rem 0.5rem;text-align:left;">Date</th>` +
-    `<th style="padding:0.3rem 0.5rem;text-align:left;width:3.5rem;">Dur</th>` +
-    `<th style="padding:0.3rem 0.5rem;text-align:center;width:3rem;" title="Final tavern tier">Tier</th>` +
-    `<th style="padding:0.3rem 0.5rem;text-align:center;width:2.5rem;" title="Triples played">3x</th>` +
+    _sortTh('Date', 'date', 'left', '') +
+    _sortTh('Dur', 'dur', 'left', '3.5rem', 'Duration') +
+    _sortTh('Tier', 'tier', 'center', '3rem', 'Final tavern tier') +
+    _sortTh('3x', 'triples', 'center', '2.5rem', 'Triples played') +
     `<th style="padding:0.3rem 0.5rem;text-align:left;">Notes</th>` +
     `</tr></thead>` +
     `<tbody>${rows}</tbody>` +
