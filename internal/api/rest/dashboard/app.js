@@ -617,19 +617,20 @@ function filterGamesByPartner(games) {
 // Compute aggregate stats from filtered game metas (client-side).
 function computeAgg(metas) {
   if (!metas || metas.length === 0) return { games_played: 0, wins: 0, losses: 0, avg_placement: 0, best_placement: 0, worst_placement: 0 };
-  let wins = 0, losses = 0, total = 0, best = 8, worst = 1;
+  let wins = 0, losses = 0, total = 0, best = 8, worst = 1, bestGame = null, worstGame = null;
   for (const g of metas) {
     const p = g.placement || 0;
     total += p;
     const threshold = g.is_duos ? 2 : 4;
     if (p <= threshold) wins++; else losses++;
-    if (p < best) best = p;
-    if (p > worst) worst = p;
+    if (p < best) { best = p; bestGame = g; }
+    if (p > worst) { worst = p; worstGame = g; }
   }
   return {
     games_played: metas.length, wins, losses,
     avg_placement: total / metas.length,
     best_placement: best, worst_placement: worst,
+    best_game_id: bestGame?.game_id, worst_game_id: worstGame?.game_id,
   };
 }
 
@@ -679,8 +680,10 @@ function renderSummaryCards(agg, compareAgg) {
     { label: 'Games Played', value: agg.games_played, sub: '' },
     { label: 'Win Rate', value: `${winRate}%`, valueClass: winRateClass, sub: `${agg.wins}W / ${agg.losses}L` },
     { label: 'Avg Placement', value: agg.avg_placement ? agg.avg_placement.toFixed(2) : '-', valueClass: avgPlacementClass, sub: '' },
-    { label: 'Best', value: agg.best_placement || '-', sub: '' },
-    { label: 'Worst', value: agg.worst_placement || '-', sub: '' },
+    { label: 'Best', value: agg.best_placement || '-', sub: '',
+      clickGameId: agg.best_game_id, heroHint: agg.best_game_id ? heroBaseName(State.fullGames.get(agg.best_game_id)?.player?.hero_card_id) : '' },
+    { label: 'Worst', value: agg.worst_placement || '-', sub: '',
+      clickGameId: agg.worst_game_id, heroHint: agg.worst_game_id ? heroBaseName(State.fullGames.get(agg.worst_game_id)?.player?.hero_card_id) : '' },
     { label: 'Streak', value: streakValue, valueClass: streakClass, sub: streakSub },
   ];
 
@@ -706,10 +709,10 @@ function renderSummaryCards(agg, compareAgg) {
   el.innerHTML = cards
     .map(
       (c) => `
-    <div class="summary-card">
+    <div class="summary-card"${c.clickGameId ? ` onclick="drillToGame('${c.clickGameId}')" style="cursor:pointer;"` : ''}>
       <div class="label">${c.label}</div>
       <div class="value${c.valueClass ? ' ' + c.valueClass : ''}">${c.value}</div>
-      ${c.sub ? `<div class="sub">${c.sub}</div>` : ''}
+      ${c.heroHint ? `<div class="sub">${c.heroHint}</div>` : (c.sub ? `<div class="sub">${c.sub}</div>` : '')}
     </div>`
     )
     .join('');
@@ -2875,6 +2878,17 @@ async function renderLevel1() {
 
   const filtered = filterGamesByPartner(full);
   renderRichCharts(filtered);
+  updatePartnerStats(filtered);
+
+  // Re-render summary cards now that full game data is loaded (adds hero hints to Best/Worst)
+  if (State.mode === 'compare') {
+    renderSummaryCards(
+      computeAgg(State.games.filter((g) => !g.is_duos)),
+      computeAgg(State.games.filter((g) => g.is_duos))
+    );
+  } else {
+    renderSummaryCards(computeAgg(State.games));
+  }
   updatePartnerStats(filtered);
 
   // Duration uses metas (has timestamps)
