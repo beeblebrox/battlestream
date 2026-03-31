@@ -2155,7 +2155,70 @@ function renderHeatmapBuffInner(games, variant) {
 }
 
 // ============================================================================
-// 11. Level 2 — Single Game
+// 11. Recent Games Table (L1 bottom)
+// ============================================================================
+
+function renderRecentGamesTable(metas, fullGames) {
+  const el = document.getElementById('recent-games-table');
+  if (!el) return;
+  if (!metas || metas.length === 0) { el.innerHTML = ''; return; }
+
+  const sorted = [...metas].sort((a, b) => (b.start_time_unix || 0) - (a.start_time_unix || 0));
+
+  const rows = sorted.map((meta) => {
+    const full = fullGames.get(meta.game_id);
+    const p = meta.placement || 0;
+    const win = isWin(p, meta.is_duos);
+    const pColor = win ? 'var(--win)' : 'var(--loss)';
+    const hero = full ? heroBaseName(full.player?.hero_card_id) : '—';
+    const mode = meta.is_duos ? 'Duos' : 'Solo';
+    const modeColor = meta.is_duos ? '#4fc3f7' : '#aaa';
+    const startDate = meta.start_time_unix ? new Date(meta.start_time_unix * 1000) : null;
+    const dateStr = startDate
+      ? startDate.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' +
+        startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : '—';
+    const dur = (meta.end_time_unix && meta.start_time_unix)
+      ? `${((meta.end_time_unix - meta.start_time_unix) / 60).toFixed(0)}m`
+      : '';
+    const anomaly = full?.anomaly_name
+      ? `<span style="color:#ff9800;font-size:0.75rem;">${full.anomaly_name}</span>` : '';
+    const partner = (full && full.is_duos) ? getPartnerLabel(full) : '';
+    const partnerBit = partner
+      ? `<span style="color:#4fc3f7;font-size:0.75rem;">w/ ${partner}</span>` : '';
+    const notes = [anomaly, partnerBit].filter(Boolean).join(' ');
+
+    return `<tr onclick="drillToGame('${meta.game_id}')" style="cursor:pointer;" ` +
+      `onmouseover="this.style.background='#1e2d4e'" onmouseout="this.style.background=''">` +
+      `<td style="text-align:center;padding:0.35rem 0.5rem;"><span style="color:${pColor};font-weight:700;">#${p}</span></td>` +
+      `<td style="padding:0.35rem 0.5rem;">${hero}</td>` +
+      `<td style="padding:0.35rem 0.5rem;color:${modeColor};font-size:0.82rem;">${mode}</td>` +
+      `<td style="padding:0.35rem 0.5rem;color:#aaa;font-size:0.8rem;">${dateStr}</td>` +
+      `<td style="padding:0.35rem 0.5rem;color:#888;font-size:0.8rem;">${dur}</td>` +
+      `<td style="padding:0.35rem 0.5rem;font-size:0.8rem;">${notes}</td>` +
+      `</tr>`;
+  }).join('');
+
+  el.innerHTML =
+    `<div style="margin-top:1.5rem;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:1rem;">` +
+    `<h3 style="margin:0 0 0.75rem;color:#eee;font-size:0.95rem;">Recent Games ` +
+    `<span style="color:#888;font-weight:normal;">(${sorted.length})</span></h3>` +
+    `<div style="max-height:320px;overflow-y:auto;">` +
+    `<table style="width:100%;border-collapse:collapse;font-size:0.88rem;">` +
+    `<thead><tr style="color:#888;font-size:0.78rem;border-bottom:1px solid var(--border);">` +
+    `<th style="padding:0.3rem 0.5rem;text-align:center;width:3rem;">#</th>` +
+    `<th style="padding:0.3rem 0.5rem;text-align:left;">Hero</th>` +
+    `<th style="padding:0.3rem 0.5rem;text-align:left;width:4rem;">Mode</th>` +
+    `<th style="padding:0.3rem 0.5rem;text-align:left;">Date</th>` +
+    `<th style="padding:0.3rem 0.5rem;text-align:left;width:3.5rem;">Dur</th>` +
+    `<th style="padding:0.3rem 0.5rem;text-align:left;">Notes</th>` +
+    `</tr></thead>` +
+    `<tbody>${rows}</tbody>` +
+    `</table></div></div>`;
+}
+
+// ============================================================================
+// 12. Level 2 — Single Game
 // ============================================================================
 
 function renderGameHeader(game) {
@@ -2699,6 +2762,9 @@ async function renderLevel1() {
 
   // Duration uses metas (has timestamps)
   renderDuration(State.games);
+
+  // Recent games table — provides direct row-click navigation to any game
+  renderRecentGamesTable(State.games, State.fullGames);
 
   // Resize after rendering
   setTimeout(() => resizeAll(), 100);
