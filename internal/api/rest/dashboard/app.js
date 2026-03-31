@@ -2314,7 +2314,8 @@ function renderGameHeader(game) {
       <button onclick="if(${hasPrevGame}){drillToGame('${hasPrevGame ? sortedGames[gameIdx - 1].game_id : ''}')}" ${hasPrevGame ? '' : 'disabled'} style="background:#16213e;color:${hasPrevGame ? '#eee' : '#444'};border:1px solid #333;border-radius:4px;padding:0.25rem 0.6rem;cursor:${hasPrevGame ? 'pointer' : 'default'};font-size:0.9rem;" title="Previous game (←)">&#8592;</button>
       <span style="color:#888;font-size:0.8rem;min-width:80px;text-align:center;">${gameProgress}</span>
       <button onclick="if(${hasNextGame}){drillToGame('${hasNextGame ? sortedGames[gameIdx + 1].game_id : ''}')}" ${hasNextGame ? '' : 'disabled'} style="background:#16213e;color:${hasNextGame ? '#eee' : '#444'};border:1px solid #333;border-radius:4px;padding:0.25rem 0.6rem;cursor:${hasNextGame ? 'pointer' : 'default'};font-size:0.9rem;" title="Next game (→)">&#8594;</button>
-    </div>` : ''}
+    </div>
+    <span style="color:#555;font-size:0.72rem;white-space:nowrap;">← → games &nbsp;·&nbsp; Esc back</span>` : '<span style="margin-left:auto;color:#555;font-size:0.72rem;white-space:nowrap;">Esc back</span>'}
   `;
 }
 
@@ -3024,7 +3025,15 @@ document.addEventListener('keydown', (e) => {
       navigateTo(2);
     }
   } else if (State.level === 2) {
-    if (e.key === 'Escape') {
+    const sortedL2 = [...State.games].sort((a, b) => (a.start_time_unix || 0) - (b.start_time_unix || 0));
+    const gameIdxL2 = sortedL2.findIndex((g) => g.game_id === State.selectedGameID);
+    if (e.key === 'ArrowLeft' && gameIdxL2 > 0) {
+      e.preventDefault();
+      drillToGame(sortedL2[gameIdxL2 - 1].game_id);
+    } else if (e.key === 'ArrowRight' && gameIdxL2 >= 0 && gameIdxL2 < sortedL2.length - 1) {
+      e.preventDefault();
+      drillToGame(sortedL2[gameIdxL2 + 1].game_id);
+    } else if (e.key === 'Escape') {
       e.preventDefault();
       navigateTo(1);
     }
