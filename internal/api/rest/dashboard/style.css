@@ -7,6 +7,9 @@
   --win: #00c853;
   --loss: #ff5252;
   --border: #333;
+  --border-hover: #555;
+  --glow: rgba(233, 69, 96, 0.12);
+  --shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
 }
 
 * {
@@ -29,12 +32,15 @@ header {
   padding: 1rem 1.5rem;
   background: var(--bg-card);
   border-bottom: 1px solid var(--border);
+  background: linear-gradient(90deg, #16213e 0%, #1a1a2e 100%);
 }
 
 header h1 {
   font-size: 1.4rem;
   font-weight: 700;
   color: var(--accent);
+  letter-spacing: 0.02em;
+  text-shadow: 0 0 20px rgba(233, 69, 96, 0.4);
 }
 
 .breadcrumb {
@@ -75,17 +81,20 @@ header h1 {
   cursor: pointer;
   font-size: 0.85rem;
   transition: all 0.2s;
+  letter-spacing: 0.02em;
 }
 
 .mode-btn:hover {
   border-color: var(--accent);
   color: var(--text);
+  background: var(--glow);
 }
 
 .mode-btn.active {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
+  box-shadow: 0 0 12px rgba(233, 69, 96, 0.3);
 }
 
 .filter-bar {
@@ -126,6 +135,7 @@ header h1 {
 .filter-group input[type="date"]:focus {
   outline: none;
   border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(233, 69, 96, 0.15);
 }
 
 .filter-group .sep {
@@ -200,24 +210,36 @@ main {
 .summary-card {
   background: var(--bg-card);
   border: 1px solid var(--border);
+  border-top: 2px solid #2a2a4a;
   border-radius: 8px;
   padding: 1rem 1.25rem;
   min-width: 140px;
   flex: 1;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.summary-card:hover {
+  border-color: var(--border-hover);
+  border-top-color: var(--accent);
+  box-shadow: var(--shadow);
 }
 
 .summary-card .label {
   font-size: 0.75rem;
   color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   margin-bottom: 0.25rem;
 }
 
 .summary-card .value {
   font-size: 1.6rem;
   font-weight: 700;
+  line-height: 1.2;
 }
+
+.summary-card .value.up { color: var(--win); }
+.summary-card .value.down { color: var(--loss); }
 
 .summary-card .sub {
   font-size: 0.8rem;
@@ -238,6 +260,12 @@ main {
   border-radius: 8px;
   padding: 0.75rem;
   height: 350px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.chart-container:hover {
+  border-color: var(--border-hover);
+  box-shadow: var(--shadow);
 }
 
 .chart-container.wide {
@@ -246,10 +274,12 @@ main {
 }
 
 .chart-container h3 {
-  font-size: 0.9rem;
-  color: var(--text);
+  font-size: 0.85rem;
+  color: var(--text-muted);
   margin-bottom: 0.5rem;
   font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 .filter-clear-btn {
@@ -261,11 +291,13 @@ main {
   cursor: pointer;
   font-size: 0.85rem;
   transition: all 0.2s;
+  letter-spacing: 0.02em;
 }
 
 .filter-clear-btn:hover {
   border-color: var(--loss);
   color: var(--loss);
+  background: rgba(255, 82, 82, 0.08);
 }
 
 .summary-card .partner-value {
@@ -331,10 +363,12 @@ main {
 
 .game-header .placement.win {
   color: var(--win);
+  text-shadow: 0 0 12px rgba(0, 200, 83, 0.4);
 }
 
 .game-header .placement.loss {
   color: var(--loss);
+  text-shadow: 0 0 12px rgba(255, 82, 82, 0.4);
 }
 
 /* Level 3: Turn detail */
@@ -495,4 +529,19 @@ main {
     flex-direction: column;
     gap: 0.5rem;
   }
+}
+
+/* Scrollbar polish */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-hover); }
+
+/* Minion card gold border on hover */
+.minion-card {
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.minion-card:hover {
+  border-color: #ffc107;
+  box-shadow: 0 0 8px rgba(255, 193, 7, 0.2);
 }

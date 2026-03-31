@@ -641,11 +641,14 @@ function renderSummaryCards(agg, compareAgg) {
   }
 
   const winRate = agg.games_played > 0 ? ((agg.wins / agg.games_played) * 100).toFixed(1) : '0.0';
+  const winRateClass = parseFloat(winRate) >= 50 ? 'up' : 'down';
+  const avgPlacementThreshold = State.mode === 'duos' ? 2.5 : 4.5;
+  const avgPlacementClass = agg.avg_placement && agg.avg_placement < avgPlacementThreshold ? 'up' : 'down';
 
   const cards = [
     { label: 'Games Played', value: agg.games_played, sub: '' },
-    { label: 'Win Rate', value: `${winRate}%`, sub: `${agg.wins}W / ${agg.losses}L` },
-    { label: 'Avg Placement', value: agg.avg_placement ? agg.avg_placement.toFixed(2) : '-', sub: '' },
+    { label: 'Win Rate', value: `${winRate}%`, valueClass: winRateClass, sub: `${agg.wins}W / ${agg.losses}L` },
+    { label: 'Avg Placement', value: agg.avg_placement ? agg.avg_placement.toFixed(2) : '-', valueClass: avgPlacementClass, sub: '' },
     { label: 'Best', value: agg.best_placement || '-', sub: '' },
     { label: 'Worst', value: agg.worst_placement || '-', sub: '' },
   ];
@@ -674,7 +677,7 @@ function renderSummaryCards(agg, compareAgg) {
       (c) => `
     <div class="summary-card">
       <div class="label">${c.label}</div>
-      <div class="value">${c.value}</div>
+      <div class="value${c.valueClass ? ' ' + c.valueClass : ''}">${c.value}</div>
       ${c.sub ? `<div class="sub">${c.sub}</div>` : ''}
     </div>`
     )
