@@ -633,6 +633,20 @@ function computeAgg(metas) {
   };
 }
 
+function computeStreak(metas) {
+  if (!metas || metas.length === 0) return { count: 0, isWin: false };
+  const sorted = [...metas].sort((a, b) => (b.start_time_unix || 0) - (a.start_time_unix || 0));
+  const threshold = sorted[0].is_duos ? 2 : 4;
+  const firstIsWin = (sorted[0].placement || 0) <= threshold;
+  let count = 0;
+  for (const g of sorted) {
+    const win = (g.placement || 0) <= (g.is_duos ? 2 : 4);
+    if (win !== firstIsWin) break;
+    count++;
+  }
+  return { count, isWin: firstIsWin };
+}
+
 function renderSummaryCards(agg, compareAgg) {
   const el = document.getElementById('summary-cards');
   if (!agg) {
@@ -645,12 +659,18 @@ function renderSummaryCards(agg, compareAgg) {
   const avgPlacementThreshold = State.mode === 'duos' ? 2.5 : 4.5;
   const avgPlacementClass = agg.avg_placement && agg.avg_placement < avgPlacementThreshold ? 'up' : 'down';
 
+  const streak = computeStreak(State.games);
+  const streakValue = streak.count > 0 ? `${streak.isWin ? 'W' : 'L'}${streak.count}` : '—';
+  const streakClass = streak.count > 0 ? (streak.isWin ? 'up' : 'down') : '';
+  const streakSub = streak.count > 1 ? `${streak.isWin ? 'win' : 'loss'} streak` : (streak.count === 1 ? `last game` : '');
+
   const cards = [
     { label: 'Games Played', value: agg.games_played, sub: '' },
     { label: 'Win Rate', value: `${winRate}%`, valueClass: winRateClass, sub: `${agg.wins}W / ${agg.losses}L` },
     { label: 'Avg Placement', value: agg.avg_placement ? agg.avg_placement.toFixed(2) : '-', valueClass: avgPlacementClass, sub: '' },
     { label: 'Best', value: agg.best_placement || '-', sub: '' },
     { label: 'Worst', value: agg.worst_placement || '-', sub: '' },
+    { label: 'Streak', value: streakValue, valueClass: streakClass, sub: streakSub },
   ];
 
   if (compareAgg) {
@@ -2156,6 +2176,14 @@ function renderGameHeader(game) {
   const partner = partnerLabel ? `<span style="color:#4fc3f7;">w/ ${partnerLabel}</span>` : '';
   const metaParts = [dateShort, dur, anomaly, partner].filter(Boolean).join(' &middot; ');
 
+  // Game X of Y navigation
+  const sortedGames = [...State.games].sort((a, b) => (a.start_time_unix || 0) - (b.start_time_unix || 0));
+  const gameIdx = sortedGames.findIndex((g) => g.game_id === game.game_id);
+  const gameCount = sortedGames.length;
+  const hasPrevGame = gameIdx > 0;
+  const hasNextGame = gameIdx >= 0 && gameIdx < gameCount - 1;
+  const gameProgress = gameCount > 0 ? `Game ${gameIdx + 1} of ${gameCount}` : '';
+
   el.innerHTML = `
     <button onclick="navigateTo(1)" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:0.4rem 0.8rem;cursor:pointer;font-size:0.85rem;">&#8592; Back</button>
     <div style="display:flex;flex-direction:column;gap:0.15rem;">
@@ -2166,6 +2194,12 @@ function renderGameHeader(game) {
       </div>
       <div class="game-header-meta">${metaParts}</div>
     </div>
+    ${gameCount > 1 ? `
+    <div style="margin-left:auto;display:flex;align-items:center;gap:0.5rem;">
+      <button onclick="if(${hasPrevGame}){drillToGame('${hasPrevGame ? sortedGames[gameIdx - 1].game_id : ''}')}" ${hasPrevGame ? '' : 'disabled'} style="background:#16213e;color:${hasPrevGame ? '#eee' : '#444'};border:1px solid #333;border-radius:4px;padding:0.25rem 0.6rem;cursor:${hasPrevGame ? 'pointer' : 'default'};font-size:0.9rem;" title="Previous game (←)">&#8592;</button>
+      <span style="color:#888;font-size:0.8rem;min-width:80px;text-align:center;">${gameProgress}</span>
+      <button onclick="if(${hasNextGame}){drillToGame('${hasNextGame ? sortedGames[gameIdx + 1].game_id : ''}')}" ${hasNextGame ? '' : 'disabled'} style="background:#16213e;color:${hasNextGame ? '#eee' : '#444'};border:1px solid #333;border-radius:4px;padding:0.25rem 0.6rem;cursor:${hasNextGame ? 'pointer' : 'default'};font-size:0.9rem;" title="Next game (→)">&#8594;</button>
+    </div>` : ''}
   `;
 }
 
