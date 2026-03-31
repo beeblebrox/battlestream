@@ -135,8 +135,8 @@ jobs:
       - name: Check proto backward compatibility
         uses: bufbuild/buf-breaking-action@v1
         with:
-          input: proto
-          against: "https://github.com/${{ github.repository }}.git#branch=main,subdir=proto"
+          input: "."
+          against: "https://github.com/${{ github.repository }}.git#branch=main"
 
   docker:
     name: Docker build
