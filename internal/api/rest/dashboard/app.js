@@ -2674,6 +2674,13 @@ function renderTurnDetail(snapshot) {
   const p = s.player || {};
   const tier = s.tavern_tier || p.tavern_tier || '?';
   const gold = p.current_gold != null ? `${p.current_gold}/${p.max_gold || '?'}` : '';
+  const phase = s.phase === 'RECRUIT' ? 'Recruit' : s.phase === 'COMBAT' ? 'Combat' : (s.phase || '');
+  const phaseColor = s.phase === 'COMBAT' ? '#ff9800' : '#aaa';
+  const winStreak = p.win_streak || 0;
+  const lossStreak = p.loss_streak || 0;
+  const streakBit = winStreak > 0
+    ? `<span style="color:var(--win);font-size:0.8rem;">W${winStreak}</span>`
+    : (lossStreak > 0 ? `<span style="color:var(--loss);font-size:0.8rem;">L${lossStreak}</span>` : '');
 
   // Turn X of Y counter + prev/next nav
   const turns = State.selectedGameID ? (State.turnData.get(State.selectedGameID) || []) : [];
@@ -2686,8 +2693,10 @@ function renderTurnDetail(snapshot) {
   header.innerHTML = `
     <button onclick="navigateTo(2)" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:0.4rem 0.8rem;cursor:pointer;font-size:0.85rem;">&#8592; Back</button>
     <h2>Turn ${snapshot.turn}</h2>
+    ${phase ? `<span style="color:${phaseColor};font-size:0.82rem;">${phase}</span>` : ''}
     <span style="color:#7c4dff;">Tier ${tier}</span>
     ${gold ? `<span style="color:#ffc107;">Gold: ${gold}</span>` : ''}
+    ${streakBit}
     <div style="margin-left:auto;display:flex;align-items:center;gap:0.5rem;">
       <button onclick="if(${hasPrev}){drillToTurn(${hasPrev ? turns[turnIdx - 1].turn : 0})}" ${hasPrev ? '' : 'disabled'} style="background:#16213e;color:${hasPrev ? '#eee' : '#444'};border:1px solid #333;border-radius:4px;padding:0.25rem 0.6rem;cursor:${hasPrev ? 'pointer' : 'default'};font-size:0.9rem;" title="Previous turn (←)">&#8592;</button>
       <span style="color:#888;font-size:0.8rem;min-width:80px;text-align:center;">${turnProgress}</span>
