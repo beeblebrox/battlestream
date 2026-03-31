@@ -1,7 +1,7 @@
 ---
 name: dashboard-qa
 description: >
-  Validate the Battlestream web dashboard at http://127.0.0.1:8080/dashboard/ using Playwright.
+  Validate the Battlestream web dashboard at http://127.0.0.1:8080/dashboard/ using agent-browser.
   Checks chart rendering, axis labels, help tooltips, filters, navigation, data integrity, and
   visual consistency. Use this skill whenever dashboard HTML/JS/CSS is modified, after builds that
   touch the dashboard, when the user asks to verify or test the dashboard, or when investigating
@@ -13,7 +13,7 @@ description: >
 
 # Dashboard QA
 
-Automated Playwright-based validation of the Battlestream web dashboard. The dashboard is an
+Automated browser-based validation using the agent-browser skill of the Battlestream web dashboard. The dashboard is an
 ECharts-based single-page app served at `/dashboard/` by the REST server. It has three navigation
 levels (Overview, Game Detail, Turn Detail), filtering (Last N games, Last N days, date range
 scrubber, mode toggle, partner filter), and 14 Level-1 charts plus 6 Level-2 charts.
@@ -22,7 +22,7 @@ scrubber, mode toggle, partner filter), and 14 Level-1 charts plus 6 Level-2 cha
 
 Before running any checks:
 
-1. Navigate to `http://127.0.0.1:8080/dashboard/` using Playwright.
+1. Navigate to `http://127.0.0.1:8080/dashboard/` using agent-browser.
    If it fails to load, stop immediately and tell the user:
    > "Dashboard not accessible at http://127.0.0.1:8080/dashboard/. Start the daemon with
    > `./battlestream daemon` and try again."
@@ -192,7 +192,7 @@ to verify results.
 
 For each check:
 1. Read the check steps from `references/checks-dashboard.md`
-2. Execute using Playwright MCP tools
+2. Execute using agent-browser CLI tools
 3. Record result: PASS or FAIL with details
 4. On failure: take a screenshot of the current state and note expected vs actual values
 

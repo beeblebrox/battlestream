@@ -8,8 +8,5 @@
       "WebFetch(domain:community.developer.battle.net)",
       "WebFetch(domain:docs.anthropic.com)"
     ]
-  },
-  "enabledPlugins": {
-    "playwright@claude-plugins-official": true
   }
 }

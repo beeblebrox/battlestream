@@ -1,7 +1,7 @@
 # Dashboard QA Checks
 
 All checks for validating the Battlestream dashboard. Each check has an ID, group, and
-step-by-step validation instructions using Playwright browser tools.
+step-by-step validation instructions using agent-browser CLI tools.
 
 ## Table of Contents
 
@@ -367,10 +367,25 @@ This check validates axis naming, positioning, and styling for all charts.
    - A "Back" button or breadcrumb link exists
    - Breadcrumb shows "Overview / Game ..."
 6. Evaluate: `State.selectedGameID` — should equal the drilled game ID
-7. Click the Back button (or navigate via breadcrumb to Level 1)
-8. Wait 500ms
-9. Evaluate: `State.selectedGameID` — should be `null`
-10. Evaluate: `State.level` — should be `1`
+7. Evaluate Level 2 chart rendering (verify correct IDs):
+   ```javascript
+   (() => {
+     const ids = [
+       'chart-tier-prog', 'chart-board-stats', 'chart-board-size',
+       'chart-gold-econ', 'chart-health-armor', 'chart-buff-accum'
+     ];
+     const results = {};
+     for (const id of ids) {
+       results[id] = Charts[id] ? 'present' : 'MISSING';
+     }
+     return results;
+   })()
+   ```
+8. Verify: all 6 Level-2 charts are `'present'` (not `'MISSING'`)
+9. Click the Back button (or navigate via breadcrumb to Level 1)
+10. Wait 500ms
+11. Evaluate: `State.selectedGameID` — should be `null`
+12. Evaluate: `State.level` — should be `1`
 
 ---
 
@@ -460,7 +475,7 @@ This check validates axis naming, positioning, and styling for all charts.
    (() => {
      const opts = Charts['chart-heatmap-tier-turn'].getOption();
      const yData = opts.yAxis[0].data || [];
-     const hasT7 = yData.some(d => d === 'T7' || d === '7' || d === 7);
+     const hasT7 = yData.some(d => (typeof d === 'string' && d.includes('T7')) || d === '7' || d === 7);
      return { yData, hasT7 };
    })()
    ```
@@ -790,13 +805,13 @@ and accessibility. Scatter series use a different symbol shape (diamond) instead
      // Buff breakdown is a heatmap — player rows use blue tones, partner rows use orange tones.
      // Check that the visualMap or series encoding distinguishes player from partner.
      const yData = opts.yAxis?.[0]?.data || [];
-     const hasPlayerRows = yData.some(l => typeof l === 'string' && !l.includes('*'));
-     const hasPartnerRows = yData.some(l => typeof l === 'string' && l.includes('*'));
+     const hasPlayerRows = yData.some(l => typeof l === 'string' && !l.includes('└ Partner'));
+     const hasPartnerRows = yData.some(l => typeof l === 'string' && l.includes('└ Partner'));
      return { hasPlayerRows, hasPartnerRows, yLabels: yData };
    })()
    ```
 6. Verify: `hasPlayerRows === true` (player buff category rows present)
-7. Verify: `hasPartnerRows === true` when duos games exist (partner rows marked with `*` suffix)
+7. Verify: `hasPartnerRows === true` when duos games exist (partner rows labeled as `└ Partner` indented sub-rows per category)
 8. Visual: player rows should use blue color scale, partner rows should use orange color scale
 9. Evaluate buff efficiency bar mode partner series:
    ```javascript
