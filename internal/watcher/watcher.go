@@ -24,6 +24,7 @@ type Watcher struct {
 	lines       chan Line
 	errors      chan error
 	done        chan struct{}
+	stopOnce    sync.Once
 
 	mu    sync.Mutex
 	tails []*tail.Tail
@@ -261,13 +262,11 @@ func resolveLogDir(dir string, files []string) string {
 }
 
 // Stop gracefully stops all tails and closes the Lines channel.
+// Safe to call concurrently and multiple times.
 func (w *Watcher) Stop() {
-	select {
-	case <-w.done:
-		return
-	default:
+	w.stopOnce.Do(func() {
 		close(w.done)
-	}
+	})
 	w.stopTails()
 }
 

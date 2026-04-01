@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -86,6 +87,35 @@ func TestWatcherStopIdempotent(t *testing.T) {
 	w.Stop()
 	w.Stop()
 	w.Stop()
+}
+
+func TestWatcherStopConcurrentSafe(t *testing.T) {
+	dir := t.TempDir()
+	createLogFile(t, dir, "Power.log")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	w, err := New(ctx, Config{LogDir: dir, Files: []string{"Power.log"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate the real shutdown race: context cancelled (triggers internal
+	// goroutine to call Stop) AND caller also calls Stop concurrently.
+	const goroutines = 20
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	start := make(chan struct{})
+	for range goroutines {
+		go func() {
+			defer wg.Done()
+			<-start
+			w.Stop()
+		}()
+	}
+	close(start)
+	wg.Wait()
 }
 
 func TestWatcherPicksUpNewLines(t *testing.T) {
