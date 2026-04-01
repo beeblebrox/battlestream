@@ -87,12 +87,12 @@ QA agent:
    ```
 3. Runs the full validation suite.
 4. Records results in a Paperclip comment on the issue.
-5. **Pass** → merge to `main`, clean up worktree, mark issue `done`.
+5. **Pass** → set status to `in_progress`, reassign to the **developer**, and post a comment: "QA passed — please merge `feat/<issue-id>` to `main`, push, clean up the worktree, and mark this done." QA does **not** merge. The developer owns the merge step.
 6. **Fail** → **immediately**: set status to `in_progress`, reassign to the developer, post a bug report comment explaining what failed and what needs to be fixed. Do NOT leave a comment and walk away — the status change + reassignment is what notifies the developer. A bare comment is invisible to them.
 
-### 5. Merging to `main`
+### 5. Merging to `main` (Developer)
 
-Once QA passes:
+Once QA reassigns the issue back to you with a pass comment:
 
 1. From the repo root (on `main`):
    ```sh
