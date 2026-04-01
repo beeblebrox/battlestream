@@ -13,6 +13,7 @@ This document defines the standard workflow all developers, UI engineers, and QA
 3. **QA uses the same worktree as the developer.** This guarantees QA is testing exactly the code that will be merged — no re-checkout, no divergence.
 4. **Merging to `main` requires QA sign-off.** A task cannot be marked `done` and merged until QA has validated it on the worktree.
 5. **`main` is always releasable.** Only clean, tested, QA-approved code lands on `main`.
+6. **Bug fixes must include a regression test.** Every bug fix must be accompanied by a test that reproduces the original failure and passes after the fix. This prevents the same bug from regressing silently.
 
 ---
 
@@ -46,6 +47,16 @@ cd ../battlestream-<issue-id>
   ```
 - Run `go vet ./...` before every commit.
 - Do not merge into `main` yourself. Do not rebase onto `main` mid-flight unless explicitly coordinated with the team.
+
+#### Bug Fix Requirement
+
+If the issue is a **bug fix**, you must include a regression test before handing off to QA:
+
+1. Write a test that **fails** against the unfixed code, reproducing the original bug.
+2. Apply the fix so the test passes.
+3. Confirm the full test suite still passes: `go test -race -count=1 ./...`
+
+Do not submit a bug fix for QA review without a corresponding regression test. QA will reject fixes that lack one.
 
 ### 3. Handing Off to QA
 
@@ -115,6 +126,7 @@ Once QA passes:
 - Do not commit `.claude/plans/`, screenshot files (`*.png`), or game log directories (`Hearthstone_*/`) — these are gitignored.
 - Do not push directly to `main`. Even hotfixes go through a branch.
 - Do not mark a task `done` in Paperclip before QA has signed off.
+- Do not submit a bug fix without a regression test — QA will reject it.
 
 ---
 
