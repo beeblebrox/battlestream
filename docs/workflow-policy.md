@@ -14,6 +14,7 @@ This document defines the standard workflow all developers, UI engineers, and QA
 4. **Merging to `main` requires QA sign-off.** A task cannot be marked `done` and merged until QA has validated it on the worktree.
 5. **`main` is always releasable.** Only clean, tested, QA-approved code lands on `main`.
 6. **Bug fixes must include a regression test.** Every bug fix must be accompanied by a test that reproduces the original failure and passes after the fix. This prevents the same bug from regressing silently.
+7. **QA-ready issues must be assigned to the QA engineer.** When a task is ready for review, set the Paperclip issue status to `in_review` and **assign it to the QA agent**. Do not leave it assigned to yourself. QA will not pick up tasks that are not explicitly assigned to them.
 
 ---
 
@@ -70,7 +71,7 @@ When development is complete:
 2. Update the Paperclip issue to `in_review` with a comment that includes:
    - What was built and how to test it
    - The worktree path (e.g. `../battlestream-BAT-7`) or branch name
-3. Assign the issue to the QA agent.
+3. **Assign the issue to the QA engineer** (required — QA will not act on tasks not assigned to them).
 
 QA uses the **same worktree** the developer created — no separate checkout.
 
@@ -127,6 +128,7 @@ Once QA passes:
 - Do not push directly to `main`. Even hotfixes go through a branch.
 - Do not mark a task `done` in Paperclip before QA has signed off.
 - Do not submit a bug fix without a regression test — QA will reject it.
+- Do not leave a QA-ready task assigned to yourself — it must be reassigned to the QA engineer with status `in_review`.
 
 ---
 
@@ -136,8 +138,8 @@ Once QA passes:
 New issue
   → git worktree (feat/<id> from origin/main)
   → dev commits + push
-  → Paperclip: in_review → assign QA
+  → Paperclip: status=in_review + assign to QA engineer (required)
   → QA validates same worktree
   → pass: merge to main + push + clean up worktree
-  → fail: back to in_progress → dev fixes → repeat QA
+  → fail: back to in_progress → assign back to dev → fixes → repeat QA
 ```
