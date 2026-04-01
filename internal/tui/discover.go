@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/filepicker"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -22,10 +21,9 @@ import (
 type discoverStep int
 
 const (
-	discoverStepList    discoverStep = iota // multi-select list of all found installs
-	discoverStepPicker                      // manual directory browser
-	discoverStepNaming                      // profile name per selected install
-	discoverStepActive                      // active profile radio select (multi only)
+	discoverStepScan    discoverStep = iota // path input + scan results list
+	discoverStepNaming                      // profile name per install (only if >1)
+	discoverStepActive                      // active profile radio (only if >1)
 	discoverStepSummary                     // confirm + save
 )
 
@@ -36,11 +34,23 @@ const (
 type discoveredInstall struct {
 	info     *discovery.InstallInfo
 	selected bool
+	verified installVerification
+}
+
+type installVerification struct {
+	exeFound bool
+	logFound bool
 }
 
 type namedProfile struct {
 	install *discovery.InstallInfo
 	name    string
+}
+
+// scanResultMsg carries the async result of a directory scan.
+type scanResultMsg struct {
+	installs []*discovery.InstallInfo
+	err      error
 }
 
 // ============================================================
@@ -51,21 +61,21 @@ type namedProfile struct {
 type DiscoverModel struct {
 	step discoverStep
 
-	// Step 1 — install list
-	installs []*discoveredInstall
-	cursor   int
-	listNote string // transient feedback (e.g. "nothing selected")
+	// Step 1 — scan
+	installs      []*discoveredInstall
+	cursor        int
+	listNote      string // transient feedback
+	scanning      bool
+	scanInput     textinput.Model
+	inputFocused  bool // is the path input focused?
+	clearExisting bool // if true, wipe existing profiles on save
 
-	// Step 2 — file picker
-	fp        filepicker.Model
-	pickerErr string
-
-	// Step 3 — profile naming
+	// Step 2 — profile naming (only when >1 install selected)
 	profiles   []namedProfile
 	nameInputs []textinput.Model
 	nameIdx    int
 
-	// Step 4 — active profile radio
+	// Step 3 — active profile radio
 	activeCursor int
 
 	// Config context
@@ -81,59 +91,73 @@ type DiscoverModel struct {
 	done bool
 }
 
-// NewDiscoverModel constructs a DiscoverModel, auto-populating installs.
+// NewDiscoverModel constructs a DiscoverModel.
 func NewDiscoverModel(cfg *config.Config, cfgSavePath string) *DiscoverModel {
 	if cfg == nil {
 		cfg = &config.Config{}
 	}
-	m := &DiscoverModel{
+	ti := textinput.New()
+	ti.Placeholder = "e.g. ~ or /home/user/.wine or /mnt/games"
+	ti.Width = 50
+	home, _ := os.UserHomeDir()
+	ti.SetValue(home)
+
+	return &DiscoverModel{
 		cfg:         cfg,
 		cfgSavePath: cfgSavePath,
+		scanInput:   ti,
 		width:       80,
 		height:      24,
 	}
-	m.loadAutoInstalls()
-	return m
 }
 
-func (m *DiscoverModel) loadAutoInstalls() {
-	found, err := discovery.DiscoverAll()
-	if err != nil {
-		m.listNote = fmt.Sprintf("Auto-discovery: %v", err)
-		return
+// verifyInstall checks whether the exe and log directory actually exist on disk.
+func verifyInstall(info *discovery.InstallInfo) installVerification {
+	v := installVerification{}
+	for _, exe := range []string{
+		filepath.Join(info.InstallRoot, "Hearthstone.exe"),
+		filepath.Join(info.InstallRoot, "Hearthstone.app"),
+	} {
+		if _, err := os.Stat(exe); err == nil {
+			v.exeFound = true
+			break
+		}
 	}
-	for _, info := range found {
-		m.installs = append(m.installs, &discoveredInstall{info: info, selected: true})
+	if _, err := os.Stat(info.LogPath); err == nil {
+		v.logFound = true
 	}
+	return v
 }
 
-func (m *DiscoverModel) initFilePicker() {
-	fp := filepicker.New()
-	home, _ := os.UserHomeDir()
-	fp.CurrentDirectory = home
-	fp.DirAllowed = true
-	fp.FileAllowed = false
-	fp.ShowHidden = false
-	fp.AutoHeight = false
-	fp.Height = max(m.height-8, 5)
-	m.fp = fp
-	m.pickerErr = ""
-}
-
-// suggestProfileName derives a profile name from the install root path.
-func suggestProfileName(installRoot string) string {
+// baseProfileName derives the default profile name prefix for an install root.
+func baseProfileName(installRoot string) string {
 	lower := strings.ToLower(installRoot)
 	switch {
-	case strings.Contains(lower, "compatdata") || (strings.Contains(lower, "steam") && strings.Contains(lower, "drive_c")):
+	case strings.Contains(lower, "compatdata"):
 		return "steam-proton"
-	case strings.Contains(lower, ".wine"):
+	case strings.Contains(lower, "drive_c") || strings.Contains(lower, ".wine"):
 		return "wine"
 	default:
 		return "main"
 	}
 }
 
-// installKind returns a short label for display ("Wine", "Proton", "Native").
+// suggestProfileName derives a unique profile name, appending -2, -3, etc. when
+// needed to avoid collisions within the usedNames set.
+func suggestProfileName(installRoot string, usedNames map[string]bool) string {
+	base := baseProfileName(installRoot)
+	if !usedNames[base] {
+		return base
+	}
+	for i := 2; ; i++ {
+		candidate := fmt.Sprintf("%s-%d", base, i)
+		if !usedNames[candidate] {
+			return candidate
+		}
+	}
+}
+
+// installKind returns a short display label for an install ("Wine", "Proton", "Native").
 func installKind(info *discovery.InstallInfo) string {
 	lower := strings.ToLower(info.InstallRoot)
 	switch {
@@ -146,12 +170,99 @@ func installKind(info *discovery.InstallInfo) string {
 	}
 }
 
+// expandPath expands a leading ~ and any $ENV_VAR references.
+func expandPath(p string) string {
+	if strings.HasPrefix(p, "~/") || p == "~" {
+		home, _ := os.UserHomeDir()
+		p = home + p[1:]
+	}
+	return os.ExpandEnv(p)
+}
+
+// needsNaming returns true when naming is required (i.e. more than one install selected).
+func (m *DiscoverModel) needsNaming() bool {
+	count := 0
+	for _, inst := range m.installs {
+		if inst.selected {
+			count++
+		}
+	}
+	return count > 1
+}
+
+// selectedInstalls returns the currently selected installs.
+func (m *DiscoverModel) selectedInstalls() []*discovery.InstallInfo {
+	var out []*discovery.InstallInfo
+	for _, inst := range m.installs {
+		if inst.selected {
+			out = append(out, inst.info)
+		}
+	}
+	return out
+}
+
+// addInstall appends an install if not already present.
+func (m *DiscoverModel) addInstall(info *discovery.InstallInfo) {
+	for _, existing := range m.installs {
+		if existing.info.InstallRoot == info.InstallRoot {
+			return
+		}
+	}
+	m.installs = append(m.installs, &discoveredInstall{
+		info:     info,
+		selected: true,
+		verified: verifyInstall(info),
+	})
+	m.cursor = len(m.installs) - 1
+}
+
+// buildNamingInputs prepares the naming step inputs with collision-free suggestions.
+func (m *DiscoverModel) buildNamingInputs(selected []*discovery.InstallInfo) {
+	usedNames := make(map[string]bool)
+	m.profiles = make([]namedProfile, len(selected))
+	m.nameInputs = make([]textinput.Model, len(selected))
+	for i, info := range selected {
+		name := suggestProfileName(info.InstallRoot, usedNames)
+		usedNames[name] = true
+		m.profiles[i] = namedProfile{install: info}
+		ti := textinput.New()
+		ti.Placeholder = "profile name"
+		ti.SetValue(name)
+		ti.Width = 30
+		m.nameInputs[i] = ti
+	}
+	m.nameIdx = 0
+	if len(m.nameInputs) > 0 {
+		m.nameInputs[0].Focus()
+	}
+}
+
+// doScan performs an async directory scan.
+func doScan(path string) tea.Cmd {
+	return func() tea.Msg {
+		if path == "" {
+			found, err := discovery.DiscoverAll()
+			return scanResultMsg{installs: found, err: err}
+		}
+		expanded := expandPath(path)
+		if info, err := discovery.DiscoverFromRoot(expanded); err == nil {
+			return scanResultMsg{installs: []*discovery.InstallInfo{info}}
+		}
+		found, err := discovery.WalkForAllInstalls(expanded)
+		if err != nil || len(found) == 0 {
+			return scanResultMsg{err: fmt.Errorf("no Hearthstone install found under %s", expanded)}
+		}
+		return scanResultMsg{installs: found}
+	}
+}
+
 // ============================================================
 // Init
 // ============================================================
 
 func (m *DiscoverModel) Init() tea.Cmd {
-	return nil
+	m.scanning = true
+	return doScan("")
 }
 
 // ============================================================
@@ -163,8 +274,25 @@ func (m *DiscoverModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		if m.step == discoverStepPicker {
-			m.fp.Height = max(m.height-8, 5)
+		return m, nil
+
+	case scanResultMsg:
+		m.scanning = false
+		if msg.err != nil && len(msg.installs) == 0 {
+			m.listNote = fmt.Sprintf("No installs found: %v", msg.err)
+		} else {
+			prev := len(m.installs)
+			for _, info := range msg.installs {
+				m.addInstall(info)
+			}
+			added := len(m.installs) - prev
+			if added > 0 {
+				m.listNote = fmt.Sprintf("Found %d install(s)", added)
+			} else if len(msg.installs) > 0 {
+				m.listNote = "Already in list — no new installs found"
+			} else {
+				m.listNote = "No Hearthstone installs found in that directory"
+			}
 		}
 		return m, nil
 
@@ -172,10 +300,10 @@ func (m *DiscoverModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 	}
 
-	// File picker needs non-key messages (async dir reads).
-	if m.step == discoverStepPicker {
+	// Forward non-key msgs to the text input when it is focused.
+	if m.inputFocused {
 		var cmd tea.Cmd
-		m.fp, cmd = m.fp.Update(msg)
+		m.scanInput, cmd = m.scanInput.Update(msg)
 		return m, cmd
 	}
 
@@ -184,10 +312,8 @@ func (m *DiscoverModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *DiscoverModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.step {
-	case discoverStepList:
-		return m.handleListKey(msg)
-	case discoverStepPicker:
-		return m.handlePickerKey(msg)
+	case discoverStepScan:
+		return m.handleScanKey(msg)
 	case discoverStepNaming:
 		return m.handleNamingKey(msg)
 	case discoverStepActive:
@@ -198,165 +324,109 @@ func (m *DiscoverModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// ----- Step 1: install list -----
+// ----- Step 1: scan -----
 
-func (m *DiscoverModel) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *DiscoverModel) handleScanKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.inputFocused {
+		switch msg.String() {
+		case "ctrl+c":
+			m.err = fmt.Errorf("setup cancelled")
+			m.done = true
+			return m, tea.Quit
+		case "esc":
+			m.inputFocused = false
+			m.scanInput.Blur()
+			return m, nil
+		case "enter":
+			path := strings.TrimSpace(m.scanInput.Value())
+			m.inputFocused = false
+			m.scanInput.Blur()
+			m.scanning = true
+			m.listNote = ""
+			return m, doScan(path)
+		}
+		var cmd tea.Cmd
+		m.scanInput, cmd = m.scanInput.Update(msg)
+		return m, cmd
+	}
+
 	m.listNote = ""
 	switch msg.String() {
 	case "ctrl+c", "q":
 		m.err = fmt.Errorf("setup cancelled")
 		m.done = true
 		return m, tea.Quit
+
 	case "up", "k":
 		if m.cursor > 0 {
 			m.cursor--
 		}
+
 	case "down", "j":
 		if m.cursor < len(m.installs)-1 {
 			m.cursor++
 		}
+
 	case " ":
 		if len(m.installs) > 0 {
 			m.installs[m.cursor].selected = !m.installs[m.cursor].selected
 		}
-	case "a":
-		// Toggle all.
-		allOn := true
-		for _, inst := range m.installs {
-			if !inst.selected {
-				allOn = false
-				break
+
+	case "d", "backspace":
+		if len(m.installs) > 0 {
+			m.installs = append(m.installs[:m.cursor], m.installs[m.cursor+1:]...)
+			if m.cursor >= len(m.installs) && m.cursor > 0 {
+				m.cursor--
 			}
 		}
-		for _, inst := range m.installs {
-			inst.selected = !allOn
-		}
-	case "m":
-		m.initFilePicker()
-		m.step = discoverStepPicker
+
+	case "c", "C":
+		// Clear all: reset the install list and mark existing profiles for removal.
+		m.installs = nil
+		m.cursor = 0
+		m.clearExisting = true
+		m.listNote = "All existing profiles will be cleared on save. Scan to add new installs."
+
+	case "/", "s", "S":
+		m.inputFocused = true
+		m.scanInput.Focus()
+		return m, textinput.Blink
+
+	case "r", "R":
+		m.scanning = true
+		m.listNote = ""
+		return m, doScan("")
+
 	case "enter", "right":
-		var sel []*discovery.InstallInfo
-		for _, inst := range m.installs {
-			if inst.selected {
-				sel = append(sel, inst.info)
-			}
-		}
+		sel := m.selectedInstalls()
 		if len(sel) == 0 {
 			m.listNote = "Select at least one install (SPACE to toggle)"
 			return m, nil
 		}
-		m.buildNamingInputs(sel)
-		m.step = discoverStepNaming
+		return m.advanceFromScan()
 	}
 	return m, nil
 }
 
-func (m *DiscoverModel) buildNamingInputs(selected []*discovery.InstallInfo) {
-	m.profiles = make([]namedProfile, len(selected))
-	m.nameInputs = make([]textinput.Model, len(selected))
-	for i, info := range selected {
-		m.profiles[i] = namedProfile{install: info}
-		ti := textinput.New()
-		ti.Placeholder = "profile name"
-		ti.SetValue(suggestProfileName(info.InstallRoot))
-		ti.Width = 30
-		m.nameInputs[i] = ti
+// advanceFromScan decides the next step based on how many installs are selected.
+func (m *DiscoverModel) advanceFromScan() (tea.Model, tea.Cmd) {
+	sel := m.selectedInstalls()
+	if m.needsNaming() {
+		m.buildNamingInputs(sel)
+		m.step = discoverStepNaming
+	} else {
+		// Single install — auto-name it, skip naming step entirely.
+		m.profiles = []namedProfile{{
+			install: sel[0],
+			name:    baseProfileName(sel[0].InstallRoot),
+		}}
+		m.activeCursor = 0
+		m.step = discoverStepSummary
 	}
-	m.nameIdx = 0
-	if len(m.nameInputs) > 0 {
-		m.nameInputs[0].Focus()
-	}
+	return m, nil
 }
 
-// ----- Step 2: file picker -----
-
-func (m *DiscoverModel) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+c":
-		m.err = fmt.Errorf("setup cancelled")
-		m.done = true
-		return m, tea.Quit
-	case "esc":
-		m.step = discoverStepList
-		return m, nil
-	case "tab", " ":
-		// Select the current directory for discovery.
-		selected := m.fp.CurrentDirectory
-		m.addFromPath(selected)
-		m.step = discoverStepList
-		return m, nil
-	}
-	// Delegate all other keys to the filepicker.
-	var cmd tea.Cmd
-	m.fp, cmd = m.fp.Update(msg)
-	return m, cmd
-}
-
-func (m *DiscoverModel) addFromPath(path string) {
-	m.pickerErr = ""
-	info, err := discovery.DiscoverFromRoot(path)
-	if err == nil {
-		m.addInstall(info)
-		return
-	}
-	// Walk with depth cap to avoid slow scans.
-	infos, walkErr := walkInstallsDepthLimited(path, 5)
-	if walkErr != nil || len(infos) == 0 {
-		m.pickerErr = fmt.Sprintf("No Hearthstone install found in %s", path)
-		return
-	}
-	for _, inst := range infos {
-		m.addInstall(inst)
-	}
-}
-
-func (m *DiscoverModel) addInstall(info *discovery.InstallInfo) {
-	for _, existing := range m.installs {
-		if existing.info.InstallRoot == info.InstallRoot {
-			return
-		}
-	}
-	m.installs = append(m.installs, &discoveredInstall{info: info, selected: true})
-	m.cursor = len(m.installs) - 1
-}
-
-// walkInstallsDepthLimited finds all HS installs under startDir up to maxDepth levels deep.
-func walkInstallsDepthLimited(startDir string, maxDepth int) ([]*discovery.InstallInfo, error) {
-	var all []*discovery.InstallInfo
-	err := walkDirDepth(startDir, 0, maxDepth, func(path string) error {
-		if info, err := discovery.DiscoverFromRoot(path); err == nil {
-			all = append(all, info)
-			return filepath.SkipDir
-		}
-		return nil
-	})
-	return all, err
-}
-
-func walkDirDepth(dir string, depth, maxDepth int, fn func(string) error) error {
-	if depth > maxDepth {
-		return nil
-	}
-	if err := fn(dir); err == filepath.SkipDir {
-		return nil
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil //nolint: nilerr — skip unreadable dirs silently
-	}
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		child := filepath.Join(dir, e.Name())
-		if err := walkDirDepth(child, depth+1, maxDepth, fn); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// ----- Step 3: profile naming -----
+// ----- Step 2: profile naming -----
 
 func (m *DiscoverModel) handleNamingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
@@ -365,17 +435,20 @@ func (m *DiscoverModel) handleNamingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.done = true
 		return m, tea.Quit
 	case "esc":
-		m.step = discoverStepList
+		m.step = discoverStepScan
 		return m, nil
 	case "enter":
 		name := strings.TrimSpace(m.nameInputs[m.nameIdx].Value())
 		if name == "" {
-			name = suggestProfileName(m.profiles[m.nameIdx].install.InstallRoot)
+			usedNames := make(map[string]bool)
+			for i := 0; i < m.nameIdx; i++ {
+				usedNames[m.profiles[i].name] = true
+			}
+			name = suggestProfileName(m.profiles[m.nameIdx].install.InstallRoot, usedNames)
 		}
 		m.profiles[m.nameIdx].name = name
 		m.nameIdx++
 		if m.nameIdx >= len(m.nameInputs) {
-			// All profiles named — advance.
 			m.activeCursor = 0
 			if len(m.profiles) > 1 {
 				m.step = discoverStepActive
@@ -388,13 +461,12 @@ func (m *DiscoverModel) handleNamingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.nameInputs[m.nameIdx].Focus()
 		return m, nil
 	}
-	// Delegate to the active text input.
 	var cmd tea.Cmd
 	m.nameInputs[m.nameIdx], cmd = m.nameInputs[m.nameIdx].Update(msg)
 	return m, cmd
 }
 
-// ----- Step 4: active profile -----
+// ----- Step 3: active profile -----
 
 func (m *DiscoverModel) handleActiveKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
@@ -425,7 +497,7 @@ func (m *DiscoverModel) handleActiveKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// ----- Step 5: summary -----
+// ----- Step 4: summary -----
 
 func (m *DiscoverModel) handleSummaryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
@@ -436,12 +508,14 @@ func (m *DiscoverModel) handleSummaryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		if len(m.profiles) > 1 {
 			m.step = discoverStepActive
-		} else {
+		} else if m.needsNaming() {
 			m.nameIdx = 0
 			if len(m.nameInputs) > 0 {
 				m.nameInputs[0].Focus()
 			}
 			m.step = discoverStepNaming
+		} else {
+			m.step = discoverStepScan
 		}
 	case "enter", "y":
 		if err := m.saveConfig(); err != nil {
@@ -454,6 +528,10 @@ func (m *DiscoverModel) handleSummaryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *DiscoverModel) saveConfig() error {
+	if m.clearExisting {
+		m.cfg.Profiles = make(map[string]*config.ProfileConfig)
+		m.cfg.ActiveProfile = ""
+	}
 	for i, p := range m.profiles {
 		pc := config.NewProfileConfig(p.name)
 		pc.Hearthstone.InstallPath = p.install.InstallRoot
@@ -464,7 +542,7 @@ func (m *DiscoverModel) saveConfig() error {
 	return config.Save(m.cfg, m.cfgSavePath)
 }
 
-// Error returns any error that terminated the wizard (cancelled or save failure).
+// Error returns any error that terminated the wizard.
 func (m *DiscoverModel) Error() error { return m.err }
 
 // Done reports whether the wizard has finished.
@@ -497,9 +575,6 @@ var (
 			Foreground(colorGold).
 			Bold(true)
 
-	styleWizError = lipgloss.NewStyle().
-			Foreground(colorRed)
-
 	styleWizNote = lipgloss.NewStyle().
 			Foreground(colorDim).
 			Italic(true)
@@ -513,14 +588,31 @@ var (
 
 	styleWizRadioOff = lipgloss.NewStyle().
 				Foreground(colorDim)
+
+	styleWizVerifyOK = lipgloss.NewStyle().
+				Foreground(colorGreen)
+
+	styleWizVerifyMiss = lipgloss.NewStyle().
+				Foreground(colorDim)
+
+	styleWizWarning = lipgloss.NewStyle().
+			Foreground(colorGold)
+
+	styleWizInputActive = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(colorGold).
+				Padding(0, 1)
+
+	styleWizInputIdle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(colorDim).
+				Padding(0, 1)
 )
 
 func (m *DiscoverModel) View() string {
 	switch m.step {
-	case discoverStepList:
-		return m.viewList()
-	case discoverStepPicker:
-		return m.viewPicker()
+	case discoverStepScan:
+		return m.viewScan()
 	case discoverStepNaming:
 		return m.viewNaming()
 	case discoverStepActive:
@@ -532,30 +624,56 @@ func (m *DiscoverModel) View() string {
 }
 
 func (m *DiscoverModel) innerWidth() int {
-	w := m.width - 8 // border + padding
+	w := m.width - 8
 	if w < 40 {
 		return 40
 	}
 	return w
 }
 
-// ----- Step 1: list view -----
+// ----- Step 1: scan view -----
 
-func (m *DiscoverModel) viewList() string {
+func (m *DiscoverModel) viewScan() string {
 	iw := m.innerWidth()
 	var sb strings.Builder
 
 	sb.WriteString(styleWizTitle.Render("BATTLESTREAM SETUP"))
 	sb.WriteString("\n")
-	sb.WriteString(styleWizStep.Render("Step 1/4 — Select installations"))
+	sb.WriteString(styleWizStep.Render("Step 1 — Scan for Hearthstone installs"))
 	sb.WriteString("\n\n")
 
-	if len(m.installs) == 0 {
-		sb.WriteString(styleWizNote.Render("No installs found automatically."))
+	// Path input section.
+	inputStyle := styleWizInputIdle
+	if m.inputFocused {
+		inputStyle = styleWizInputActive
+	}
+	sb.WriteString(inputStyle.Render(m.scanInput.View()))
+	sb.WriteString("\n")
+	if m.inputFocused {
+		sb.WriteString(styleWizNote.Render("  ENTER to scan from this path · ESC to cancel"))
+	} else {
+		sb.WriteString(styleWizNote.Render("  Press / to edit path · R to rescan defaults · C to clear all"))
+	}
+	sb.WriteString("\n\n")
+
+	// Clear-all notice.
+	if m.clearExisting {
+		sb.WriteString(styleWizWarning.Render("⚠  Existing profiles will be replaced on save"))
+		sb.WriteString("\n\n")
+	}
+
+	// Results section.
+	if m.scanning {
+		sb.WriteString(styleWizNote.Render("  Scanning..."))
+		sb.WriteString("\n\n")
+	} else if len(m.installs) == 0 {
+		sb.WriteString(styleWizNote.Render("No installs found."))
 		sb.WriteString("\n")
-		sb.WriteString(styleWizNote.Render("Press M to browse for one manually."))
+		sb.WriteString(styleWizNote.Render("Press / to enter a custom path, then ENTER to scan. Or press R to rescan default locations."))
 		sb.WriteString("\n\n")
 	} else {
+		sb.WriteString(styleWizStep.Render(fmt.Sprintf("%d install(s) found:", len(m.installs))))
+		sb.WriteString("\n\n")
 		for i, inst := range m.installs {
 			cursor := "  "
 			if i == m.cursor {
@@ -566,65 +684,40 @@ func (m *DiscoverModel) viewList() string {
 				check = styleWizCheck.Render("[✓]")
 			}
 			kind := installKind(inst.info)
-			root := truncatePath(inst.info.InstallRoot, iw-20)
-			sb.WriteString(fmt.Sprintf("%s%s %s  %s\n",
+			root := truncatePath(inst.info.InstallRoot, iw-22)
+			sb.WriteString(fmt.Sprintf("%s%s  %s  %s\n",
 				cursor, check,
 				styleValue.Render(root),
 				styleDim.Render("("+kind+")")))
-			if i == m.cursor {
-				logShort := truncatePath(inst.info.LogPath, iw-6)
-				sb.WriteString(fmt.Sprintf("       %s\n", styleDim.Render("Log: "+logShort)))
+
+			// Verification badges.
+			exeBadge := styleWizVerifyMiss.Render("· exe")
+			if inst.verified.exeFound {
+				exeBadge = styleWizVerifyOK.Render("✓ exe")
 			}
+			logBadge := styleWizVerifyMiss.Render("· logs")
+			if inst.verified.logFound {
+				logBadge = styleWizVerifyOK.Render("✓ logs")
+			}
+			logPath := truncatePath(inst.info.LogPath, iw-24)
+			sb.WriteString(fmt.Sprintf("       %s  %s  %s\n",
+				exeBadge, logBadge, styleDim.Render(logPath)))
 		}
 		sb.WriteString("\n")
 	}
 
 	if m.listNote != "" {
-		sb.WriteString(styleWizError.Render(m.listNote))
+		sb.WriteString(styleWizNote.Render(m.listNote))
 		sb.WriteString("\n\n")
 	}
 
-	if m.pickerErr != "" {
-		sb.WriteString(styleWizError.Render(m.pickerErr))
-		sb.WriteString("\n\n")
-	}
-
-	help := "SPACE toggle · A toggle all · M add manually · ENTER continue · Q quit"
+	help := "SPACE toggle · D remove · C clear all · / scan path · R rescan · ENTER continue · Q quit"
 	sb.WriteString(styleWizHelp.Render(help))
 
 	return styleWizBorder.Width(m.width - 4).Render(sb.String())
 }
 
-// ----- Step 2: file picker view -----
-
-func (m *DiscoverModel) viewPicker() string {
-	iw := m.innerWidth()
-	var sb strings.Builder
-
-	sb.WriteString(styleWizTitle.Render("BATTLESTREAM SETUP"))
-	sb.WriteString("\n")
-	sb.WriteString(styleWizStep.Render("Step 1b — Browse to Hearthstone directory"))
-	sb.WriteString("\n\n")
-
-	sb.WriteString(styleDim.Render("Current: "))
-	sb.WriteString(styleValue.Render(truncatePath(m.fp.CurrentDirectory, iw-10)))
-	sb.WriteString("\n\n")
-
-	sb.WriteString(m.fp.View())
-	sb.WriteString("\n\n")
-
-	if m.pickerErr != "" {
-		sb.WriteString(styleWizError.Render(m.pickerErr))
-		sb.WriteString("\n")
-	}
-
-	help := "j/k navigate · ENTER open dir · TAB/SPACE select current dir · ESC back"
-	sb.WriteString(styleWizHelp.Render(help))
-
-	return styleWizBorder.Width(m.width - 4).Render(sb.String())
-}
-
-// ----- Step 3: profile naming view -----
+// ----- Step 2: profile naming view -----
 
 func (m *DiscoverModel) viewNaming() string {
 	var sb strings.Builder
@@ -637,7 +730,7 @@ func (m *DiscoverModel) viewNaming() string {
 
 	sb.WriteString(styleWizTitle.Render("BATTLESTREAM SETUP"))
 	sb.WriteString("\n")
-	sb.WriteString(styleWizStep.Render(fmt.Sprintf("Step 2/4 — Name profile (%d/%d)", current, total)))
+	sb.WriteString(styleWizStep.Render(fmt.Sprintf("Step 2 — Name profiles (%d of %d)", current, total)))
 	sb.WriteString("\n\n")
 
 	if m.nameIdx < len(m.profiles) {
@@ -653,7 +746,7 @@ func (m *DiscoverModel) viewNaming() string {
 			styleLabel.Render("Kind:"),
 			styleDim.Render(installKind(inst))))
 		sb.WriteString("\n")
-		sb.WriteString(styleWizNote.Render("Profile name identifies this install (e.g. main, ptr, steam-proton)."))
+		sb.WriteString(styleWizNote.Render("Profile name identifies this install (e.g. main, wine, steam-proton)."))
 		sb.WriteString("\n")
 		sb.WriteString(styleWizNote.Render("Used with the --profile flag."))
 		sb.WriteString("\n\n")
@@ -662,20 +755,20 @@ func (m *DiscoverModel) viewNaming() string {
 		sb.WriteString("\n\n")
 	}
 
-	help := "ENTER confirm · ESC back"
+	help := "ENTER confirm · ESC back to scan"
 	sb.WriteString(styleWizHelp.Render(help))
 
 	return styleWizBorder.Width(m.width - 4).Render(sb.String())
 }
 
-// ----- Step 4: active profile view -----
+// ----- Step 3: active profile view -----
 
 func (m *DiscoverModel) viewActive() string {
 	var sb strings.Builder
 
 	sb.WriteString(styleWizTitle.Render("BATTLESTREAM SETUP"))
 	sb.WriteString("\n")
-	sb.WriteString(styleWizStep.Render("Step 3/4 — Select active profile"))
+	sb.WriteString(styleWizStep.Render("Step 3 — Select active profile"))
 	sb.WriteString("\n\n")
 
 	sb.WriteString(styleDim.Render("Which profile should be active by default?"))
@@ -705,17 +798,26 @@ func (m *DiscoverModel) viewActive() string {
 	return styleWizBorder.Width(m.width - 4).Render(sb.String())
 }
 
-// ----- Step 5: summary view -----
+// ----- Step 4: summary view -----
 
 func (m *DiscoverModel) viewSummary() string {
 	var sb strings.Builder
 
+	stepNum := 2
+	if len(m.profiles) > 1 {
+		stepNum = 4
+	}
 	sb.WriteString(styleWizTitle.Render("BATTLESTREAM SETUP"))
 	sb.WriteString("\n")
-	sb.WriteString(styleWizStep.Render("Step 4/4 — Confirm and save"))
+	sb.WriteString(styleWizStep.Render(fmt.Sprintf("Step %d — Confirm and save", stepNum)))
 	sb.WriteString("\n\n")
 
-	sb.WriteString(styleLabel.Render("Profiles to add:"))
+	if m.clearExisting {
+		sb.WriteString(styleWizWarning.Render("⚠  Existing profiles will be replaced"))
+		sb.WriteString("\n\n")
+	}
+
+	sb.WriteString(styleLabel.Render("Profiles to save:"))
 	sb.WriteString("\n\n")
 
 	iw := m.innerWidth()
@@ -724,29 +826,37 @@ func (m *DiscoverModel) viewSummary() string {
 		if i == m.activeCursor {
 			active = styleWizCheck.Render(" ← active")
 		}
+		v := verifyInstall(p.install)
+		exeBadge := styleWizVerifyMiss.Render("· exe")
+		if v.exeFound {
+			exeBadge = styleWizVerifyOK.Render("✓ exe")
+		}
+		logNote := styleWizVerifyMiss.Render("· logs (will be created on first run)")
+		if v.logFound {
+			logNote = styleWizVerifyOK.Render("✓ logs")
+		}
 		root := truncatePath(p.install.InstallRoot, iw-len(p.name)-16)
 		sb.WriteString(fmt.Sprintf("  %-20s → %s%s\n",
 			styleValue.Render(p.name),
 			styleDim.Render(root),
 			active))
+		sb.WriteString(fmt.Sprintf("  %s  %s\n\n", exeBadge, logNote))
 	}
-	sb.WriteString("\n")
-
-	sb.WriteString(fmt.Sprintf("%s  %s\n",
-		styleLabel.Render("Active profile:"),
-		styleValue.Render(m.profiles[m.activeCursor].name)))
 
 	savePath := m.cfgSavePath
 	if savePath == "" {
 		home, _ := os.UserHomeDir()
 		savePath = filepath.Join(home, ".battlestream", "config.yaml")
 	}
+	sb.WriteString(fmt.Sprintf("%s  %s\n",
+		styleLabel.Render("Active profile:"),
+		styleValue.Render(m.profiles[m.activeCursor].name)))
 	sb.WriteString(fmt.Sprintf("%s      %s\n",
 		styleLabel.Render("Save path:"),
 		styleDim.Render(truncatePath(savePath, iw-12))))
 	sb.WriteString("\n")
 
-	help := "ENTER save and continue · Q cancel · ESC back"
+	help := "ENTER save · Q cancel · ESC back"
 	sb.WriteString(styleWizHelp.Render(help))
 
 	return styleWizBorder.Width(m.width - 4).Render(sb.String())
@@ -768,8 +878,6 @@ func truncatePath(p string, maxLen int) string {
 // ============================================================
 
 // RunDiscover starts the interactive discovery wizard.
-// On success the config is written to cfgSavePath and a summary is printed.
-// cfgSavePath may be empty; the model will derive the default path.
 func RunDiscover(cfg *config.Config, cfgSavePath string) error {
 	m := NewDiscoverModel(cfg, cfgSavePath)
 	p := tea.NewProgram(m, tea.WithAltScreen())
@@ -784,7 +892,6 @@ func RunDiscover(cfg *config.Config, cfgSavePath string) error {
 	if final.Error() != nil {
 		return final.Error()
 	}
-	// Print post-save summary to stdout.
 	printDiscoverSummary(final)
 	return nil
 }
