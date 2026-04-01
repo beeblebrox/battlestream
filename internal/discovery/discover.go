@@ -71,6 +71,7 @@ func searchRoots() []string {
 		roots = append(roots, wineRoots(home)...)
 		roots = append(roots, protonRoots(home)...)
 		roots = append(roots, filepath.Join(home, ".var", "app"))
+		roots = append(roots, linuxExtraRoots(home)...)
 		return roots
 	}
 }
