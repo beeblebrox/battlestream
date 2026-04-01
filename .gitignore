@@ -42,6 +42,10 @@ Thumbs.db
 # Config with secrets
 config.yaml
 
+# GitHub App private keys (never commit)
+*.pem
+.github-app-key.pem
+
 # Claude Code local settings
 .claude/settings.local.json
 .claude/plans/
