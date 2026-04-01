@@ -15,6 +15,7 @@ This document defines the standard workflow all developers, UI engineers, and QA
 5. **`main` is always releasable.** Only clean, tested, QA-approved code lands on `main`.
 6. **Bug fixes must include a regression test.** Every bug fix must be accompanied by a test that reproduces the original failure and passes after the fix. This prevents the same bug from regressing silently.
 7. **QA-ready issues must be assigned to the QA engineer.** When a task is ready for review, set the Paperclip issue status to `in_review` and **assign it to the QA agent**. Do not leave it assigned to yourself. QA will not pick up tasks that are not explicitly assigned to them.
+8. **QA failures must be reassigned to the developer — comments are not enough.** When QA finds bugs, they MUST: (a) set status to `in_progress`, (b) reassign to the developer, (c) post a bug report comment. A comment saying "ready for dev" without a reassignment and status change is a protocol violation — developers only see tasks assigned to them. Work left in a comment is lost work.
 
 ---
 
@@ -86,8 +87,8 @@ QA agent:
    ```
 3. Runs the full validation suite.
 4. Records results in a Paperclip comment on the issue.
-5. **Pass** → marks issue `done`, notifies developer.
-6. **Fail** → sets issue back to `in_progress`, assigns to developer with a clear bug report.
+5. **Pass** → merge to `main`, clean up worktree, mark issue `done`.
+6. **Fail** → **immediately**: set status to `in_progress`, reassign to the developer, post a bug report comment explaining what failed and what needs to be fixed. Do NOT leave a comment and walk away — the status change + reassignment is what notifies the developer. A bare comment is invisible to them.
 
 ### 5. Merging to `main`
 
@@ -129,6 +130,7 @@ Once QA passes:
 - Do not mark a task `done` in Paperclip before QA has signed off.
 - Do not submit a bug fix without a regression test — QA will reject it.
 - Do not leave a QA-ready task assigned to yourself — it must be reassigned to the QA engineer with status `in_review`.
+- Do not post "ready for dev" in a comment without also reassigning the issue to the developer and setting status to `in_progress`. Comments without assignment changes are invisible to the developer — the work will be lost.
 
 ---
 
