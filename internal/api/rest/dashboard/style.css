@@ -533,6 +533,65 @@ main {
   }
 }
 
+/* Win/Loss breakdown panel */
+.winloss-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem 1rem;
+  margin-bottom: 1.5rem;
+  display: flex;
+  gap: 1.5rem;
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+
+.winloss-panel .wl-label {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.25rem;
+  font-weight: 600;
+}
+
+.winloss-panel .wl-row {
+  display: flex;
+  gap: 1.25rem;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.winloss-panel .wl-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.winloss-panel .wl-stat .wl-val {
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.winloss-panel .wl-stat .wl-name {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.winloss-panel .wl-divider {
+  width: 1px;
+  background: var(--border);
+  align-self: stretch;
+  flex-shrink: 0;
+}
+
+.winloss-panel .wl-section {
+  flex: 1;
+  min-width: 200px;
+}
+
 /* Scrollbar polish */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: var(--bg); }

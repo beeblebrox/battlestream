@@ -763,6 +763,72 @@ function updatePartnerStats(fullGames) {
 }
 
 // ============================================================================
+// 7b. Win/Loss Breakdown Panel
+// ============================================================================
+
+function renderWinLossPanel(metas, fullGames) {
+  const el = document.getElementById('winloss-panel');
+  if (!el) return;
+  if (!metas || metas.length === 0) { el.innerHTML = ''; return; }
+
+  const wins = metas.filter((g) => isWin(g.placement || 0, g.is_duos));
+  const losses = metas.filter((g) => !isWin(g.placement || 0, g.is_duos));
+  if (wins.length === 0 && losses.length === 0) { el.innerHTML = ''; return; }
+
+  function stats(games) {
+    if (games.length === 0) return null;
+    let totalPlacement = 0, totalTier = 0, totalTriples = 0, totalDuration = 0;
+    let tierCount = 0, triplesCount = 0, durationCount = 0;
+    for (const g of games) {
+      totalPlacement += g.placement || 0;
+      const dur = (g.end_time_unix && g.start_time_unix && g.end_time_unix > g.start_time_unix)
+        ? g.end_time_unix - g.start_time_unix : 0;
+      if (dur > 0) { totalDuration += dur; durationCount++; }
+      const full = fullGames?.get(g.game_id);
+      if (full) {
+        const tier = full.tavern_tier || full.player?.tavern_tier;
+        if (tier) { totalTier += tier; tierCount++; }
+        const triples = full.player?.triple_count;
+        if (triples != null) { totalTriples += triples; triplesCount++; }
+      }
+    }
+    return {
+      count: games.length,
+      avgPlacement: (totalPlacement / games.length).toFixed(2),
+      avgTier: tierCount > 0 ? (totalTier / tierCount).toFixed(1) : null,
+      avgTriples: triplesCount > 0 ? (totalTriples / triplesCount).toFixed(1) : null,
+      avgDuration: durationCount > 0 ? Math.round(totalDuration / durationCount / 60) : null,
+    };
+  }
+
+  function section(label, color, s) {
+    if (!s) return '';
+    const statHtml = [
+      { val: s.avgPlacement, name: 'avg place' },
+      s.avgTier != null ? { val: `T${s.avgTier}`, name: 'avg tier' } : null,
+      s.avgTriples != null ? { val: s.avgTriples, name: 'avg 3x' } : null,
+      s.avgDuration != null ? { val: `${s.avgDuration}m`, name: 'avg dur' } : null,
+    ].filter(Boolean).map((st) =>
+      `<div class="wl-stat"><div class="wl-val">${st.val}</div><div class="wl-name">${st.name}</div></div>`
+    ).join('');
+    return `<div class="wl-section">
+      <div class="wl-label" style="color:${color};">${label} <span style="color:var(--text-muted);font-weight:400;">(${s.count})</span></div>
+      <div class="wl-row">${statHtml}</div>
+    </div>`;
+  }
+
+  const wStats = stats(wins);
+  const lStats = stats(losses);
+  const hasBoth = wStats && lStats;
+
+  el.innerHTML = `<div class="winloss-panel">
+    ${section('Wins', WIN_COLOR, wStats)}
+    ${hasBoth ? '<div class="wl-divider"></div>' : ''}
+    ${section('Losses', LOSS_COLOR, lStats)}
+  </div>`;
+}
+
+// ============================================================================
 // 8. Level 1 Charts — Meta-based (fast)
 // ============================================================================
 
@@ -1250,6 +1316,27 @@ function renderHeroPerfInner(games, variant) {
       label: { show: true, position: 'right', formatter: (p) => `${p.data.value} (${entries[p.dataIndex].count}g)`, color: '#ccc', fontSize: 11 },
     }],
   }, true);
+
+  // Click a hero bar to filter the Recent Games table to that hero (click again to clear).
+  // In paired mode, label is "PlayerHero / PartnerHero" — use only the player-hero portion.
+  chart.off('click');
+  chart.on('click', (params) => {
+    if (params.componentType !== 'series') return;
+    const label = entries[params.dataIndex]?.name;
+    if (!label) return;
+    const heroName = label.split(' / ')[0].trim();
+    const current = _recentHeroFilter.toLowerCase().trim();
+    if (current === heroName.toLowerCase()) {
+      filterRecentByHero('');
+      const inp = document.getElementById('recent-hero-filter');
+      if (inp) inp.value = '';
+    } else {
+      filterRecentByHero(heroName);
+      const inp = document.getElementById('recent-hero-filter');
+      if (inp) inp.value = heroName;
+      document.getElementById('recent-games-table')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  });
 }
 
 function renderTavernTier(games) {
@@ -2929,6 +3016,9 @@ async function renderLevel1() {
     renderSummaryCards(computeAgg(State.games));
   }
   updatePartnerStats(filtered);
+
+  // Win/Loss breakdown panel (needs full games for tier/triples)
+  renderWinLossPanel(State.games, State.fullGames);
 
   // Duration uses metas (has timestamps)
   renderDuration(State.games);
