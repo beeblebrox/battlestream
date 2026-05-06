@@ -1,5 +1,4 @@
 import type { ClientConfig, GameState } from './types.js';
-import { store } from './state.js';
 
 interface EventSourceInstance {
   readyState: number;
@@ -91,15 +90,12 @@ export class BattlestreamClient {
     try {
       const res = await fetchFn(`${this.baseUrl()}/v1/game/current`, { headers });
       if (!res.ok) {
-        store.setState(null);
         this.options.onState?.(null);
         return;
       }
       const state = (await res.json()) as GameState;
-      store.setState(state);
       this.options.onState?.(state);
     } catch {
-      store.setState(null);
       this.options.onState?.(null);
     }
   }
