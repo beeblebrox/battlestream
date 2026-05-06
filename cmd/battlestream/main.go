@@ -351,7 +351,7 @@ func startDaemon(ctx context.Context, cfg *config.Config, profile *config.Profil
 }
 
 func cmdDaemon() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "daemon",
 		Short: "Start the battlestream background service",
 		Long:  "Starts gRPC + REST + WebSocket servers, tails HS logs, and writes stat files.",
@@ -361,6 +361,15 @@ func cmdDaemon() *cobra.Command {
 				return fmt.Errorf("loading config: %w", err)
 			}
 			setupLogging(cfg.Logging)
+
+			// BS_NO_AUTH=true env var disables API key checking.
+			if os.Getenv("BS_NO_AUTH") == "true" {
+				cfg.API.APIKey = ""
+			}
+			// --no-auth flag overrides any configured API key (takes precedence over env var).
+			if noAuth, _ := cmd.Flags().GetBool("no-auth"); noAuth {
+				cfg.API.APIKey = ""
+			}
 
 			profile, err := cfg.GetProfile(profileFlag)
 			if err != nil {
@@ -393,6 +402,8 @@ func cmdDaemon() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().Bool("no-auth", false, "Accept all requests without checking the API key (for local plugin use)")
+	return cmd
 }
 
 // --- run ---

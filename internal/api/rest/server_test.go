@@ -2,6 +2,8 @@ package rest
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -136,6 +138,33 @@ func TestGameStateToJSON_AllFields(t *testing.T) {
 	}
 	if len(ob) != 1 {
 		t.Errorf("expected 1 opponent_board minion, got %d", len(ob))
+	}
+}
+
+func TestWithAuth_EmptyKey_AllowsAllRequests(t *testing.T) {
+	// Server with empty key already bypasses auth — this is the --no-auth path.
+	s := New(nil, "")
+	handler := s.withAuth(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	req := httptest.NewRequest("GET", "/", nil) // no Authorization header
+	rw := httptest.NewRecorder()
+	handler(rw, req)
+	if rw.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d", rw.Code)
+	}
+}
+
+func TestWithAuth_NonEmptyKey_RejectsUnauthenticated(t *testing.T) {
+	s := New(nil, "secret")
+	handler := s.withAuth(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	req := httptest.NewRequest("GET", "/", nil)
+	rw := httptest.NewRecorder()
+	handler(rw, req)
+	if rw.Code != http.StatusUnauthorized {
+		t.Fatalf("want 401, got %d", rw.Code)
 	}
 }
 
