@@ -131,12 +131,11 @@ jobs:
           TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           git clone "https://x-access-token:${TAP_TOKEN}@github.com/beeblebrox/homebrew-tap.git" tap
-          mkdir -p tap/Formula
-          cp battlestream-source.rb tap/Formula/battlestream-source.rb
+          cp battlestream-source.rb tap/battlestream-source.rb
           cd tap
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/battlestream-source.rb
+          git add battlestream-source.rb
           git diff --cached --quiet && echo "No changes" && exit 0
           git commit -m "Update battlestream-source formula to ${{ steps.tag.outputs.tag }}"
           git push
