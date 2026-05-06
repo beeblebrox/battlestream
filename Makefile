@@ -16,6 +16,7 @@ gen-profiles:
 	cd streamdeck-plugin && node scripts/gen-profiles.mjs
 
 install-plugin: build-plugin
+	@pkill -f "plugin\.js.*com\.battlestream\.streamdeck\.sdPlugin" 2>/dev/null || true
 	rm -rf "$(OPENDECK_PLUGINS)/com.battlestream.streamdeck.sdPlugin"
 	cp -r streamdeck-plugin/dist/com.battlestream.streamdeck.sdPlugin "$(OPENDECK_PLUGINS)/"
 	@for dir in "$(OPENDECK_PROFILES)"/sd-*/; do \
