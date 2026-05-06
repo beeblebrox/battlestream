@@ -160,11 +160,22 @@ func TestWithAuth_NonEmptyKey_RejectsUnauthenticated(t *testing.T) {
 	handler := s.withAuth(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
+
+	// No token — should be rejected.
 	req := httptest.NewRequest("GET", "/", nil)
 	rw := httptest.NewRecorder()
 	handler(rw, req)
 	if rw.Code != http.StatusUnauthorized {
 		t.Fatalf("want 401, got %d", rw.Code)
+	}
+
+	// Correct token — should pass through.
+	req2 := httptest.NewRequest("GET", "/", nil)
+	req2.Header.Set("Authorization", "Bearer secret")
+	rw2 := httptest.NewRecorder()
+	handler(rw2, req2)
+	if rw2.Code != http.StatusOK {
+		t.Fatalf("want 200 with correct token, got %d", rw2.Code)
 	}
 }
 

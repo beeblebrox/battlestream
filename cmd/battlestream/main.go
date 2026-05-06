@@ -362,12 +362,14 @@ func cmdDaemon() *cobra.Command {
 			}
 			setupLogging(cfg.Logging)
 
-			// BS_NO_AUTH=true env var disables API key checking.
-			if os.Getenv("BS_NO_AUTH") == "true" {
-				cfg.API.APIKey = ""
-			}
-			// --no-auth flag overrides any configured API key (takes precedence over env var).
-			if noAuth, _ := cmd.Flags().GetBool("no-auth"); noAuth {
+			// Flag > env var > config: explicit --no-auth flag always wins; fall back to
+			// BS_NO_AUTH env var only when the flag was not explicitly set by the caller.
+			if flagSet := cmd.Flags().Changed("no-auth"); flagSet {
+				if noAuth, _ := cmd.Flags().GetBool("no-auth"); noAuth {
+					cfg.API.APIKey = ""
+				}
+				// flag explicitly set to false — ignore env var
+			} else if os.Getenv("BS_NO_AUTH") == "true" {
 				cfg.API.APIKey = ""
 			}
 
