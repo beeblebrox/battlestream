@@ -1,28 +1,38 @@
 # Bundled Profiles
 
-These `.sdProfile` directories are bundled with the plugin so users can switch to
-a curated full-panel layout by pressing the Auto-Layout button.
+Pre-built layouts for all four Stream Deck device sizes. The Auto-Layout button uses
+these to fill the whole panel with Battlestream stat actions in one press.
 
-## How to generate
+## Layouts
 
-1. Build and install the plugin: `make build-plugin`, then double-click
-   `dist/com.battlestream.streamdeck.sdPlugin` (macOS) or drag it into Stream Deck (Windows).
-2. In Stream Deck software, open the profile you want to edit.
-3. Drag each stat action from the Battlestream category onto the desired key.
-4. File → Export Profile → save to `streamdeck-plugin/profiles/<Name>.sdProfile`.
-5. Repeat for each device type:
-   - **Battlestream Standard** — 5×3 layout, all 15 core stat actions
-   - **Battlestream XL** — 8×4 layout, all 15 core + 4 XL bonus actions
-   - **Battlestream Mini** — 3×2 layout, 6 essential stats (Health, Tier, Gold, Turn, Triples, Phase)
-   - **Battlestream Plus** — 4×3 layout, 12 stat actions
+| File | Device | Grid | Actions |
+|---|---|---|---|
+| `Battlestream XL.json` | Stream Deck XL (8×4) | 32 keys | All 20 (4 slots empty) |
+| `Battlestream Standard.json` | Stream Deck (5×3) | 15 keys | 15 core stats |
+| `Battlestream Mini.json` | Stream Deck Mini (3×2) | 6 keys | Health, Tier, Gold, Turn, Triples, Phase |
+| `Battlestream Plus.json` | Stream Deck + (4×3) | 12 keys | 12 core stats |
 
-6. Commit the exported `.sdProfile` directories.
+## Regenerating
 
-## Device type codes (manifest.json reference)
+```bash
+cd streamdeck-plugin
+node scripts/gen-profiles.mjs
+```
 
-| DeviceType | Device |
-|---|---|
-| 0 | Stream Deck (5×3) |
-| 1 | Stream Deck Mini (3×2) |
-| 2 | Stream Deck XL (8×4) |
-| 7 | Stream Deck + (4×3) |
+## Installing (OpenDeck on Linux)
+
+`make install-plugin` copies the plugin **and** all four profiles to OpenDeck automatically:
+
+```
+make install-plugin
+```
+
+Profiles land in every `sd-*` device directory under
+`~/.var/app/me.amankhanna.opendeck/config/opendeck/profiles/`.
+Restart OpenDeck to pick them up.
+
+## Official Stream Deck software (macOS / Windows)
+
+The `.sdProfile` directories alongside the JSON files are stubs for the official SDK's
+`switchToProfile()` mechanism. To populate them for official Stream Deck software, export
+profiles manually from the Stream Deck app and replace the stubs.
