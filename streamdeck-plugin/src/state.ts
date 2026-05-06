@@ -4,6 +4,7 @@ type Subscriber = (state: GameState | null) => void;
 
 class StateStore {
   private state: GameState | null = null;
+  private stateKey: string | null = null;
   private settings: GlobalSettings = { host: '127.0.0.1', port: 8080, apiKey: '' };
   private subscribers = new Set<Subscriber>();
 
@@ -12,6 +13,9 @@ class StateStore {
   }
 
   setState(state: GameState | null): void {
+    const key = state === null ? null : JSON.stringify(state);
+    if (key === this.stateKey) return;
+    this.stateKey = key;
     this.state = state;
     for (const sub of this.subscribers) {
       sub(state);

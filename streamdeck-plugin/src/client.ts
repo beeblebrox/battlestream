@@ -18,7 +18,7 @@ interface ClientOptions {
 
 const BACKOFF_INITIAL = 500;
 const BACKOFF_MAX = 30_000;
-const POLL_INTERVAL = 2_000;
+const POLL_INTERVAL = 5_000;
 
 export class BattlestreamClient {
   private config: ClientConfig;

@@ -15,13 +15,14 @@ export abstract class BaseStat extends SingletonAction<Record<string, never>> {
 
   private readonly contexts = new Set<ImageSettable>();
   private unsub?: () => void;
+  private lastRenderKey = '';
 
   override async onWillAppear({ action }: WillAppearEvent<Record<string, never>>): Promise<void> {
     if (this.contexts.size === 0) {
       this.unsub = store.subscribe(state => void this.updateAll(state));
     }
     this.contexts.add(action as unknown as ImageSettable);
-    await this.renderOne(action as unknown as ImageSettable, store.getState());
+    await this.renderOne(action as unknown as ImageSettable, store.getState(), true);
   }
 
   override async onWillDisappear({ action }: WillDisappearEvent<Record<string, never>>): Promise<void> {
@@ -38,10 +39,10 @@ export abstract class BaseStat extends SingletonAction<Record<string, never>> {
   }
 
   private async updateAll(state: GameState | null): Promise<void> {
-    await Promise.all([...this.contexts].map(a => this.renderOne(a, state)));
+    await Promise.all([...this.contexts].map(a => this.renderOne(a, state, false)));
   }
 
-  private async renderOne(action: ImageSettable, state: GameState | null): Promise<void> {
+  private async renderOne(action: ImageSettable, state: GameState | null, force: boolean): Promise<void> {
     let value: string;
     let subtitle: string;
     if (state === null) {
@@ -53,6 +54,9 @@ export abstract class BaseStat extends SingletonAction<Record<string, never>> {
         value = 'ERR'; subtitle = '';
       }
     }
+    const key = `${value}|${subtitle}|${state === null}`;
+    if (!force && key === this.lastRenderKey) return;
+    this.lastRenderKey = key;
     const image = renderButton({
       label: this.label,
       value,
