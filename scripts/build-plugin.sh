@@ -16,4 +16,12 @@ mkdir -p "$BIN_MODULES"
 cp -r node_modules/@napi-rs "$BIN_MODULES/"
 cp -r node_modules/ws "$BIN_MODULES/"
 
-echo "Plugin built at: $DIST"
+# Zip for distribution (e.g. GitHub releases)
+ZIPFILE="$PLUGIN_DIR/dist/battlestream-streamdeck.zip"
+rm -f "$ZIPFILE"
+cd "$PLUGIN_DIR/dist"
+zip -r "$ZIPFILE" com.battlestream.streamdeck.sdPlugin
+cd "$PLUGIN_DIR"
+
+echo "Plugin built at:  $DIST"
+echo "Release zip:      $ZIPFILE"
