@@ -1,11 +1,10 @@
-import { SingletonAction, type WillAppearEvent, type WillDisappearEvent, type PropertyInspectorDidAppearEvent } from '@elgato/streamdeck';
+import { SingletonAction, type WillAppearEvent, type WillDisappearEvent } from '@elgato/streamdeck';
 import { store } from '../state.js';
 import { renderButton } from '../render.js';
 import type { GameState } from '../types.js';
 
 interface ImageSettable {
   setImage(image: string): Promise<void>;
-  sendToPropertyInspector(payload: unknown): Promise<void>;
   id?: string;
 }
 
@@ -36,10 +35,6 @@ export abstract class BaseStat extends SingletonAction<Record<string, never>> {
       this.unsub?.();
       this.unsub = undefined;
     }
-  }
-
-  override async onPropertyInspectorDidAppear({ action }: PropertyInspectorDidAppearEvent<Record<string, never>>): Promise<void> {
-    await (action as unknown as ImageSettable).sendToPropertyInspector(store.getSettings());
   }
 
   private async updateAll(state: GameState | null): Promise<void> {
