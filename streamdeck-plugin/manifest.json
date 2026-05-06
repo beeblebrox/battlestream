@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
+  "SDKVersion": 3,
+  "Version": "1.0.0.0",
+  "Name": "Battlestream",
+  "Author": "battlestream",
+  "Description": "Live Hearthstone Battlegrounds stats on your Stream Deck.",
+  "Category": "Battlestream",
+  "CategoryIcon": "imgs/category",
+  "CodePath": "bin/plugin.js",
+  "Icon": "imgs/plugin-icon",
+  "UUID": "com.battlestream.streamdeck",
+  "OS": [
+    { "Platform": "mac", "MinimumVersion": "10.15" },
+    { "Platform": "windows", "MinimumVersion": "10" }
+  ],
+  "Software": { "MinimumVersion": "7.1" },
+  "Nodejs": { "Version": "24", "Debug": "enabled" },
+  "PropertyInspectorPath": "ui/global-settings.html",
+  "Profiles": [
+    { "Name": "Battlestream Standard", "DeviceType": 0, "ReadOnly": false, "DontAutoSwitchWhenInstalled": false },
+    { "Name": "Battlestream XL",       "DeviceType": 2, "ReadOnly": false, "DontAutoSwitchWhenInstalled": false },
+    { "Name": "Battlestream Mini",     "DeviceType": 1, "ReadOnly": false, "DontAutoSwitchWhenInstalled": false },
+    { "Name": "Battlestream Plus",     "DeviceType": 7, "ReadOnly": false, "DontAutoSwitchWhenInstalled": false }
+  ],
+  "Actions": [
+    { "UUID": "com.battlestream.streamdeck.health",           "Name": "Health",           "Icon": "imgs/actions/health",           "Controllers": ["Keypad"], "States": [{"Image": "imgs/actions/health"}] },
+    { "UUID": "com.battlestream.streamdeck.armor",            "Name": "Armor",            "Icon": "imgs/actions/armor",            "Controllers": ["Keypad"], "States": [{"Image": "imgs/actions/armor"}] },
+    { "UUID": "com.battlestream.streamdeck.tavern-tier",      "Name": "Tavern Tier",      "Icon": "imgs/actions/tavern-tier",      "Controllers": ["Keypad"], "States": [{"Image": "imgs/actions/tavern-tier"}] },
+    { "UUID": "com.battlestream.streamdeck.gold",             "Name": "Gold",             "Icon": "imgs/actions/gold",             "Controllers": ["Keypad"], "States": [{"Image": "imgs/actions/gold"}] },
+    { "UUID": "com.battlestream.streamdeck.triples",          "Name": "Triples",          "Icon": "imgs/actions/triples",          "Controllers": ["Keypad"], "States": [{"Image": "imgs/actions/triples"}] },
+    { "UUID": "com.battlestream.streamdeck.win-streak",       "Name": "Win Streak",       "Icon": "imgs/actions/win-streak",       "Controllers": ["Keypad"], "States": [{"Image": "imgs/actions/win-streak"}] },
+    { "UUID": "com.battlestream.streamdeck.loss-streak",      "Name": "Loss Streak",      "Icon": "imgs/actions/loss-streak",      "Controllers": ["Keypad"], "States": [{"Image": "imgs/actions/loss-streak"}] },
+    { "UUID": "com.battlestream.streamdeck.placement",        "Name": "Placement",        "Icon": "imgs/actions/placement",        "Controllers": ["Keypad"], "States": [{"Image": "imgs/actions/placement"}] },
+    { "UUID": "com.battlestream.streamdeck.spell-power",      "Name": "Spell Power",      "Icon": "imgs/actions/spell-power",      "Controllers": ["Keypad"], "States": [{"Image": "imgs/actions/spell-power"}] },
+    { "UUID": "com.battlestream.streamdeck.turn",             "Name": "Turn",             "Icon": "imgs/actions/turn",             "Controllers": ["Keypad"], "States": [{"Image": "imgs/actions/turn"}] },
+    { "UUID": "com.battlestream.streamdeck.phase",            "Name": "Phase",            "Icon": "imgs/actions/phase",            "Controllers": ["Keypad"], "States": [{"Image": "imgs/actions/phase"}] },
+    { "UUID": "com.battlestream.streamdeck.minion-count",     "Name": "Minion Count",     "Icon": "imgs/actions/minion-count",     "Controllers": ["Keypad"], "States": [{"Image": "imgs/actions/minion-count"}] },
+    { "UUID": "com.battlestream.streamdeck.buff-atk",         "Name": "Buff ATK",         "Icon": "imgs/actions/buff-atk",         "Controllers": ["Keypad"], "States": [{"Image": "imgs/actions/buff-atk"}] },
+    { "UUID": "com.battlestream.streamdeck.buff-hp",          "Name": "Buff HP",          "Icon": "imgs/actions/buff-hp",          "Controllers": ["Keypad"], "States": [{"Image": "imgs/actions/buff-hp"}] },
+    { "UUID": "com.battlestream.streamdeck.anomaly",          "Name": "Anomaly",          "Icon": "imgs/actions/anomaly",          "Controllers": ["Keypad"], "States": [{"Image": "imgs/actions/anomaly"}] },
+    { "UUID": "com.battlestream.streamdeck.bloodgem-buff",    "Name": "Bloodgem Buff",    "Icon": "imgs/actions/bloodgem-buff",    "Controllers": ["Keypad"], "States": [{"Image": "imgs/actions/bloodgem-buff"}] },
+    { "UUID": "com.battlestream.streamdeck.elemental-buff",   "Name": "Elemental Buff",   "Icon": "imgs/actions/elemental-buff",   "Controllers": ["Keypad"], "States": [{"Image": "imgs/actions/elemental-buff"}] },
+    { "UUID": "com.battlestream.streamdeck.spellcraft",       "Name": "Spellcraft",       "Icon": "imgs/actions/spellcraft",       "Controllers": ["Keypad"], "States": [{"Image": "imgs/actions/spellcraft"}] },
+    { "UUID": "com.battlestream.streamdeck.tavern-spell-buff","Name": "Tavern Spell Buff","Icon": "imgs/actions/tavern-spell-buff","Controllers": ["Keypad"], "States": [{"Image": "imgs/actions/tavern-spell-buff"}] },
+    { "UUID": "com.battlestream.streamdeck.auto-layout",      "Name": "Auto-Layout",      "Icon": "imgs/actions/auto-layout",      "Controllers": ["Keypad"], "States": [{"Image": "imgs/actions/auto-layout"}] }
+  ]
+}
