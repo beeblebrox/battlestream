@@ -1,4 +1,5 @@
 import streamDeck from '@elgato/streamdeck';
+import { EventSource } from 'eventsource';
 import { BattlestreamClient } from './client.js';
 import { store } from './state.js';
 import type { GlobalSettings } from './types.js';
@@ -45,20 +46,23 @@ streamDeck.actions.registerAction(new SpellcraftAction());
 streamDeck.actions.registerAction(new TavernSpellBuffAction());
 streamDeck.actions.registerAction(new AutoLayoutAction());
 
-let client = new BattlestreamClient(
-  { host: '127.0.0.1', port: 8080, apiKey: '' },
-  { onState: state => store.setState(state) },
-);
+function makeClient(host: string, port: number, apiKey: string): BattlestreamClient {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return new BattlestreamClient(
+    { host, port, apiKey },
+    { onState: state => store.setState(state), EventSourceImpl: EventSource as any },
+  );
+}
+
+let client = makeClient('127.0.0.1', 8080, '');
 client.connect();
 
 function applySettings(settings: GlobalSettings): void {
-  const config = {
-    host: settings.host?.trim() || '127.0.0.1',
-    port: settings.port ?? 8080,
-    apiKey: settings.apiKey ?? '',
-  };
+  const host = settings.host?.trim() || '127.0.0.1';
+  const port = settings.port ?? 8080;
+  const apiKey = settings.apiKey ?? '';
   client.disconnect();
-  client = new BattlestreamClient(config, { onState: state => store.setState(state) });
+  client = makeClient(host, port, apiKey);
   client.connect();
 }
 
@@ -66,4 +70,6 @@ streamDeck.settings.onDidReceiveGlobalSettings(({ settings }) => {
   applySettings(settings as GlobalSettings);
 });
 
-streamDeck.connect();
+streamDeck.connect().then(() => {
+  streamDeck.settings.getGlobalSettings();
+});
