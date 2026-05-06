@@ -52,6 +52,14 @@
 
       ws.onmessage = function(evt) {
         const msg = JSON.parse(evt.data);
+        // Plugin pushes current settings when PI opens (sendToPropertyInspector)
+        if (msg.event === 'sendToPropertyInspector') {
+          const s = msg.payload || {};
+          document.getElementById('host').value = s.host || '127.0.0.1';
+          document.getElementById('port').value = s.port || 8080;
+          document.getElementById('apiKey').value = s.apiKey || '';
+        }
+        // Also handle didReceiveGlobalSettings as fallback
         if (msg.event === 'didReceiveGlobalSettings') {
           const s = msg.payload.settings || {};
           document.getElementById('host').value = s.host || '127.0.0.1';

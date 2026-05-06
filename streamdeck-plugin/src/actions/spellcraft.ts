@@ -7,7 +7,7 @@ export class SpellcraftAction extends BaseStat {
   label = 'SPELLCRAFT';
   gradient = ['#2a0030', '#9b59b6'] as const;
   extract(s: GameState) {
-    const ac = s.ability_counters.find(a => a.category === 'NAGA_SPELLS');
+    const ac = (s.ability_counters ?? []).find(a => a.category === 'NAGA_SPELLS');
     return { value: ac ? String(ac.value) : '0', subtitle: '' };
   }
 }

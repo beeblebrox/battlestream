@@ -1,10 +1,11 @@
-import { SingletonAction, type WillAppearEvent, type WillDisappearEvent } from '@elgato/streamdeck';
+import { SingletonAction, type WillAppearEvent, type WillDisappearEvent, type PropertyInspectorDidAppearEvent } from '@elgato/streamdeck';
 import { store } from '../state.js';
 import { renderButton } from '../render.js';
 import type { GameState } from '../types.js';
 
 interface ImageSettable {
   setImage(image: string): Promise<void>;
+  sendToPropertyInspector(payload: unknown): Promise<void>;
   id?: string;
 }
 
@@ -25,7 +26,6 @@ export abstract class BaseStat extends SingletonAction<Record<string, never>> {
   }
 
   override async onWillDisappear({ action }: WillDisappearEvent<Record<string, never>>): Promise<void> {
-    // Match by identity — find the context that refers to the same action id
     for (const ctx of this.contexts) {
       if ((ctx as unknown as { id: string }).id === (action as unknown as { id: string }).id) {
         this.contexts.delete(ctx);
@@ -38,14 +38,26 @@ export abstract class BaseStat extends SingletonAction<Record<string, never>> {
     }
   }
 
+  override async onPropertyInspectorDidAppear({ action }: PropertyInspectorDidAppearEvent<Record<string, never>>): Promise<void> {
+    await (action as unknown as ImageSettable).sendToPropertyInspector(store.getSettings());
+  }
+
   private async updateAll(state: GameState | null): Promise<void> {
     await Promise.all([...this.contexts].map(a => this.renderOne(a, state)));
   }
 
   private async renderOne(action: ImageSettable, state: GameState | null): Promise<void> {
-    const { value, subtitle } = state
-      ? this.extract(state)
-      : { value: '—', subtitle: 'OFFLINE' };
+    let value: string;
+    let subtitle: string;
+    if (state === null) {
+      value = '—'; subtitle = 'OFFLINE';
+    } else {
+      try {
+        ({ value, subtitle } = this.extract(state));
+      } catch {
+        value = 'ERR'; subtitle = '';
+      }
+    }
     const image = renderButton({
       label: this.label,
       value,

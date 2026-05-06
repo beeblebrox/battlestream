@@ -61,6 +61,7 @@ function applySettings(settings: GlobalSettings): void {
   const host = settings.host?.trim() || '127.0.0.1';
   const port = settings.port ?? 8080;
   const apiKey = settings.apiKey ?? '';
+  store.setSettings({ host, port, apiKey });
   client.disconnect();
   client = makeClient(host, port, apiKey);
   client.connect();
