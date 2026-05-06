@@ -1,0 +1,69 @@
+import streamDeck from '@elgato/streamdeck';
+import { BattlestreamClient } from './client.js';
+import { store } from './state.js';
+import type { GlobalSettings } from './types.js';
+
+import { HealthAction } from './actions/health.js';
+import { ArmorAction } from './actions/armor.js';
+import { TavernTierAction } from './actions/tavern-tier.js';
+import { GoldAction } from './actions/gold.js';
+import { TriplesAction } from './actions/triples.js';
+import { WinStreakAction } from './actions/win-streak.js';
+import { LossStreakAction } from './actions/loss-streak.js';
+import { PlacementAction } from './actions/placement.js';
+import { SpellPowerAction } from './actions/spell-power.js';
+import { TurnAction } from './actions/turn.js';
+import { PhaseAction } from './actions/phase.js';
+import { MinionCountAction } from './actions/minion-count.js';
+import { BuffAtkAction } from './actions/buff-atk.js';
+import { BuffHpAction } from './actions/buff-hp.js';
+import { AnomalyAction } from './actions/anomaly.js';
+import { BloodgemBuffAction } from './actions/bloodgem-buff.js';
+import { ElementalBuffAction } from './actions/elemental-buff.js';
+import { SpellcraftAction } from './actions/spellcraft.js';
+import { TavernSpellBuffAction } from './actions/tavern-spell-buff.js';
+import { AutoLayoutAction } from './actions/auto-layout.js';
+
+streamDeck.actions.registerAction(new HealthAction());
+streamDeck.actions.registerAction(new ArmorAction());
+streamDeck.actions.registerAction(new TavernTierAction());
+streamDeck.actions.registerAction(new GoldAction());
+streamDeck.actions.registerAction(new TriplesAction());
+streamDeck.actions.registerAction(new WinStreakAction());
+streamDeck.actions.registerAction(new LossStreakAction());
+streamDeck.actions.registerAction(new PlacementAction());
+streamDeck.actions.registerAction(new SpellPowerAction());
+streamDeck.actions.registerAction(new TurnAction());
+streamDeck.actions.registerAction(new PhaseAction());
+streamDeck.actions.registerAction(new MinionCountAction());
+streamDeck.actions.registerAction(new BuffAtkAction());
+streamDeck.actions.registerAction(new BuffHpAction());
+streamDeck.actions.registerAction(new AnomalyAction());
+streamDeck.actions.registerAction(new BloodgemBuffAction());
+streamDeck.actions.registerAction(new ElementalBuffAction());
+streamDeck.actions.registerAction(new SpellcraftAction());
+streamDeck.actions.registerAction(new TavernSpellBuffAction());
+streamDeck.actions.registerAction(new AutoLayoutAction());
+
+let client = new BattlestreamClient(
+  { host: '127.0.0.1', port: 8080, apiKey: '' },
+  { onState: state => store.setState(state) },
+);
+client.connect();
+
+function applySettings(settings: GlobalSettings): void {
+  const config = {
+    host: settings.host?.trim() || '127.0.0.1',
+    port: settings.port ?? 8080,
+    apiKey: settings.apiKey ?? '',
+  };
+  client.disconnect();
+  client = new BattlestreamClient(config, { onState: state => store.setState(state) });
+  client.connect();
+}
+
+streamDeck.settings.onDidReceiveGlobalSettings(({ settings }) => {
+  applySettings(settings as GlobalSettings);
+});
+
+streamDeck.connect();
