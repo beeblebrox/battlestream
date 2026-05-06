@@ -43,6 +43,13 @@ jobs:
       - name: Install osslsigncode
         run: sudo apt-get install -y osslsigncode
 
+      - name: Set up Node.js (plugin build)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: streamdeck-plugin/package-lock.json
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
@@ -124,11 +131,12 @@ jobs:
           TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           git clone "https://x-access-token:${TAP_TOKEN}@github.com/beeblebrox/homebrew-tap.git" tap
-          cp battlestream-source.rb tap/battlestream-source.rb
+          mkdir -p tap/Formula
+          cp battlestream-source.rb tap/Formula/battlestream-source.rb
           cd tap
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add battlestream-source.rb
+          git add Formula/battlestream-source.rb
           git diff --cached --quiet && echo "No changes" && exit 0
           git commit -m "Update battlestream-source formula to ${{ steps.tag.outputs.tag }}"
           git push

@@ -5,6 +5,7 @@ project_name: battlestream
 before:
   hooks:
     - go mod tidy
+    - bash scripts/build-plugin.sh
 
 builds:
   - id: battlestream
@@ -36,7 +37,7 @@ universal_binaries:
     ids:
       - battlestream
     name_template: battlestream
-    replace: false
+    replace: true
 
 archives:
   - id: default
@@ -89,6 +90,8 @@ changelog:
       - Merge pull request
 
 release:
+  extra_files:
+    - glob: streamdeck-plugin/dist/battlestream-streamdeck.zip
   github:
     owner: beeblebrox
     name: battlestream

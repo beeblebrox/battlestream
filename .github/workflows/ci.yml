@@ -96,6 +96,13 @@ jobs:
         working-directory: streamdeck-plugin
         run: npm run build
 
+      - name: Upload plugin zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: battlestream-streamdeck-plugin
+          path: streamdeck-plugin/dist/battlestream-streamdeck.zip
+          retention-days: 7
+
   proto-check:
     name: Proto — generated files up to date
     runs-on: ubuntu-latest
