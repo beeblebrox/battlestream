@@ -18,6 +18,7 @@ interface ClientOptions {
 
 const BACKOFF_INITIAL = 500;
 const BACKOFF_MAX = 30_000;
+const POLL_INTERVAL = 2_000;
 
 export class BattlestreamClient {
   private config: ClientConfig;
@@ -25,6 +26,7 @@ export class BattlestreamClient {
   private es: EventSourceInstance | null = null;
   private backoff = BACKOFF_INITIAL;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
   private destroyed = false;
 
   constructor(config: ClientConfig, options: ClientOptions = {}) {
@@ -36,6 +38,7 @@ export class BattlestreamClient {
     this.destroyed = false;
     this.openSSE();
     this.fetchState();
+    this.pollTimer = setInterval(() => { void this.fetchState(); }, POLL_INTERVAL);
   }
 
   disconnect(): void {
@@ -43,6 +46,10 @@ export class BattlestreamClient {
     if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
+    }
+    if (this.pollTimer !== null) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
     }
     this.es?.close();
     this.es = null;
