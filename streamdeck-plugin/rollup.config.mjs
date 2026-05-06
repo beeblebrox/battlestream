@@ -11,10 +11,10 @@ export default {
     format: 'esm',
     sourcemap: true,
   },
-  external: ['@napi-rs/canvas'],
+  external: ['@napi-rs/canvas', 'ws'],
   plugins: [
     nodeResolve({ preferBuiltins: true }),
-    typescript({ tsconfig: './tsconfig.json' }),
+    typescript({ tsconfig: './tsconfig.json', declaration: false, declarationMap: false }),
     copy({
       targets: [
         { src: 'manifest.json', dest: DIST },

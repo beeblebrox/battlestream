@@ -66,6 +66,36 @@ jobs:
           version: v2.11.3
           args: --timeout=5m
 
+  plugin:
+    name: Stream Deck Plugin
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: streamdeck-plugin/package-lock.json
+
+      - name: Install dependencies
+        working-directory: streamdeck-plugin
+        run: npm ci
+
+      - name: Type-check
+        working-directory: streamdeck-plugin
+        run: npx tsc --noEmit
+
+      - name: Test
+        working-directory: streamdeck-plugin
+        run: npm test
+
+      - name: Build
+        working-directory: streamdeck-plugin
+        run: npm run build
+
   proto-check:
     name: Proto — generated files up to date
     runs-on: ubuntu-latest
