@@ -159,9 +159,9 @@ jobs:
   proto-breaking:
     name: Proto — breaking change check
     runs-on: ubuntu-latest
-    # Non-blocking: buf BSR dep resolution is unreliable in this CI env.
-    # The job still runs for visibility; actual breaking changes would be visible in logs.
-    # TODO: commit buf.lock once buf is available locally to unblock strict enforcement.
+    # Only meaningful on PRs: compares incoming changes against main.
+    # On push-to-main the branch IS main, so there's nothing to compare against.
+    if: github.event_name == 'pull_request'
     continue-on-error: true
 
     steps:
