@@ -21,7 +21,7 @@ install-plugin: build-plugin
 	cp -r streamdeck-plugin/dist/com.battlestream.streamdeck.sdPlugin "$(OPENDECK_PLUGINS)/"
 	@for dir in "$(OPENDECK_PROFILES)"/sd-*/; do \
 		[ -d "$$dir" ] || continue; \
-		cp streamdeck-plugin/profiles/Battlestream*.json "$$dir"; \
+		cp "streamdeck-plugin/profiles/Battle Stream"*.json "$$dir"; \
 		echo "Installed profiles to $$dir"; \
 	done
 	@echo "Done. Restart OpenDeck to pick up changes."

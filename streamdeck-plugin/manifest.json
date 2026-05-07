@@ -2,10 +2,10 @@
   "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
   "SDKVersion": 3,
   "Version": "1.0.0.0",
-  "Name": "Battlestream",
+  "Name": "Battle Stream",
   "Author": "battlestream",
   "Description": "Live Hearthstone Battlegrounds stats on your Stream Deck.",
-  "Category": "Battlestream",
+  "Category": "Battle Stream",
   "CategoryIcon": "imgs/category",
   "CodePath": "bin/plugin.js",
   "Icon": "imgs/plugin-icon",
@@ -18,10 +18,10 @@
   "Nodejs": { "Version": "24", "Debug": "enabled" },
   "PropertyInspectorPath": "ui/global-settings.html",
   "Profiles": [
-    { "Name": "Battlestream Standard", "DeviceType": 0, "ReadOnly": false, "DontAutoSwitchWhenInstalled": false },
-    { "Name": "Battlestream XL",       "DeviceType": 2, "ReadOnly": false, "DontAutoSwitchWhenInstalled": false },
-    { "Name": "Battlestream Mini",     "DeviceType": 1, "ReadOnly": false, "DontAutoSwitchWhenInstalled": false },
-    { "Name": "Battlestream Plus",     "DeviceType": 7, "ReadOnly": false, "DontAutoSwitchWhenInstalled": false }
+    { "Name": "Battle Stream Standard", "DeviceType": 0, "ReadOnly": false, "DontAutoSwitchWhenInstalled": false },
+    { "Name": "Battle Stream XL",       "DeviceType": 2, "ReadOnly": false, "DontAutoSwitchWhenInstalled": false },
+    { "Name": "Battle Stream Mini",     "DeviceType": 1, "ReadOnly": false, "DontAutoSwitchWhenInstalled": false },
+    { "Name": "Battle Stream Plus",     "DeviceType": 7, "ReadOnly": false, "DontAutoSwitchWhenInstalled": false }
   ],
   "Actions": [
     { "UUID": "com.battlestream.streamdeck.health",           "Name": "Health",           "Icon": "imgs/actions/health",           "Controllers": ["Keypad"], "States": [{"Image": "imgs/actions/health"}] },

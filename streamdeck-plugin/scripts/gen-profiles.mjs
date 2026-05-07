@@ -138,10 +138,10 @@ const plus = [
 mkdirSync(PROFILES_DIR, { recursive: true });
 
 const files = [
-  ['Battlestream XL.json',       profile(xl)],
-  ['Battlestream Standard.json', profile(std)],
-  ['Battlestream Mini.json',     profile(mini)],
-  ['Battlestream Plus.json',     profile(plus)],
+  ['Battle Stream XL.json',       profile(xl)],
+  ['Battle Stream Standard.json', profile(std)],
+  ['Battle Stream Mini.json',     profile(mini)],
+  ['Battle Stream Plus.json',     profile(plus)],
 ];
 
 for (const [name, content] of files) {
