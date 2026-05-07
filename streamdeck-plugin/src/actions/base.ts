@@ -1,11 +1,10 @@
 import { SingletonAction, type WillAppearEvent, type WillDisappearEvent } from '@elgato/streamdeck';
-import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { store } from '../state.js';
 import { renderButton } from '../render.js';
 import type { GameState } from '../types.js';
 
-const IMGS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'imgs', 'actions');
+const IMGS_DIR = path.resolve(process.cwd(), 'imgs', 'actions');
 
 interface ImageSettable {
   setImage(image: string): Promise<void>;

@@ -2,7 +2,7 @@ import { store } from '../../state.js';
 import type { GameState } from '../../types.js';
 
 jest.mock('../../render.js', () => ({
-  renderButton: jest.fn(() => 'data:image/png;base64,FAKE'),
+  renderButton: jest.fn(() => Promise.resolve('data:image/png;base64,FAKE')),
 }));
 jest.mock('@elgato/streamdeck', () => ({
   action: () => (cls: unknown) => cls,
