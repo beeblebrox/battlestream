@@ -172,8 +172,18 @@ jobs:
       - name: Set up buf
         uses: bufbuild/buf-setup-action@v1
 
-      - name: Resolve buf dependencies
-        run: buf dep update || buf mod update || true
+      - name: Fetch main and inject buf.lock for dep resolution
+        run: |
+          git fetch origin main:main
+          buf dep update
+          # buf needs buf.lock in the against reference to resolve googleapis.
+          # main doesn't have it yet, so inject it into the local main branch.
+          git worktree add /tmp/main-check main
+          cp buf.lock /tmp/main-check/
+          git -C /tmp/main-check add buf.lock
+          git -C /tmp/main-check -c user.email=ci@ci -c user.name=CI \
+            commit -m "ci: inject buf.lock" --no-verify
+          git worktree remove /tmp/main-check
 
       - name: Check proto backward compatibility
         uses: bufbuild/buf-breaking-action@v1

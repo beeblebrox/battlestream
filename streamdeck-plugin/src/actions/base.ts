@@ -1,7 +1,10 @@
 import { SingletonAction, type WillAppearEvent, type WillDisappearEvent } from '@elgato/streamdeck';
+import path from 'node:path';
 import { store } from '../state.js';
 import { renderButton } from '../render.js';
 import type { GameState } from '../types.js';
+
+const IMGS_DIR = path.resolve(process.cwd(), 'imgs', 'actions');
 
 interface ImageSettable {
   setImage(image: string): Promise<void>;
@@ -58,12 +61,15 @@ export abstract class BaseStat extends SingletonAction<Record<string, never>> {
     const key = `${value}|${subtitle}|${state === null}`;
     if (!force && key === this.lastRenderKeys.get(action)) return;
     this.lastRenderKeys.set(action, key);
-    const image = renderButton({
+    const iconName = this.manifestId?.split('.').pop();
+    const iconPath = iconName ? path.join(IMGS_DIR, `${iconName}.png`) : undefined;
+    const image = await renderButton({
       label: this.label,
       value,
       subtitle,
       gradient: this.gradient,
       offline: state === null,
+      iconPath,
     });
     await action.setImage(image);
   }
