@@ -54,15 +54,14 @@ function makeClient(host: string, port: number, apiKey: string): BattlestreamCli
   );
 }
 
-let client = makeClient('127.0.0.1', 8080, '');
-client.connect();
+let client: BattlestreamClient | null = null;
 
 function applySettings(settings: GlobalSettings): void {
   const host = settings.host?.trim() || '127.0.0.1';
   const port = settings.port ?? 8080;
   const apiKey = settings.apiKey ?? '';
   store.setSettings({ host, port, apiKey });
-  client.disconnect();
+  client?.disconnect();
   client = makeClient(host, port, apiKey);
   client.connect();
 }
@@ -71,6 +70,8 @@ streamDeck.settings.onDidReceiveGlobalSettings(({ settings }) => {
   applySettings(settings as GlobalSettings);
 });
 
+// Connect to Stream Deck first, then fetch persisted settings before
+// making any outbound connection — avoids hitting the wrong port on startup.
 streamDeck.connect().then(() => {
   streamDeck.settings.getGlobalSettings();
 });
