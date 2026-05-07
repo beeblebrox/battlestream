@@ -15,7 +15,7 @@ export abstract class BaseStat extends SingletonAction<Record<string, never>> {
 
   private readonly contexts = new Set<ImageSettable>();
   private unsub?: () => void;
-  private lastRenderKey = '';
+  private readonly lastRenderKeys = new Map<ImageSettable, string>();
 
   override async onWillAppear({ action }: WillAppearEvent<Record<string, never>>): Promise<void> {
     if (this.contexts.size === 0) {
@@ -29,6 +29,7 @@ export abstract class BaseStat extends SingletonAction<Record<string, never>> {
     for (const ctx of this.contexts) {
       if ((ctx as unknown as { id: string }).id === (action as unknown as { id: string }).id) {
         this.contexts.delete(ctx);
+        this.lastRenderKeys.delete(ctx);
         break;
       }
     }
@@ -55,8 +56,8 @@ export abstract class BaseStat extends SingletonAction<Record<string, never>> {
       }
     }
     const key = `${value}|${subtitle}|${state === null}`;
-    if (!force && key === this.lastRenderKey) return;
-    this.lastRenderKey = key;
+    if (!force && key === this.lastRenderKeys.get(action)) return;
+    this.lastRenderKeys.set(action, key);
     const image = renderButton({
       label: this.label,
       value,

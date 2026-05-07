@@ -1,12 +1,14 @@
+const mockSwitchToProfile = jest.fn().mockResolvedValue(undefined);
+const mockShowAlert = jest.fn().mockResolvedValue(undefined);
+
 jest.mock('@elgato/streamdeck', () => ({
   action: () => (cls: unknown) => cls,
   SingletonAction: class {},
   streamDeck: {
-    profiles: { switchToProfile: jest.fn().mockResolvedValue(undefined) },
+    profiles: { switchToProfile: mockSwitchToProfile },
   },
 }));
 
-import { streamDeck } from '@elgato/streamdeck';
 import { AutoLayoutAction } from '../../actions/auto-layout.js';
 
 const cases: Array<[number, string]> = [
@@ -17,16 +19,41 @@ const cases: Array<[number, string]> = [
   [99, 'Battlestream Standard'],
 ];
 
-test.each(cases)('device type %i → profile "%s"', async (deviceType, expectedProfile) => {
-  const action = new AutoLayoutAction();
-  const mockEv = {
-    action: { device: { type: deviceType, id: 'dev-1' } },
+function makeEvent(deviceType: number) {
+  return {
+    action: {
+      device: { type: deviceType, id: 'dev-1' },
+      showAlert: mockShowAlert,
+    },
   };
-  await action.onKeyDown(mockEv as never);
+}
 
-  expect(streamDeck.profiles.switchToProfile).toHaveBeenCalledWith(
-    'dev-1',
-    expectedProfile,
-  );
-  jest.clearAllMocks();
+describe('on non-Linux (official Stream Deck)', () => {
+  const originalPlatform = process.platform;
+  beforeAll(() => { Object.defineProperty(process, 'platform', { value: 'win32', configurable: true }); });
+  afterAll(() => { Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true }); });
+  afterEach(() => jest.clearAllMocks());
+
+  test.each(cases)('device type %i → switchToProfile("%s")', async (deviceType, expectedProfile) => {
+    const instance = new AutoLayoutAction();
+    await instance.onKeyDown(makeEvent(deviceType) as never);
+
+    expect(mockSwitchToProfile).toHaveBeenCalledWith('dev-1', expectedProfile);
+    expect(mockShowAlert).not.toHaveBeenCalled();
+  });
+});
+
+describe('on Linux (OpenDeck — profile switching restricted to internal plugins)', () => {
+  const originalPlatform = process.platform;
+  beforeAll(() => { Object.defineProperty(process, 'platform', { value: 'linux', configurable: true }); });
+  afterAll(() => { Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true }); });
+  afterEach(() => jest.clearAllMocks());
+
+  test('shows alert and does not call switchToProfile', async () => {
+    const instance = new AutoLayoutAction();
+    await instance.onKeyDown(makeEvent(0) as never);
+
+    expect(mockShowAlert).toHaveBeenCalled();
+    expect(mockSwitchToProfile).not.toHaveBeenCalled();
+  });
 });
