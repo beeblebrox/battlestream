@@ -44,7 +44,8 @@ var (
 	colorBeetle    = lipgloss.Color("178") // dark yellow
 	colorRightmost = lipgloss.Color("105") // light purple
 	colorVolumizer = lipgloss.Color("81")  // cyan
-	colorGeneral   = lipgloss.Color("249") // gray
+	colorGeneral         = lipgloss.Color("249") // gray
+	colorGroupTavernWide = lipgloss.Color("51")  // bright cyan for TAVERN-WIDE header
 	colorMuted   = lipgloss.Color("244")
 	colorHealthFg = lipgloss.Color("46")
 	colorHealthBg = lipgloss.Color("22")
@@ -797,6 +798,33 @@ func (m *Model) partnerModsItems() string {
 	return b.String()
 }
 
+type groupedBuffs struct {
+	tavernWideATK int32
+	tavernWideHP  int32
+	targeted      []*bspb.BuffSource // non-zero only
+	typeBuffs     []*bspb.BuffSource // non-zero only
+}
+
+func groupBuffSources(sources []*bspb.BuffSource) groupedBuffs {
+	var g groupedBuffs
+	for _, bs := range sources {
+		switch gamestate.CategoryGroup[bs.Category] {
+		case gamestate.GroupTavernWide:
+			g.tavernWideATK += bs.Attack
+			g.tavernWideHP += bs.Health
+		case gamestate.GroupTargeted:
+			if bs.Attack != 0 || bs.Health != 0 {
+				g.targeted = append(g.targeted, bs)
+			}
+		case gamestate.GroupTypeBuffs:
+			if bs.Attack != 0 || bs.Health != 0 {
+				g.typeBuffs = append(g.typeBuffs, bs)
+			}
+		}
+	}
+	return g
+}
+
 // modsItems returns the scrollable buff-sources content (no outer title).
 func (m *Model) modsItems() string {
 	var b strings.Builder
@@ -818,38 +846,50 @@ func (m *Model) modsItems() string {
 		return b.String()
 	}
 
-	// Sort by total buff magnitude (largest first).
-	sources := make([]*bspb.BuffSource, len(m.game.BuffSources))
-	copy(sources, m.game.BuffSources)
-	for i := 0; i < len(sources); i++ {
-		for j := i + 1; j < len(sources); j++ {
-			totalI := abs32(sources[i].Attack) + abs32(sources[i].Health)
-			totalJ := abs32(sources[j].Attack) + abs32(sources[j].Health)
-			if totalJ > totalI {
-				sources[i], sources[j] = sources[j], sources[i]
-			}
-		}
+	g := groupBuffSources(m.game.BuffSources)
+
+	// TAVERN-WIDE: single accumulated total
+	if g.tavernWideATK != 0 || g.tavernWideHP != 0 {
+		hdr := lipgloss.NewStyle().Foreground(colorGroupTavernWide).Bold(true)
+		val := lipgloss.NewStyle().Foreground(colorGroupTavernWide)
+		b.WriteString(hdr.Render("TAVERN-WIDE") + "\n")
+		b.WriteString(val.Render(fmt.Sprintf("  +%d/+%d", g.tavernWideATK, g.tavernWideHP)) + "\n\n")
 	}
 
-	for _, bs := range sources {
-		if bs.Attack == 0 && bs.Health == 0 {
-			continue
+	// TARGETED: per-category
+	if len(g.targeted) > 0 {
+		hdr := lipgloss.NewStyle().Foreground(colorGold).Bold(true)
+		b.WriteString(hdr.Render("TARGETED") + "\n")
+		for _, bs := range g.targeted {
+			name := buffCategoryDisplayName(bs.Category)
+			color := buffCategoryColor(bs.Category)
+			line := fmt.Sprintf("  %-12s +%d/+%d", name, bs.Attack, bs.Health)
+			b.WriteString(lipgloss.NewStyle().Foreground(color).Render(line) + "\n")
 		}
-		name := buffCategoryDisplayName(bs.Category)
-		color := buffCategoryColor(bs.Category)
-		style := lipgloss.NewStyle().Foreground(color)
-		line := fmt.Sprintf("%-14s +%d/+%d", name, bs.Attack, bs.Health)
-		b.WriteString(style.Render(line) + "\n")
+		b.WriteString("\n")
 	}
 
-	// Ability counters (e.g. Spellcraft stacks)
-	if m.game != nil && len(m.game.AbilityCounters) > 0 {
+	// TYPE BUFFS: per-category
+	if len(g.typeBuffs) > 0 {
+		hdr := lipgloss.NewStyle().Foreground(colorTavern).Bold(true)
+		b.WriteString(hdr.Render("TYPE BUFFS") + "\n")
+		for _, bs := range g.typeBuffs {
+			name := buffCategoryDisplayName(bs.Category)
+			color := buffCategoryColor(bs.Category)
+			line := fmt.Sprintf("  %-12s +%d/+%d", name, bs.Attack, bs.Health)
+			b.WriteString(lipgloss.NewStyle().Foreground(color).Render(line) + "\n")
+		}
+		b.WriteString("\n")
+	}
+
+	// ABILITIES
+	if len(m.game.AbilityCounters) > 0 {
 		b.WriteString("\n" + styleTitle.Render("ABILITIES") + "\n")
 		for _, ac := range m.game.AbilityCounters {
 			name := buffCategoryDisplayName(ac.Category)
 			color := buffCategoryColor(ac.Category)
 			style := lipgloss.NewStyle().Foreground(color)
-			line := fmt.Sprintf("%-14s %s", name, ac.Display)
+			line := fmt.Sprintf("  %-12s %s", name, ac.Display)
 			b.WriteString(style.Render(line) + "\n")
 		}
 	}

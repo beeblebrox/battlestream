@@ -260,3 +260,99 @@ func TestRenderTavernTierAnomalyTier7(t *testing.T) {
 		t.Errorf("tier 7 should have no empty stars, got %q", result)
 	}
 }
+
+func TestGroupBuffSources(t *testing.T) {
+	sources := []*bspb.BuffSource{
+		{Category: "NOMI_ALL", Attack: 4, Health: 4},
+		{Category: "TAVERN_SPELL", Attack: 8, Health: 4},
+		{Category: "BLOODGEM", Attack: 3, Health: 0},
+		{Category: "RIGHTMOST", Attack: 0, Health: 0},
+		{Category: "UNDEAD", Attack: 6, Health: 6},
+		{Category: "NOMI", Attack: 0, Health: 0},
+	}
+
+	g := groupBuffSources(sources)
+
+	if g.tavernWideATK != 12 || g.tavernWideHP != 8 {
+		t.Errorf("tavernWide = +%d/+%d, want +12/+8", g.tavernWideATK, g.tavernWideHP)
+	}
+	if len(g.targeted) != 1 || g.targeted[0].Category != "BLOODGEM" {
+		t.Errorf("targeted = %v, want [BLOODGEM]", g.targeted)
+	}
+	if len(g.typeBuffs) != 1 || g.typeBuffs[0].Category != "UNDEAD" {
+		t.Errorf("typeBuffs = %v, want [UNDEAD]", g.typeBuffs)
+	}
+}
+
+func TestModsItems_GroupedSections(t *testing.T) {
+	m := &Model{
+		connState: stateConnected,
+		game: &bspb.GameState{
+			BuffSources: []*bspb.BuffSource{
+				{Category: "NOMI_ALL", Attack: 6, Health: 6},
+				{Category: "BLOODGEM", Attack: 4, Health: 0},
+				{Category: "UNDEAD", Attack: 3, Health: 3},
+			},
+		},
+	}
+
+	out := m.modsItems()
+
+	if !strings.Contains(out, "TAVERN-WIDE") {
+		t.Error("expected TAVERN-WIDE section header")
+	}
+	if !strings.Contains(out, "+6/+6") {
+		t.Error("expected tavern-wide total +6/+6")
+	}
+	if !strings.Contains(out, "TARGETED") {
+		t.Error("expected TARGETED section header")
+	}
+	if !strings.Contains(out, "Bloodgems") || !strings.Contains(out, "+4/+0") {
+		t.Error("expected Bloodgems +4/+0 in targeted section")
+	}
+	if !strings.Contains(out, "TYPE BUFFS") {
+		t.Error("expected TYPE BUFFS section header")
+	}
+	if !strings.Contains(out, "Undead") || !strings.Contains(out, "+3/+3") {
+		t.Error("expected Undead +3/+3 in type buffs section")
+	}
+}
+
+func TestModsItems_EmptySectionsOmitted(t *testing.T) {
+	m := &Model{
+		connState: stateConnected,
+		game: &bspb.GameState{
+			BuffSources: []*bspb.BuffSource{
+				{Category: "BLOODGEM", Attack: 2, Health: 0},
+			},
+		},
+	}
+
+	out := m.modsItems()
+
+	if strings.Contains(out, "TAVERN-WIDE") {
+		t.Error("expected TAVERN-WIDE section to be omitted when empty")
+	}
+	if strings.Contains(out, "TYPE BUFFS") {
+		t.Error("expected TYPE BUFFS section to be omitted when empty")
+	}
+	if !strings.Contains(out, "TARGETED") {
+		t.Error("expected TARGETED section to be present")
+	}
+}
+
+func TestModsItems_TavernWideOmittedWhenZero(t *testing.T) {
+	m := &Model{
+		connState: stateConnected,
+		game: &bspb.GameState{
+			BuffSources: []*bspb.BuffSource{
+				{Category: "NOMI_ALL", Attack: 0, Health: 0},
+				{Category: "SHOP_BUFF", Attack: 0, Health: 0},
+			},
+		},
+	}
+	out := m.modsItems()
+	if strings.Contains(out, "TAVERN-WIDE") {
+		t.Error("TAVERN-WIDE section should be omitted when all tavern-wide sources are zero")
+	}
+}

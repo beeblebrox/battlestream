@@ -179,3 +179,35 @@ var CategoryDisplayName = map[string]string{
 	CatShopBuff:        "Shop Buff",
 	CatGeneral:         "General",
 }
+
+// Buff group constants — used by the TUI and Stream Deck plugin to cluster
+// buff source categories by how they apply. Ability counter categories
+// (NagaSpells, FreeRefresh, GoldNextTurn) are intentionally excluded; they
+// appear in the ABILITIES section, not the buff sources panel.
+const (
+	GroupTavernWide = "TAVERN_WIDE"
+	GroupTargeted   = "TARGETED"
+	GroupTypeBuffs  = "TYPE_BUFFS"
+)
+
+// CategoryGroup maps each buff source category to its display group.
+// Ability counter categories are not present here by design — see above.
+var CategoryGroup = map[string]string{
+	CatNomiAll:         GroupTavernWide,
+	CatTavernSpell:     GroupTavernWide,
+	CatShopBuff:        GroupTavernWide,
+	CatGeneral:         GroupTavernWide,
+
+	CatBloodgem:        GroupTargeted,
+	CatBloodgemBarrage: GroupTargeted,
+	CatRightmost:       GroupTargeted,
+
+	CatNomi:      GroupTypeBuffs,
+	CatElemental: GroupTypeBuffs,
+	CatUndead:    GroupTypeBuffs,
+	CatLightfang: GroupTypeBuffs,
+	CatWhelp:     GroupTypeBuffs,
+	CatBeetle:    GroupTypeBuffs,
+	CatVolumizer: GroupTypeBuffs,
+	CatConsumed:  GroupTypeBuffs,
+}
