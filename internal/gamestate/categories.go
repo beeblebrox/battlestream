@@ -179,3 +179,29 @@ var CategoryDisplayName = map[string]string{
 	CatShopBuff:        "Shop Buff",
 	CatGeneral:         "General",
 }
+
+const (
+	GroupTavernWide = "TAVERN_WIDE"
+	GroupTargeted   = "TARGETED"
+	GroupTypeBuffs  = "TYPE_BUFFS"
+)
+
+var CategoryGroup = map[string]string{
+	CatNomiAll:         GroupTavernWide,
+	CatTavernSpell:     GroupTavernWide,
+	CatShopBuff:        GroupTavernWide,
+	CatGeneral:         GroupTavernWide,
+
+	CatBloodgem:        GroupTargeted,
+	CatBloodgemBarrage: GroupTargeted,
+	CatRightmost:       GroupTargeted,
+
+	CatNomi:      GroupTypeBuffs,
+	CatElemental: GroupTypeBuffs,
+	CatUndead:    GroupTypeBuffs,
+	CatLightfang: GroupTypeBuffs,
+	CatWhelp:     GroupTypeBuffs,
+	CatBeetle:    GroupTypeBuffs,
+	CatVolumizer: GroupTypeBuffs,
+	CatConsumed:  GroupTypeBuffs,
+}
