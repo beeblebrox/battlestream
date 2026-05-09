@@ -1,4 +1,4 @@
-import { CATEGORY_META, DYNAMIC_CATEGORIES, TAVERN_WIDE_CATEGORIES } from '../categories.js';
+import { CATEGORY_META, DYNAMIC_CATEGORIES, TAVERN_WIDE_CATEGORIES, categoryIconPath } from '../categories.js';
 
 test('TAVERN_WIDE_CATEGORIES has exactly 4 entries', () => {
   expect(TAVERN_WIDE_CATEGORIES.size).toBe(4);
@@ -33,4 +33,15 @@ test('every CATEGORY_META entry has displayName, group, and gradient', () => {
     expect(['TARGETED', 'TYPE_BUFFS']).toContain(meta.group);
     expect(DYNAMIC_CATEGORIES.has(cat)).toBe(true);
   }
+});
+
+test('categoryIconPath returns a path ending with the iconFile for known icons', () => {
+  const p = categoryIconPath('BLOODGEM');
+  expect(p).toBeDefined();
+  expect(p!.endsWith('bloodgem-buff.png')).toBe(true);
+});
+
+test('categoryIconPath returns undefined for categories with no icon', () => {
+  expect(categoryIconPath('UNDEAD')).toBeUndefined();
+  expect(categoryIconPath('UNKNOWN_CATEGORY')).toBeUndefined();
 });

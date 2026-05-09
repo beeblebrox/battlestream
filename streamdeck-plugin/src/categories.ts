@@ -4,7 +4,7 @@ export type BuffGroup = 'TAVERN_WIDE' | 'TARGETED' | 'TYPE_BUFFS';
 
 export interface CategoryMeta {
   displayName: string;
-  group: 'TARGETED' | 'TYPE_BUFFS';
+  group: BuffGroup;
   gradient: readonly [string, string];
   iconFile?: string;
 }
