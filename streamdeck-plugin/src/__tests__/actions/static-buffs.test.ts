@@ -57,3 +57,32 @@ describe('RightmostBuffAction', () => {
     expect(new RightmostBuffAction().extract(base).value).toBe('+0/+0');
   });
 });
+
+import { NomiBuffAction }      from '../../actions/nomi-buff.js';
+import { UndeadBuffAction }    from '../../actions/undead-buff.js';
+import { LightfangBuffAction } from '../../actions/lightfang-buff.js';
+import { WhelpBuffAction }     from '../../actions/whelp-buff.js';
+import { BeetleBuffAction }    from '../../actions/beetle-buff.js';
+import { VolumizerBuffAction } from '../../actions/volumizer-buff.js';
+import { ConsumedBuffAction }  from '../../actions/consumed-buff.js';
+
+type MakeAction = () => { extract(s: GameState): { value: string } };
+const TYPE_BUFF_CASES: Array<[string, MakeAction, string]> = [
+  ['NomiBuffAction',      () => new NomiBuffAction(),      'NOMI'],
+  ['UndeadBuffAction',    () => new UndeadBuffAction(),    'UNDEAD'],
+  ['LightfangBuffAction', () => new LightfangBuffAction(), 'LIGHTFANG'],
+  ['WhelpBuffAction',     () => new WhelpBuffAction(),     'WHELP'],
+  ['BeetleBuffAction',    () => new BeetleBuffAction(),    'BEETLE'],
+  ['VolumizerBuffAction', () => new VolumizerBuffAction(), 'VOLUMIZER'],
+  ['ConsumedBuffAction',  () => new ConsumedBuffAction(),  'CONSUMED'],
+];
+
+test.each(TYPE_BUFF_CASES)('%s returns +ATK/+HP for its category', (_name, makeAction, cat) => {
+  const a = makeAction();
+  const s: GameState = { ...base, buff_sources: [{ category: cat, attack: 4, health: 2 }] };
+  expect(a.extract(s).value).toBe('+4/+2');
+});
+
+test.each(TYPE_BUFF_CASES)('%s returns +0/+0 when category absent', (_name, makeAction) => {
+  expect(makeAction().extract(base).value).toBe('+0/+0');
+});
