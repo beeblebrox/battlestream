@@ -37,3 +37,36 @@ func TestCategoryGroup_AllCategoriesMapped(t *testing.T) {
 		})
 	}
 }
+
+func TestCategoryGroup_NoUnexpectedEntries(t *testing.T) {
+	expected := map[string]string{
+		CatNomiAll:         GroupTavernWide,
+		CatTavernSpell:     GroupTavernWide,
+		CatShopBuff:        GroupTavernWide,
+		CatGeneral:         GroupTavernWide,
+		CatBloodgem:        GroupTargeted,
+		CatBloodgemBarrage: GroupTargeted,
+		CatRightmost:       GroupTargeted,
+		CatNomi:            GroupTypeBuffs,
+		CatElemental:       GroupTypeBuffs,
+		CatUndead:          GroupTypeBuffs,
+		CatLightfang:       GroupTypeBuffs,
+		CatWhelp:           GroupTypeBuffs,
+		CatBeetle:          GroupTypeBuffs,
+		CatVolumizer:       GroupTypeBuffs,
+		CatConsumed:        GroupTypeBuffs,
+	}
+	if len(CategoryGroup) != len(expected) {
+		t.Errorf("CategoryGroup has %d entries, want %d", len(CategoryGroup), len(expected))
+	}
+	for cat, group := range CategoryGroup {
+		wantGroup, ok := expected[cat]
+		if !ok {
+			t.Errorf("CategoryGroup has unexpected key %q", cat)
+			continue
+		}
+		if group != wantGroup {
+			t.Errorf("CategoryGroup[%q] = %q, want %q", cat, group, wantGroup)
+		}
+	}
+}
