@@ -14,15 +14,14 @@ import type { GameState } from '../../types.js';
 
 function makeAction(id: string, row = 0, col = 0) {
   return {
-    id,
-    coordinates: { row, column: col },
-    setImage: jest.fn().mockResolvedValue(undefined),
+    action: { id, setImage: jest.fn().mockResolvedValue(undefined) },
+    payload: { coordinates: { row, column: col } },
   };
 }
 
 async function appear(inst: DynamicBuffSlotAction, ...actions: ReturnType<typeof makeAction>[]) {
   for (const a of actions) {
-    await inst.onWillAppear({ action: a } as never);
+    await inst.onWillAppear(a as never);
   }
 }
 

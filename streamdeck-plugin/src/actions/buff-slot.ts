@@ -24,9 +24,9 @@ export class DynamicBuffSlotAction extends SingletonAction<Record<string, never>
 
   getSlots(): Map<string, SlotState> { return this.slots; }
 
-  override async onWillAppear({ action }: WillAppearEvent<Record<string, never>>): Promise<void> {
-    const a = action as unknown as ActionLike;
-    const { row = 0, column: col = 0 } = a.coordinates ?? {};
+  override async onWillAppear(ev: WillAppearEvent<Record<string, never>>): Promise<void> {
+    const a = ev.action as unknown as ActionLike;
+    const { row = 0, column: col = 0 } = (ev.payload as { coordinates?: { row: number; column: number } }).coordinates ?? {};
     this.coords.set(a.id, { row, col });
     this.actionMap.set(a.id, a);
 
