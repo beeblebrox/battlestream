@@ -340,3 +340,19 @@ func TestModsItems_EmptySectionsOmitted(t *testing.T) {
 		t.Error("expected TARGETED section to be present")
 	}
 }
+
+func TestModsItems_TavernWideOmittedWhenZero(t *testing.T) {
+	m := &Model{
+		connState: stateConnected,
+		game: &bspb.GameState{
+			BuffSources: []*bspb.BuffSource{
+				{Category: "NOMI_ALL", Attack: 0, Health: 0},
+				{Category: "SHOP_BUFF", Attack: 0, Health: 0},
+			},
+		},
+	}
+	out := m.modsItems()
+	if strings.Contains(out, "TAVERN-WIDE") {
+		t.Error("TAVERN-WIDE section should be omitted when all tavern-wide sources are zero")
+	}
+}

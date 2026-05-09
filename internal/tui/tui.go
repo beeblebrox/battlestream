@@ -883,7 +883,7 @@ func (m *Model) modsItems() string {
 	}
 
 	// ABILITIES
-	if m.game != nil && len(m.game.AbilityCounters) > 0 {
+	if len(m.game.AbilityCounters) > 0 {
 		b.WriteString("\n" + styleTitle.Render("ABILITIES") + "\n")
 		for _, ac := range m.game.AbilityCounters {
 			name := buffCategoryDisplayName(ac.Category)
