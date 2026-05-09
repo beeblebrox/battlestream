@@ -39,27 +39,43 @@ export async function renderButton(opts: RenderOptions): Promise<string> {
     drawGradientBg(ctx, opts, SIZE);
   }
 
-  ctx.fillStyle = 'rgba(255,255,255,0.80)';
-  ctx.font = 'bold 17px sans-serif';
+  const PAD = 12;
+  const maxW = SIZE - PAD * 2;
+
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
+
+  ctx.fillStyle = 'rgba(255,255,255,0.80)';
+  fitText(ctx, opts.label.toUpperCase(), maxW, 17, 'bold', 10);
   ctx.fillText(opts.label.toUpperCase(), SIZE / 2, 30);
 
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 52px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
+  fitText(ctx, opts.value, maxW, 52, 'bold', 14);
   ctx.fillText(opts.value, SIZE / 2, 82);
 
   if (opts.subtitle) {
     ctx.fillStyle = 'rgba(255,255,255,0.65)';
-    ctx.font = '14px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
+    fitText(ctx, opts.subtitle, maxW, 14, 'normal', 8);
     ctx.fillText(opts.subtitle, SIZE / 2, 122);
   }
 
   return `data:image/png;base64,${canvas.toBuffer('image/png').toString('base64')}`;
+}
+
+function fitText(
+  ctx: ReturnType<ReturnType<typeof createCanvas>['getContext']>,
+  text: string,
+  maxWidth: number,
+  maxSize: number,
+  weight: string,
+  minSize: number,
+): void {
+  let size = maxSize;
+  ctx.font = `${weight} ${size}px sans-serif`;
+  while (ctx.measureText(text).width > maxWidth && size > minSize) {
+    size -= 1;
+    ctx.font = `${weight} ${size}px sans-serif`;
+  }
 }
 
 function drawGradientBg(ctx: ReturnType<ReturnType<typeof createCanvas>['getContext']>, opts: RenderOptions, SIZE: number) {
