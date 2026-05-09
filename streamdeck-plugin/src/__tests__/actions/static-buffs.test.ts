@@ -32,3 +32,28 @@ describe('TavernWideBuffAction', () => {
     expect(a.extract(base).value).toBe('+0/+0');
   });
 });
+
+import { BgBarrageBuffAction } from '../../actions/bg-barrage-buff.js';
+import { RightmostBuffAction } from '../../actions/rightmost-buff.js';
+
+describe('BgBarrageBuffAction', () => {
+  test('returns +ATK/+HP for BLOODGEM_BARRAGE category', () => {
+    const a = new BgBarrageBuffAction();
+    const s: GameState = { ...base, buff_sources: [{ category: 'BLOODGEM_BARRAGE', attack: 3, health: 2 }] };
+    expect(a.extract(s).value).toBe('+3/+2');
+  });
+  test('returns +0/+0 when category absent', () => {
+    expect(new BgBarrageBuffAction().extract(base).value).toBe('+0/+0');
+  });
+});
+
+describe('RightmostBuffAction', () => {
+  test('returns +ATK/+HP for RIGHTMOST category', () => {
+    const a = new RightmostBuffAction();
+    const s: GameState = { ...base, buff_sources: [{ category: 'RIGHTMOST', attack: 2, health: 1 }] };
+    expect(a.extract(s).value).toBe('+2/+1');
+  });
+  test('returns +0/+0 when category absent', () => {
+    expect(new RightmostBuffAction().extract(base).value).toBe('+0/+0');
+  });
+});
