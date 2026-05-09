@@ -118,18 +118,19 @@ export class DynamicBuffSlotAction extends SingletonAction<Record<string, never>
   private async renderOne(id: string, a: ActionLike, state: GameState | null): Promise<void> {
     const slot = this.slots.get(id);
 
-    if (!slot || state === null) {
+    if (!slot) {
       const img = await renderButton({
-        label: 'BUFF', value: '—', subtitle: '',
+        label: '', value: '', subtitle: '',
         gradient: ['#000000', '#000000'],
-        offline: state === null,
+        offline: false,
       });
       await a.setImage(img);
       return;
     }
 
     const meta = CATEGORY_META[slot.category];
-    const bs   = state.buff_sources?.find(b => b.category === slot.category);
+    // state is non-null here: assign() clears slots when state is null
+    const bs   = state!.buff_sources?.find(b => b.category === slot.category);
     const img  = await renderButton({
       label:    meta?.displayName ?? slot.category,
       value:    bs ? `+${bs.attack}/+${bs.health}` : '+0/+0',
