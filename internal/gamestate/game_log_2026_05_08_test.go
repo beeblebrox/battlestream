@@ -188,19 +188,19 @@ func TestGameLog2026_05_08_AllBoardMinionsAreBeasts(t *testing.T) {
 	}
 }
 
-// TestGameLog2026_05_08_ShopBuffSource verifies the SHOP_BUFF buff source accumulated 79/79.
-// Raw log: BG_ShopBuff player-level Dnt counter reached 79 ATK and 79 HP.
-// Note: this value (79/79) previously caused display corruption on Stream Deck due to
-// text overflow at fixed 52px font; the fitText auto-scaling fix was applied to address this.
+// TestGameLog2026_05_08_ShopBuffSource verifies the SHOP_BUFF buff source accumulated 31/31.
+// Raw log: 5 BG_ShopBuff Dnt entities appear (one per reconnect), carrying cumulative totals
+// of 3, 7, 15, 23, 31 ATK/HP. The correct total is the final value (31) — earlier snapshots
+// are included in each successive one and must not be double-counted.
 func TestGameLog2026_05_08_ShopBuffSource(t *testing.T) {
 	s := sharedLog20260508State(t)
 	for _, bs := range s.BuffSources {
 		if bs.Category == "SHOP_BUFF" {
-			if bs.Attack != 79 {
-				t.Errorf("SHOP_BUFF attack: expected 79, got %d", bs.Attack)
+			if bs.Attack != 31 {
+				t.Errorf("SHOP_BUFF attack: expected 31, got %d", bs.Attack)
 			}
-			if bs.Health != 79 {
-				t.Errorf("SHOP_BUFF health: expected 79, got %d", bs.Health)
+			if bs.Health != 31 {
+				t.Errorf("SHOP_BUFF health: expected 31, got %d", bs.Health)
 			}
 			return
 		}

@@ -55,10 +55,11 @@ type combatCopyPeak struct {
 // buffTracker holds buff source tracking state for the local player.
 // Encapsulates buff source state, Dnt counters, and economy counters.
 type buffTracker struct {
-	buffSourceState map[string][2]int
-	shopBuffPrev    map[int][2]int
-	nomiCounter     [2]int
-	nomiAllCounter  [2]int
+	buffSourceState  map[string][2]int
+	shopBuffPrev     map[int][2]int
+	shopBuffGlobal   map[string][2]int // last absolute value per cumulative-Dnt category (BG_ShopBuff)
+	nomiCounter      [2]int
+	nomiAllCounter   [2]int
 	goldNextTurnSure    int
 	overconfidenceCount int
 }
@@ -67,6 +68,7 @@ func newBuffTracker() buffTracker {
 	return buffTracker{
 		buffSourceState: make(map[string][2]int),
 		shopBuffPrev:    make(map[int][2]int),
+		shopBuffGlobal:  make(map[string][2]int),
 	}
 }
 
@@ -1778,7 +1780,7 @@ func (p *Processor) handleDntTagChange(entityID int, tag string, value int) {
 
 	switch cardID {
 	case "BG_ShopBuff":
-		p.handleGenericShopBuffDnt(bt, setBS, entityID, isSD1, value, CatShopBuff)
+		p.handleGenericShopBuffDnt(bt, setBS, isSD1, value, CatShopBuff)
 	case "BG_ShopBuff_Elemental":
 		p.handleShopBuffDnt(bt, setBS, entityID, isSD1, value)
 	case "BG30_MagicItem_544pe":
@@ -1872,17 +1874,20 @@ func (p *Processor) handleAbsoluteDntDuos(category string, isSD1 bool, value, ba
 }
 
 // handleGenericShopBuffDnt handles BG_ShopBuff (generic shop buff) with differential accumulation.
-func (p *Processor) handleGenericShopBuffDnt(bt *buffTracker, setBS func(string, int, int), entityID int, isSD1 bool, value int, category string) {
-	prev := bt.shopBuffPrev[entityID]
+// BG_ShopBuff is a cumulative Dnt: a fresh entity is spawned each reconnect carrying the running
+// total. Tracking by entity ID would restart the delta from zero each time, summing all snapshots
+// instead of computing increments — so we track the last absolute value per category globally.
+func (p *Processor) handleGenericShopBuffDnt(bt *buffTracker, setBS func(string, int, int), isSD1 bool, value int, category string) {
+	global := bt.shopBuffGlobal[category]
 	var delta int
 	if isSD1 {
-		delta = value - prev[0]
-		prev[0] = value
+		delta = value - global[0]
+		global[0] = value
 	} else {
-		delta = value - prev[1]
-		prev[1] = value
+		delta = value - global[1]
+		global[1] = value
 	}
-	bt.shopBuffPrev[entityID] = prev
+	bt.shopBuffGlobal[category] = global
 
 	state := bt.buffSourceState[category]
 	if isSD1 {
