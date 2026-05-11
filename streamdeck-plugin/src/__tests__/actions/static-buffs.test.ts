@@ -8,6 +8,7 @@ jest.mock('@elgato/streamdeck', () => ({
 
 import type { GameState } from '../../types.js';
 import { TavernWideBuffAction } from '../../actions/tavern-wide-buff.js';
+import { SpellPowerAction }     from '../../actions/spell-power.js';
 
 const base: GameState = {
   game_id: '', phase: 'RECRUIT', turn: 1, tavern_tier: 1,
@@ -16,20 +17,31 @@ const base: GameState = {
 };
 
 describe('TavernWideBuffAction', () => {
-  test('sums NOMI_ALL + TAVERN_SPELL + SHOP_BUFF + GENERAL, excludes others', () => {
+  test('sums NOMI_ALL + SHOP_BUFF + GENERAL, excludes TAVERN_SPELL and others', () => {
     const a = new TavernWideBuffAction();
     const s: GameState = { ...base, buff_sources: [
-      { category: 'NOMI_ALL',    attack: 4, health: 4 },
+      { category: 'NOMI_ALL',     attack: 4, health: 4 },
       { category: 'TAVERN_SPELL', attack: 8, health: 4 },
-      { category: 'SHOP_BUFF',   attack: 2, health: 2 },
-      { category: 'BLOODGEM',    attack: 3, health: 0 },
+      { category: 'SHOP_BUFF',    attack: 2, health: 2 },
+      { category: 'BLOODGEM',     attack: 3, health: 0 },
     ]};
-    expect(a.extract(s).value).toBe('+14/+10');
+    expect(a.extract(s).value).toBe('+6/+6');
   });
 
   test('returns +0/+0 when no tavern-wide sources present', () => {
     const a = new TavernWideBuffAction();
     expect(a.extract(base).value).toBe('+0/+0');
+  });
+});
+
+describe('SpellPowerAction', () => {
+  test('returns +ATK/+HP from TAVERN_SPELL buff source', () => {
+    const a = new SpellPowerAction();
+    const s: GameState = { ...base, buff_sources: [{ category: 'TAVERN_SPELL', attack: 1, health: 2 }] };
+    expect(a.extract(s).value).toBe('+1/+2');
+  });
+  test('returns +0/+0 when TAVERN_SPELL absent', () => {
+    expect(new SpellPowerAction().extract(base).value).toBe('+0/+0');
   });
 });
 

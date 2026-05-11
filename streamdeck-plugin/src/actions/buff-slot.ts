@@ -2,7 +2,7 @@ import { action, SingletonAction, type WillAppearEvent, type WillDisappearEvent 
 import { store } from '../state.js';
 import { renderButton } from '../render.js';
 import { CATEGORY_META, DYNAMIC_CATEGORIES, categoryIconPath } from '../categories.js';
-import type { GameState } from '../types.js';
+import type { BuffSource, GameState } from '../types.js';
 
 export interface SlotState {
   category: string;
@@ -68,6 +68,11 @@ export class DynamicBuffSlotAction extends SingletonAction<Record<string, never>
         active.set(bs.category, true);
       }
     }
+    for (const [cat, meta] of Object.entries(CATEGORY_META)) {
+      if (!meta.aggregateCategories) continue;
+      const { atk, hp } = sumCategories(state.buff_sources ?? [], meta.aggregateCategories);
+      if (atk !== 0 || hp !== 0) active.set(cat, true);
+    }
 
     // Clear slots whose category is no longer active.
     for (const [id, slot] of this.slots) {
@@ -130,10 +135,17 @@ export class DynamicBuffSlotAction extends SingletonAction<Record<string, never>
 
     const meta = CATEGORY_META[slot.category];
     // state is non-null here: assign() clears slots when state is null
-    const bs   = state!.buff_sources?.find(b => b.category === slot.category);
-    const img  = await renderButton({
+    let value: string;
+    if (meta?.aggregateCategories) {
+      const { atk, hp } = sumCategories(state!.buff_sources ?? [], meta.aggregateCategories);
+      value = `+${atk}/+${hp}`;
+    } else {
+      const bs = state!.buff_sources?.find(b => b.category === slot.category);
+      value = bs ? `+${bs.attack}/+${bs.health}` : '+0/+0';
+    }
+    const img = await renderButton({
       label:    meta?.displayName ?? slot.category,
-      value:    bs ? `+${bs.attack}/+${bs.health}` : '+0/+0',
+      value,
       subtitle: '',
       gradient: meta?.gradient ?? ['#120a20', '#4a3070'],
       offline:  false,
@@ -141,4 +153,14 @@ export class DynamicBuffSlotAction extends SingletonAction<Record<string, never>
     });
     await a.setImage(img);
   }
+}
+
+function sumCategories(sources: BuffSource[], cats: string[]): { atk: number; hp: number } {
+  let atk = 0, hp = 0;
+  for (const c of cats) {
+    const bs = sources.find(b => b.category === c);
+    atk += bs?.attack ?? 0;
+    hp  += bs?.health ?? 0;
+  }
+  return { atk, hp };
 }

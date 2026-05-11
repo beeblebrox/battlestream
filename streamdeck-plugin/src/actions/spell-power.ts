@@ -6,5 +6,8 @@ import type { GameState } from '../types.js';
 export class SpellPowerAction extends BaseStat {
   label = 'SPELL PWR';
   gradient = ['#4a004a', '#a93226'] as const;
-  extract(s: GameState) { return { value: String(s.player.spell_power), subtitle: '' }; }
+  extract(s: GameState) {
+    const bs = (s.buff_sources ?? []).find(b => b.category === 'TAVERN_SPELL');
+    return { value: bs ? `+${bs.attack}/+${bs.health}` : '+0/+0', subtitle: '' };
+  }
 }

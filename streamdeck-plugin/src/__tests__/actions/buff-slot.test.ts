@@ -82,15 +82,36 @@ describe('DynamicBuffSlotAction.assign()', () => {
     expect(inst.getSlots().has('ctx-1')).toBe(false);
   });
 
-  test('TAVERN_WIDE categories are never assigned to slots', async () => {
+  test('raw TAVERN_WIDE source categories (NOMI_ALL, SHOP_BUFF) alone do not get their own slots', async () => {
     const inst = new DynamicBuffSlotAction();
     await appear(inst, makeAction('ctx-1', 0, 0));
     inst.assign(makeState(
-      { category: 'NOMI_ALL',     attack: 6, health: 6 },
-      { category: 'TAVERN_SPELL', attack: 4, health: 2 },
-      { category: 'SHOP_BUFF',    attack: 2, health: 2 },
+      { category: 'NOMI_ALL',  attack: 6, health: 6 },
+      { category: 'SHOP_BUFF', attack: 2, health: 2 },
     ));
+    // The aggregate TAVERN_WIDE virtual category claims the slot, not the raw ones.
+    expect(inst.getSlots().get('ctx-1')?.category).toBe('TAVERN_WIDE');
+  });
+
+  test('TAVERN_WIDE aggregate is assigned to a slot when any constituent is non-zero', async () => {
+    const inst = new DynamicBuffSlotAction();
+    await appear(inst, makeAction('ctx-1', 0, 0));
+    inst.assign(makeState({ category: 'NOMI_ALL', attack: 4, health: 4 }));
+    expect(inst.getSlots().get('ctx-1')?.category).toBe('TAVERN_WIDE');
+  });
+
+  test('TAVERN_WIDE aggregate is not assigned when all constituents are zero', async () => {
+    const inst = new DynamicBuffSlotAction();
+    await appear(inst, makeAction('ctx-1', 0, 0));
+    inst.assign(makeState({ category: 'NOMI_ALL', attack: 0, health: 0 }));
     expect(inst.getSlots().has('ctx-1')).toBe(false);
+  });
+
+  test('TAVERN_SPELL is assigned to a dynamic slot', async () => {
+    const inst = new DynamicBuffSlotAction();
+    await appear(inst, makeAction('ctx-1', 0, 0));
+    inst.assign(makeState({ category: 'TAVERN_SPELL', attack: 1, health: 2 }));
+    expect(inst.getSlots().get('ctx-1')?.category).toBe('TAVERN_SPELL');
   });
 
   test('null state clears all slot assignments', async () => {
