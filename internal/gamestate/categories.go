@@ -193,21 +193,21 @@ const (
 // CategoryGroup maps each buff source category to its display group.
 // Ability counter categories are not present here by design — see above.
 var CategoryGroup = map[string]string{
-	CatNomiAll:         GroupTavernWide,
-	CatTavernSpell:     GroupTavernWide,
-	CatShopBuff:        GroupTavernWide,
-	CatGeneral:         GroupTavernWide,
+	CatNomiAll:  GroupTavernWide,
+	CatShopBuff: GroupTavernWide,
+	CatGeneral:  GroupTavernWide,
 
 	CatBloodgem:        GroupTargeted,
 	CatBloodgemBarrage: GroupTargeted,
 	CatRightmost:       GroupTargeted,
 
-	CatNomi:      GroupTypeBuffs,
-	CatElemental: GroupTypeBuffs,
-	CatUndead:    GroupTypeBuffs,
-	CatLightfang: GroupTypeBuffs,
-	CatWhelp:     GroupTypeBuffs,
-	CatBeetle:    GroupTypeBuffs,
-	CatVolumizer: GroupTypeBuffs,
-	CatConsumed:  GroupTypeBuffs,
+	CatNomi:        GroupTypeBuffs,
+	CatElemental:   GroupTypeBuffs,
+	CatUndead:      GroupTypeBuffs,
+	CatLightfang:   GroupTypeBuffs,
+	CatWhelp:       GroupTypeBuffs,
+	CatBeetle:      GroupTypeBuffs,
+	CatVolumizer:   GroupTypeBuffs,
+	CatConsumed:    GroupTypeBuffs,
+	CatTavernSpell: GroupTypeBuffs,
 }

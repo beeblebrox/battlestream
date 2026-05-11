@@ -3311,6 +3311,11 @@ var cardNames = map[string]string{
 	"VAN_tt_010a": "Spellbender",
 }
 
+// CardNames returns the full map of card ID to display name.
+func CardNames() map[string]string {
+	return cardNames
+}
+
 // CardName returns the display name for a card ID,
 // or the card ID itself if not found.
 func CardName(cardID string) string {
