@@ -273,14 +273,15 @@ func TestGroupBuffSources(t *testing.T) {
 
 	g := groupBuffSources(sources)
 
-	if g.tavernWideATK != 12 || g.tavernWideHP != 8 {
-		t.Errorf("tavernWide = +%d/+%d, want +12/+8", g.tavernWideATK, g.tavernWideHP)
+	if g.tavernWideATK != 4 || g.tavernWideHP != 4 {
+		t.Errorf("tavernWide = +%d/+%d, want +4/+4", g.tavernWideATK, g.tavernWideHP)
 	}
 	if len(g.targeted) != 1 || g.targeted[0].Category != "BLOODGEM" {
 		t.Errorf("targeted = %v, want [BLOODGEM]", g.targeted)
 	}
-	if len(g.typeBuffs) != 1 || g.typeBuffs[0].Category != "UNDEAD" {
-		t.Errorf("typeBuffs = %v, want [UNDEAD]", g.typeBuffs)
+	// TAVERN_SPELL is now GroupTypeBuffs; only non-zero type buffs appear.
+	if len(g.typeBuffs) != 2 {
+		t.Errorf("typeBuffs len = %d, want 2 (TAVERN_SPELL + UNDEAD)", len(g.typeBuffs))
 	}
 }
 
