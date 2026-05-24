@@ -8,6 +8,8 @@ package gamestate
 //              OnTurnTransition, OnGameEnd
 //   Phase 3 — player buff tags and economy counters migrated: OnPlayerTagChanged,
 //              OnEconomyChanged, OnCombatEconomyEffect
+//   Phase 4 — Dnt enchantments migrated: OnDntEnchantment
+//   Phase 5 — board/stat changes migrated: OnMinionPermStatChanged, OnMinionBought, OnMinionSold
 
 import (
 	"fmt"
@@ -209,11 +211,31 @@ func (p *Processor) OnPlayerName(a *action.PlayerNameAction) error {
 
 // ── RecruitVisitor ────────────────────────────────────────────────────────────
 
-func (p *Processor) OnMinionBought(_ *action.MinionBoughtAction) error            { return nil }
-func (p *Processor) OnMinionSold(_ *action.MinionSoldAction) error                { return nil }
+// OnMinionBought handles ZONE→PLAY transitions for the local player's minions.
+func (p *Processor) OnMinionBought(a *action.MinionBoughtAction) error {
+	p.tryAddMinionFromRegistry(int(a.Entity), a.ControllerID)
+	return nil
+}
+
+// OnMinionSold handles non-PLAY zone transitions: removes minion from board.
+func (p *Processor) OnMinionSold(a *action.MinionSoldAction) error {
+	entityID := int(a.Entity)
+	p.machine.RemoveMinion(entityID)
+	p.machine.RemoveEnchantmentsForEntity(entityID)
+	if p.machine.Phase() == PhaseRecruit {
+		p.machine.UpdateBoardSnapshot()
+	}
+	return nil
+}
+
 func (p *Processor) OnTavernUpgraded(_ *action.TavernUpgradedAction) error        { return nil }
 func (p *Processor) OnTavernSpellPlayed(_ *action.TavernSpellPlayedAction) error  { return nil }
-func (p *Processor) OnMinionPermStatChanged(_ *action.MinionPermStatChangedAction) error { return nil }
+
+// OnMinionPermStatChanged handles ATK/HEALTH changes during recruit phase.
+func (p *Processor) OnMinionPermStatChanged(a *action.MinionPermStatChangedAction) error {
+	p.updateMinionStatByID(int(a.Entity), a.EntityName, a.Stat, a.NewValue)
+	return nil
+}
 // OnDntEnchantment handles TAG_SCRIPT_DATA_NUM changes on Dnt enchantment entities.
 // Delegates to handleDntTagChange which dispatches by enchantment card ID.
 func (p *Processor) OnDntEnchantment(a *action.DntEnchantmentAction) error {
@@ -264,7 +286,16 @@ func (p *Processor) OnEconomyChanged(a *action.EconomyChangedAction) error {
 
 // ── CombatVisitor ─────────────────────────────────────────────────────────────
 
-func (p *Processor) OnMinionTempStatChanged(_ *action.MinionTempStatChangedAction) error { return nil }
+// OnMinionTempStatChanged handles ATK/HEALTH changes during combat.
+// The board snapshot preserves recruit stats; combat changes are simulation-only.
+// Partner combat minion tracking and combat copy peaks are handled by the Handle()
+// caller (they need additional event context not carried in the action).
+func (p *Processor) OnMinionTempStatChanged(a *action.MinionTempStatChangedAction) error {
+	// During combat, stat changes don't update the main board (snapshot-preserved).
+	// updateMinionStatByID handles the entity registry update and change buffering.
+	p.updateMinionStatByID(int(a.Entity), "", a.Stat, a.NewValue)
+	return nil
+}
 func (p *Processor) OnHeroDamaged(_ *action.HeroDamagedAction) error                    { return nil }
 func (p *Processor) OnMinionAttacked(_ *action.MinionAttackedAction) error               { return nil }
 func (p *Processor) OnDeathrattleTriggered(_ *action.DeathrattleTriggeredAction) error   { return nil }

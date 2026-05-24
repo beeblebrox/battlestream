@@ -4,12 +4,14 @@ package action
 // These actions can ONLY arrive during PhaseCombat. Stat changes are temporary
 // (simulation only; the board snapshot preserves recruit-phase stats).
 
-// MinionTempStatChangedAction fires when a minion's ATK or Health changes
-// during combat (temporary; does not persist to recruit phase).
+// MinionTempStatChangedAction fires when a minion's ATK or Health changes during
+// combat (simulation only; the board snapshot preserves recruit-phase stats).
+// Stat is "ATK" or "HEALTH"; NewValue is the updated absolute value.
 type MinionTempStatChangedAction struct {
 	ActionBase
-	DeltaATK int
-	DeltaHP  int
+	Stat         string
+	NewValue     int
+	ControllerID int
 }
 
 func (a *MinionTempStatChangedAction) actionMarker()                                 {}

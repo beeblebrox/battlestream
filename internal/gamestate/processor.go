@@ -529,7 +529,23 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 			} else if p.isPartnerHero(e, controllerID) {
 				p.machine.UpdatePartnerTag(tag, value)
 			} else if e.EntityID > 0 && controllerID == p.localPlayerID {
-				p.updateMinionStat(e, "HEALTH", value)
+				phase := p.machine.Phase()
+				if phase == PhaseCombat {
+					_ = p.OnMinionTempStatChanged(&action.MinionTempStatChangedAction{
+						ActionBase:   action.ActionBase{Entity: action.EntityID(e.EntityID)},
+						Stat:         "HEALTH",
+						NewValue:     parseInt(value),
+						ControllerID: controllerID,
+					})
+				} else {
+					_ = p.OnMinionPermStatChanged(&action.MinionPermStatChangedAction{
+						ActionBase:   action.ActionBase{Entity: action.EntityID(e.EntityID)},
+						Stat:         "HEALTH",
+						NewValue:     parseInt(value),
+						EntityName:   e.EntityName,
+						ControllerID: controllerID,
+					})
+				}
 				p.updatePartnerCombatMinion(e.EntityID, "HEALTH", parseInt(value))
 				p.updateCombatCopyPeak(e.EntityID, "HEALTH", parseInt(value))
 			}
@@ -542,7 +558,23 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 				}
 			}
 			if e.EntityID > 0 && controllerID == p.localPlayerID {
-				p.updateMinionStat(e, "ATK", value)
+				phase := p.machine.Phase()
+				if phase == PhaseCombat {
+					_ = p.OnMinionTempStatChanged(&action.MinionTempStatChangedAction{
+						ActionBase:   action.ActionBase{Entity: action.EntityID(e.EntityID)},
+						Stat:         "ATK",
+						NewValue:     parseInt(value),
+						ControllerID: controllerID,
+					})
+				} else {
+					_ = p.OnMinionPermStatChanged(&action.MinionPermStatChangedAction{
+						ActionBase:   action.ActionBase{Entity: action.EntityID(e.EntityID)},
+						Stat:         "ATK",
+						NewValue:     parseInt(value),
+						EntityName:   e.EntityName,
+						ControllerID: controllerID,
+					})
+				}
 				p.updatePartnerCombatMinion(e.EntityID, "ATK", parseInt(value))
 				p.updateCombatCopyPeak(e.EntityID, "ATK", parseInt(value))
 			}
@@ -672,17 +704,15 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 			}
 			if value == "PLAY" && e.EntityID > 0 {
 				if p.machine.Phase() != PhaseGameOver {
-					p.tryAddMinionFromRegistry(e.EntityID, controllerID)
+					_ = p.OnMinionBought(&action.MinionBoughtAction{
+						ActionBase:   action.ActionBase{Entity: action.EntityID(e.EntityID)},
+						ControllerID: controllerID,
+					})
 				}
 			} else if e.EntityID > 0 && p.machine.Phase() != PhaseGameOver {
-				// Remove from board on any non-PLAY zone transition (GRAVEYARD,
-				// REMOVEDFROMGAME, SETASIDE, HAND, DECK, etc.). This catches
-				// sold minions (PLAY->HAND) that were previously missed.
-				p.machine.RemoveMinion(e.EntityID)
-				p.machine.RemoveEnchantmentsForEntity(e.EntityID)
-				if p.machine.Phase() == PhaseRecruit {
-					p.machine.UpdateBoardSnapshot()
-				}
+				_ = p.OnMinionSold(&action.MinionSoldAction{
+					ActionBase: action.ActionBase{Entity: action.EntityID(e.EntityID)},
+				})
 			}
 
 		case "TURN":
@@ -1450,25 +1480,26 @@ func (p *Processor) isPlayerOrHeroEntity(e parser.GameEvent, controllerID int) b
 	return p.isLocalPlayerEntity(e) || p.isLocalHero(e, controllerID)
 }
 
-// updateMinionStat updates a minion's stat on the board and in the entity
-// registry. During recruit phase, buffers the delta for board-wide detection.
+// updateMinionStat updates a minion's stat from a raw parser event.
 func (p *Processor) updateMinionStat(e parser.GameEvent, stat, value string) {
-	newVal := parseInt(value)
-	if e.EntityID <= 0 {
+	p.updateMinionStatByID(e.EntityID, e.EntityName, stat, parseInt(value))
+}
+
+// updateMinionStatByID is the core stat-update path; called by both the parser-event
+// adapter above and the Phase 5 visitor (OnMinionPermStatChanged).
+func (p *Processor) updateMinionStatByID(entityID int, entityName, stat string, newVal int) {
+	if entityID <= 0 {
 		return
 	}
 
 	// Update entity registry.
-	info := p.entityProps[e.EntityID]
+	info := p.entityProps[entityID]
 	if info == nil {
 		info = &entityInfo{}
-		p.entityProps[e.EntityID] = info
+		p.entityProps[entityID] = info
 	}
-
-	// Extract name from the event entity name if we don't have one yet
-	// or only have a bare numeric placeholder.
-	if e.EntityName != "" && (info.Name == "" || isBareNumber(info.Name)) {
-		info.Name = cleanEntityName(e.EntityName)
+	if entityName != "" && (info.Name == "" || isBareNumber(info.Name)) {
+		info.Name = cleanEntityName(entityName)
 	}
 
 	var oldVal int
@@ -1482,12 +1513,12 @@ func (p *Processor) updateMinionStat(e parser.GameEvent, stat, value string) {
 	}
 
 	// Skip hero entities — those are handled by UpdatePlayerTag.
-	if p.heroEntities[e.EntityID] {
+	if p.heroEntities[entityID] {
 		return
 	}
 
 	// Update board minion stats if it's on the board.
-	onBoard := p.machine.UpdateMinionStat(e.EntityID, stat, newVal)
+	onBoard := p.machine.UpdateMinionStat(entityID, stat, newVal)
 	phase := p.machine.Phase()
 	if onBoard && phase == PhaseRecruit {
 		p.machine.UpdateBoardSnapshot()
@@ -1502,7 +1533,7 @@ func (p *Processor) updateMinionStat(e parser.GameEvent, stat, value string) {
 			name = info.CardID
 		}
 		p.pendingStatChanges = append(p.pendingStatChanges, pendingStatChange{
-			entityID: e.EntityID,
+			entityID: entityID,
 			name:     name,
 			turn:     p.machine.currentTurn(),
 			stat:     stat,

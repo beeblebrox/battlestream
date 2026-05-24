@@ -142,8 +142,19 @@ func TestGoldenState_DispatchProducesSameResultAsHandle(t *testing.T) {
 		t.Errorf("AbilityCounters mismatch:\n  ref=%v\n  got=%v", ref.AbilityCounters, got.AbilityCounters)
 	}
 
-	// ── TODO: enable in Phase 5 (board / stat changes) ──────────────────────
-	// if len(ref.Board) != len(got.Board) { t.Errorf(...) }
+	// ── Phase 5 assertions (board / stat changes) ───────────────────────────────
+	if len(ref.Board) != len(got.Board) {
+		t.Errorf("Board length: ref=%d got=%d", len(ref.Board), len(got.Board))
+	} else {
+		for i, rm := range ref.Board {
+			gm := got.Board[i]
+			if rm.EntityID != gm.EntityID || rm.Attack != gm.Attack || rm.Health != gm.Health {
+				t.Errorf("Board[%d]: ref={%d %s %d/%d} got={%d %s %d/%d}",
+					i, rm.EntityID, rm.Name, rm.Attack, rm.Health,
+					gm.EntityID, gm.Name, gm.Attack, gm.Health)
+			}
+		}
+	}
 
 	// ── TODO: enable in Phase 6 (combat / win-loss) ─────────────────────────
 	// if ref.Player.WinStreak != got.Player.WinStreak { t.Errorf(...) }

@@ -4,11 +4,11 @@ package action
 // These actions can ONLY arrive during PhaseRecruit. Their effects on game state
 // are permanent (persist into and beyond the following combat phase).
 
-// MinionBoughtAction fires when a minion moves from HAND/TAVERN to the player board.
+// MinionBoughtAction fires when a minion's ZONE transitions to PLAY for the local player.
+// ControllerID is the entity's controller player ID.
 type MinionBoughtAction struct {
 	ActionBase
-	BaseATK    int
-	BaseHealth int
+	ControllerID int
 }
 
 func (a *MinionBoughtAction) actionMarker()                           {}
@@ -42,11 +42,15 @@ func (a *TavernSpellPlayedAction) recruitPhase()                               {
 func (a *TavernSpellPlayedAction) AcceptRecruit(v RecruitVisitor) error { return v.OnTavernSpellPlayed(a) }
 
 // MinionPermStatChangedAction fires when a minion's ATK or Health changes
-// permanently during recruit phase (from a buff, enchantment, or effect).
+// during recruit phase (permanent — persists beyond combat).
+// Stat is "ATK" or "HEALTH"; NewValue is the updated absolute value.
+// EntityName is used to update the entity registry name if it was previously unknown.
 type MinionPermStatChangedAction struct {
 	ActionBase
-	DeltaATK int
-	DeltaHP  int
+	Stat         string
+	NewValue     int
+	EntityName   string
+	ControllerID int
 }
 
 func (a *MinionPermStatChangedAction) actionMarker()                                  {}
