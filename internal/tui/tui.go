@@ -649,14 +649,32 @@ func (m *Model) renderGamePanel(w int) string {
 		b.WriteString(styleLabel.Render("Turn   ") + styleValue.Render(fmt.Sprintf("%d", m.game.Turn)) + "\n")
 		b.WriteString(styleLabel.Render("Tavern ") + renderTavernTier(int(m.game.TavernTier)) + "\n")
 		if len(m.game.AvailableTribes) > 0 {
-			b.WriteString(styleLabel.Render("Tribes ") + styleDim.Render(strings.Join(m.game.AvailableTribes, ", ")) + "\n")
+			tribesStr := strings.Join(m.game.AvailableTribes, ", ")
+			// "Tribes " label is 7 chars; border+padding adds ~4; leave 1 for safety.
+			maxTribesW := w - 7 - 4 - 1
+			if maxTribesW < 10 {
+				maxTribesW = 10
+			}
+			if len(tribesStr) > maxTribesW {
+				// Truncate at last comma before the limit to keep clean word boundaries.
+				cut := maxTribesW - 1 // reserve one char for "…"
+				if cut > 0 {
+					lastComma := strings.LastIndex(tribesStr[:cut], ",")
+					if lastComma > 0 {
+						tribesStr = tribesStr[:lastComma] + "…"
+					} else {
+						tribesStr = tribesStr[:cut] + "…"
+					}
+				}
+			}
+			b.WriteString(styleLabel.Render("Tribes ") + styleDim.Render(tribesStr) + "\n")
 		}
 		if m.game.AnomalyName != "" {
-			label := "Anomaly"
+			anomalyHint := ""
 			if m.game.AnomalyDescription != "" {
-				label += " [d]"
+				anomalyHint = styleDim.Render(" [d]")
 			}
-			b.WriteString(styleLabel.Render(label+" ") + styleValue.Render(m.game.AnomalyName) + "\n")
+			b.WriteString(styleLabel.Render("Anomaly ") + styleValue.Render(m.game.AnomalyName) + anomalyHint + "\n")
 			if m.showAnomalyDesc && m.game.AnomalyDescription != "" {
 				wrapped := lipgloss.NewStyle().Width(w - 10).Render(m.game.AnomalyDescription)
 				b.WriteString("        " + styleDim.Render(wrapped) + "\n")
@@ -691,13 +709,26 @@ func (m *Model) renderHeroPanel(w int) string {
 	if m.game.IsDuos {
 		healthLabel = "HP Team "
 	}
-	b.WriteString(styleLabel.Render(healthLabel) + renderHealthBar(effectiveHP, maxHP, 16) + "\n")
+	// Health bar width: panel inner width minus label (8) minus border+padding overhead (4)
+	// minus the " 99/99" suffix estimate (6). Minimum 6 chars of bar.
+	healthBarW := w - 8 - 4 - 6
+	if healthBarW < 6 {
+		healthBarW = 6
+	}
+	if healthBarW > 16 {
+		healthBarW = 16
+	}
+	b.WriteString(styleLabel.Render(healthLabel) + renderHealthBar(effectiveHP, maxHP, healthBarW) + "\n")
 	armor := "—"
 	if p.Armor > 0 {
 		armor = fmt.Sprintf("%d", p.Armor)
 	}
 	b.WriteString(styleLabel.Render("Armor   ") + styleValue.Render(armor) + "\n")
-	b.WriteString(styleLabel.Render("Triples ") + styleValue.Render(fmt.Sprintf("%d", p.TripleCount)) + "\n")
+	triples := "—"
+	if p.TripleCount > 0 {
+		triples = fmt.Sprintf("%d", p.TripleCount)
+	}
+	b.WriteString(styleLabel.Render("Triples ") + styleValue.Render(triples) + "\n")
 	b.WriteString(styleLabel.Render("Gold    ") + styleValue.Render(fmt.Sprintf("%d/%d", p.CurrentGold, p.MaxGold)) + "\n")
 	if p.HeroCardId != "" {
 		b.WriteString(styleLabel.Render("Hero    ") + styleValue.Render(gamestate.CardName(p.HeroCardId)) + "\n")
@@ -709,6 +740,8 @@ func (m *Model) renderHeroPanel(w int) string {
 			b.WriteString(styleLabel.Render("Last    ") + styleWin.Render(fmt.Sprintf("WIN (streak: %d)", p.WinStreak)) + "\n")
 		} else if p.LossStreak > 0 {
 			b.WriteString(styleLabel.Render("Last    ") + styleLoss.Render(fmt.Sprintf("LOSS (streak: %d)", p.LossStreak)) + "\n")
+		} else {
+			b.WriteString(styleLabel.Render("Last    ") + styleDim.Render("—") + "\n")
 		}
 	}
 
@@ -1267,9 +1300,17 @@ func renderMinion(mn *bspb.MinionState) string {
 	stats := fmt.Sprintf("%d/%d", mn.Attack, mn.Health)
 	sb.WriteString(lipgloss.NewStyle().Foreground(colorGold).Render(stats))
 
-	// Buffs
+	// Buffs — only show non-zero components to avoid noisy "+0".
 	if mn.BuffAttack != 0 || mn.BuffHealth != 0 {
-		buff := fmt.Sprintf(" (+%d/+%d)", mn.BuffAttack, mn.BuffHealth)
+		var buff string
+		switch {
+		case mn.BuffAttack != 0 && mn.BuffHealth != 0:
+			buff = fmt.Sprintf(" (+%d/+%d)", mn.BuffAttack, mn.BuffHealth)
+		case mn.BuffAttack != 0:
+			buff = fmt.Sprintf(" (+%d atk)", mn.BuffAttack)
+		default:
+			buff = fmt.Sprintf(" (+%d hp)", mn.BuffHealth)
+		}
 		sb.WriteString(styleWin.Render(buff))
 	}
 
