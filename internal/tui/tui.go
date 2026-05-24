@@ -603,8 +603,20 @@ func (m *Model) View() string {
 	if m.game != nil && m.game.IsDuos {
 		helpText = "  [r] Refresh  [R] Stats  [d] Anomaly desc  [l] Last result  [o] Dashboard  [q] Quit  scroll: mouse wheel"
 	}
-	if m.width > 0 && len(helpText) > m.width {
-		helpText = helpText[:m.width]
+	if m.width > 0 {
+		runes := []rune(helpText)
+		if len(runes) > m.width {
+			// Truncate at last complete keybinding (last ']' before the width limit).
+			cut := m.width - 1
+			for cut > 0 && runes[cut] != ']' {
+				cut--
+			}
+			if cut > 0 {
+				helpText = string(runes[:cut+1]) + "…"
+			} else {
+				helpText = string(runes[:m.width])
+			}
+		}
 	}
 	help := styleHelp.Render(helpText)
 
@@ -678,7 +690,7 @@ func (m *Model) renderGamePanel(w int) string {
 			if m.game.AnomalyDescription != "" {
 				anomalyHint = styleDim.Render(" [d]")
 			}
-			b.WriteString(styleLabel.Render("Anomaly") + styleValue.Render(m.game.AnomalyName) + anomalyHint + "\n")
+			b.WriteString(styleLabel.Render("Anomaly") + " " + styleValue.Render(m.game.AnomalyName) + anomalyHint + "\n")
 			if m.showAnomalyDesc && m.game.AnomalyDescription != "" {
 				wrapped := lipgloss.NewStyle().Width(w - 10).Render(m.game.AnomalyDescription)
 				b.WriteString("        " + styleDim.Render(wrapped) + "\n")
@@ -946,7 +958,10 @@ func (m *Model) modsItems() string {
 
 	// ABILITIES
 	if len(m.game.AbilityCounters) > 0 {
-		b.WriteString("\n" + styleTitle.Render("ABILITIES") + "\n")
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(styleTitle.Render("ABILITIES") + "\n")
 		for _, ac := range m.game.AbilityCounters {
 			name := buffCategoryDisplayName(ac.Category)
 			color := buffCategoryColor(ac.Category)
@@ -1355,14 +1370,24 @@ func renderMinion(mn *bspb.MinionState, maxW int) string {
 		sb.WriteString(styleWin.Render(buff))
 	}
 
-	// Tribe
-	if mn.MinionType != "" && mn.MinionType != "INVALID" {
-		sb.WriteString(styleDim.Render(fmt.Sprintf(" [%s]", strings.ToLower(mn.MinionType))))
+	// Tribe and enchantment count — suppress when remaining width budget is too tight.
+	used := nameW + 1 + len(stats) // name field + separator + stats digits
+	budget := maxW - used
+	if maxW == 0 {
+		budget = 99
 	}
-
-	// Enchantment count
+	if mn.MinionType != "" && mn.MinionType != "INVALID" {
+		tribeStr := fmt.Sprintf(" [%s]", strings.ToLower(mn.MinionType))
+		if budget >= len(tribeStr) {
+			sb.WriteString(styleDim.Render(tribeStr))
+			budget -= len(tribeStr)
+		}
+	}
 	if len(mn.Enchantments) > 0 {
-		sb.WriteString(styleDim.Render(fmt.Sprintf(" %d buffs", len(mn.Enchantments))))
+		enchStr := fmt.Sprintf(" %d buffs", len(mn.Enchantments))
+		if budget >= len(enchStr) {
+			sb.WriteString(styleDim.Render(enchStr))
+		}
 	}
 
 	return sb.String()
