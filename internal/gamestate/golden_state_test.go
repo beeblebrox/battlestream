@@ -134,9 +134,13 @@ func TestGoldenState_DispatchProducesSameResultAsHandle(t *testing.T) {
 	// if ref.Player.WinStreak != got.Player.WinStreak { t.Errorf(...) }
 	// if ref.Player.LossStreak != got.Player.LossStreak { t.Errorf(...) }
 
-	// ── TODO: enable in Phase 4 (Dnt enchantments) ──────────────────────────
-	// if !buffSourcesEqual(ref.BuffSources, got.BuffSources) { t.Errorf(...) }
-	// if !abilityCountersEqual(ref.AbilityCounters, got.AbilityCounters) { t.Errorf(...) }
+	// ── Phase 4 assertions (Dnt enchantments) ───────────────────────────────
+	if !buffSourcesEqual(ref.BuffSources, got.BuffSources) {
+		t.Errorf("BuffSources mismatch:\n  ref=%v\n  got=%v", ref.BuffSources, got.BuffSources)
+	}
+	if !abilityCountersEqual(ref.AbilityCounters, got.AbilityCounters) {
+		t.Errorf("AbilityCounters mismatch:\n  ref=%v\n  got=%v", ref.AbilityCounters, got.AbilityCounters)
+	}
 
 	// ── TODO: enable in Phase 5 (board / stat changes) ──────────────────────
 	// if len(ref.Board) != len(got.Board) { t.Errorf(...) }
@@ -166,4 +170,41 @@ func TestGoldenState_PhaseEnforcement(t *testing.T) {
 	// 1. No board state mutation occurred.
 	// 2. The dispatcher logged a "non-recruit action during recruit phase" warning.
 	t.Skip("Phase enforcement test enabled in Phase 5")
+}
+
+// ── Comparison helpers ────────────────────────────────────────────────────────
+
+func buffSourcesEqual(a, b []gamestate.BuffSource) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	// Build map by category for order-independent comparison.
+	m := make(map[string]gamestate.BuffSource, len(a))
+	for _, bs := range a {
+		m[bs.Category] = bs
+	}
+	for _, bs := range b {
+		ref, ok := m[bs.Category]
+		if !ok || ref.Attack != bs.Attack || ref.Health != bs.Health {
+			return false
+		}
+	}
+	return true
+}
+
+func abilityCountersEqual(a, b []gamestate.AbilityCounter) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	m := make(map[string]gamestate.AbilityCounter, len(a))
+	for _, ac := range a {
+		m[ac.Category] = ac
+	}
+	for _, ac := range b {
+		ref, ok := m[ac.Category]
+		if !ok || ref.Value != ac.Value {
+			return false
+		}
+	}
+	return true
 }

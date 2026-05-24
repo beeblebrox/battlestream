@@ -53,14 +53,14 @@ func (a *MinionPermStatChangedAction) actionMarker()                            
 func (a *MinionPermStatChangedAction) recruitPhase()                                  {}
 func (a *MinionPermStatChangedAction) AcceptRecruit(v RecruitVisitor) error { return v.OnMinionPermStatChanged(a) }
 
-// DntEnchantmentAction fires when a player-level Dnt (Deathnote) enchantment's
-// script data updates — these are the HDT buff source counters.
+// DntEnchantmentAction fires when a Dnt (Deathnote) enchantment's
+// TAG_SCRIPT_DATA_NUM_1 or TAG_SCRIPT_DATA_NUM_2 changes — these are the
+// HDT buff source counters. Entity carries the enchantment's entity ID;
+// the visitor dispatches to the correct handler via the entity's card ID.
 type DntEnchantmentAction struct {
 	ActionBase
-	Category   BuffCategory
-	DeltaATK   int
-	DeltaHP    int
-	IsAbsolute bool // true = absolute tracking; false = differential
+	Tag   string // TAG_SCRIPT_DATA_NUM_1 or TAG_SCRIPT_DATA_NUM_2
+	Value int    // raw script data value
 }
 
 func (a *DntEnchantmentAction) actionMarker()                              {}
@@ -69,13 +69,14 @@ func (a *DntEnchantmentAction) AcceptRecruit(v RecruitVisitor) error { return v.
 
 // PlayerTagChangedAction fires when a player-level tag changes (Bloodgem values,
 // Elemental buff values, TavernSpell buff values, etc.).
-// ControllerID is the player= field from the log event (controller player ID);
-// the visitor uses it to guard against accepting non-local entity updates.
+// ControllerID is the player= field (0 for bare-name entity references);
+// EntityName is the entity's display name (used as a fallback when ControllerID is 0).
 type PlayerTagChangedAction struct {
 	ActionBase
 	Tag          string
 	Value        int
 	ControllerID int
+	EntityName   string
 }
 
 func (a *PlayerTagChangedAction) actionMarker()                                {}
@@ -85,11 +86,13 @@ func (a *PlayerTagChangedAction) AcceptRecruit(v RecruitVisitor) error { return 
 // EconomyChangedAction fires when an economy tag changes during recruit phase.
 // Tag identifies which counter changed (BACON_FREE_REFRESH_COUNT or
 // BACON_PLAYER_EXTRA_GOLD_NEXT_TURN); Value is the new absolute value.
+// EntityName is used as a fallback when ControllerID is 0 (bare-name entity references).
 type EconomyChangedAction struct {
 	ActionBase
 	Tag          string
 	Value        int
 	ControllerID int
+	EntityName   string
 }
 
 func (a *EconomyChangedAction) actionMarker()                               {}

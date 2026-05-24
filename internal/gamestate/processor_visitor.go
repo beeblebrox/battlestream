@@ -214,7 +214,12 @@ func (p *Processor) OnMinionSold(_ *action.MinionSoldAction) error              
 func (p *Processor) OnTavernUpgraded(_ *action.TavernUpgradedAction) error        { return nil }
 func (p *Processor) OnTavernSpellPlayed(_ *action.TavernSpellPlayedAction) error  { return nil }
 func (p *Processor) OnMinionPermStatChanged(_ *action.MinionPermStatChangedAction) error { return nil }
-func (p *Processor) OnDntEnchantment(_ *action.DntEnchantmentAction) error        { return nil }
+// OnDntEnchantment handles TAG_SCRIPT_DATA_NUM changes on Dnt enchantment entities.
+// Delegates to handleDntTagChange which dispatches by enchantment card ID.
+func (p *Processor) OnDntEnchantment(a *action.DntEnchantmentAction) error {
+	p.handleDntTagChange(int(a.Entity), a.Tag, a.Value)
+	return nil
+}
 
 // OnPlayerTagChanged handles buff-source player tags: Bloodgem, Elemental, TavernSpell.
 // Guards against enchantment entities (e.g. Bacon_TagTransferPlayerE) that mirror
@@ -226,7 +231,7 @@ func (p *Processor) OnPlayerTagChanged(a *action.PlayerTagChangedAction) error {
 			return nil
 		}
 	}
-	if !p.isLocalEntityByIDAndController(entityID, a.ControllerID) {
+	if !p.isLocalEntityByIDAndController(entityID, a.ControllerID, a.EntityName) {
 		return nil
 	}
 	p.updateBuffSourceFromPlayerTag(a.Tag, strconv.Itoa(a.Value))
@@ -242,7 +247,7 @@ func (p *Processor) OnEconomyChanged(a *action.EconomyChangedAction) error {
 			return nil
 		}
 	}
-	if !p.isLocalEntityByIDAndController(entityID, a.ControllerID) {
+	if !p.isLocalEntityByIDAndController(entityID, a.ControllerID, a.EntityName) {
 		return nil
 	}
 	switch a.Tag {
@@ -274,7 +279,7 @@ func (p *Processor) OnCombatEconomyEffect(a *action.CombatEconomyEffectAction) e
 			return nil
 		}
 	}
-	if !p.isLocalEntityByIDAndController(entityID, a.ControllerID) {
+	if !p.isLocalEntityByIDAndController(entityID, a.ControllerID, "") {
 		return nil
 	}
 	if a.Tag == "BACON_PLAYER_EXTRA_GOLD_NEXT_TURN" {
@@ -284,15 +289,19 @@ func (p *Processor) OnCombatEconomyEffect(a *action.CombatEconomyEffectAction) e
 	return nil
 }
 
-// isLocalEntityByIDAndController returns true if entityID/controllerID belong to
-// the local player or hero. Used by Phase 3 visitor methods as the equivalent
-// of isPlayerOrHeroEntity() without requiring a parser.GameEvent.
-func (p *Processor) isLocalEntityByIDAndController(entityID, controllerID int) bool {
-	// Match local player entity (controllerID == localPlayerID).
+// isLocalEntityByIDAndController returns true if the entity belongs to the local player or hero.
+// entityName is used as a fallback when controllerID is 0 (bare-name log references like
+// "TAG_CHANGE Entity=Alice" have no player= field and thus PlayerID=0 in the event).
+func (p *Processor) isLocalEntityByIDAndController(entityID, controllerID int, entityName string) bool {
+	// Direct controller match.
 	if p.localPlayerID > 0 && controllerID == p.localPlayerID {
 		return true
 	}
-	// Match local hero entity (exact ID once known; fall back to hero registry).
+	// Name fallback: bare-name entity references have controllerID==0; use localPlayerName.
+	if p.localPlayerID > 0 && controllerID == 0 && p.localPlayerName != "" && entityName == p.localPlayerName {
+		return true
+	}
+	// Match local hero entity by ID (exact once known; fall back to hero registry).
 	if entityID > 0 {
 		if p.localHeroID > 0 {
 			return entityID == p.localHeroID

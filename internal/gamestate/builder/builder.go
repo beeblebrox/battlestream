@@ -170,8 +170,13 @@ func (b *ActionBuilder) buildGameEnd(e parser.GameEvent) action.Action {
 }
 
 // buildTagChange handles EventTagChange events for migrated player/economy tags.
-// Returns nil for all other tags so the drain falls back to Handle().
+// Returns nil for all other tags (or for any migrated tag during non-recruit phases)
+// so the drain falls back to Handle(). These player-state tags can fire at any phase;
+// only the recruit-phase path goes through the dispatcher — other phases still use Handle().
 func (b *ActionBuilder) buildTagChange(e parser.GameEvent) action.Action {
+	if b.phase != action.PhaseRecruit {
+		return nil
+	}
 	for tag, rawStr := range e.Tags {
 		switch tag {
 		case "BACON_BLOODGEMBUFFATKVALUE", "BACON_BLOODGEMBUFFHEALTHVALUE",
@@ -183,6 +188,7 @@ func (b *ActionBuilder) buildTagChange(e parser.GameEvent) action.Action {
 				Tag:          tag,
 				Value:        val,
 				ControllerID: e.PlayerID,
+				EntityName:   e.EntityName,
 			}
 
 		case "BACON_FREE_REFRESH_COUNT":
@@ -192,6 +198,7 @@ func (b *ActionBuilder) buildTagChange(e parser.GameEvent) action.Action {
 				Tag:          tag,
 				Value:        raw,
 				ControllerID: e.PlayerID,
+				EntityName:   e.EntityName,
 			}
 
 		case "BACON_PLAYER_EXTRA_GOLD_NEXT_TURN":
@@ -199,19 +206,12 @@ func (b *ActionBuilder) buildTagChange(e parser.GameEvent) action.Action {
 			if raw < 0 {
 				raw = 0
 			}
-			if b.phase == action.PhaseCombat {
-				return &action.CombatEconomyEffectAction{
-					ActionBase:   b.base(e),
-					Tag:          tag,
-					Value:        raw,
-					ControllerID: e.PlayerID,
-				}
-			}
 			return &action.EconomyChangedAction{
 				ActionBase:   b.base(e),
 				Tag:          tag,
 				Value:        raw,
 				ControllerID: e.PlayerID,
+				EntityName:   e.EntityName,
 			}
 		}
 	}

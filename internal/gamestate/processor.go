@@ -800,10 +800,13 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 		case "TAG_SCRIPT_DATA_NUM_1", "TAG_SCRIPT_DATA_NUM_2":
 			if e.EntityID > 0 {
 				p.updateEnchantmentScriptData(e.EntityID, tag, value)
-				// Process enchantments controlled by local player or attached to local entities.
 				ctrl := p.entityController[e.EntityID]
 				if ctrl == p.localPlayerID || p.isLocalDntTarget(e.EntityID) {
-					p.handleDntTagChange(e.EntityID, tag, parseInt(value))
+					_ = p.OnDntEnchantment(&action.DntEnchantmentAction{
+						ActionBase: action.ActionBase{Entity: action.EntityID(e.EntityID)},
+						Tag:        tag,
+						Value:      parseInt(value),
+					})
 				}
 			}
 
