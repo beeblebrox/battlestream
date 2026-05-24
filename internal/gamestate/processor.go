@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"battlestream.fixates.io/internal/gamestate/action"
 	"battlestream.fixates.io/internal/parser"
 )
 
@@ -202,125 +203,71 @@ func NewProcessor(m *Machine) *Processor {
 func (p *Processor) Handle(e parser.GameEvent) {
 	p.lastEventTime = time.Now()
 
+	// For migrated event types, Handle() is a thin adapter: it constructs the typed
+	// action and calls the visitor method. Direct callers (tests, legacy code) continue
+	// to work. The dispatcher path calls the visitor methods directly (no double-call).
+
 	switch e.Type {
 	case parser.EventGameStart:
-		p.flushPendingStatChanges()
-		p.isReconnect = false
-		// Stash game-level state before reset — if the next EventGameEntityTags
-		// confirms a reconnect, this state will be restored.
-		if phase := p.machine.Phase(); phase != PhaseIdle && phase != PhaseGameOver {
-			s := p.machine.State()
-			turnSnaps, prevBS, prevAC, prevMC := p.machine.ReconnectStashData()
-			p.reconnectStash = &reconnectStash{
-				gameID:              s.GameID,
-				startTime:           s.StartTime,
-				turn:                s.Turn,
-				tavernTier:          s.TavernTier,
-				isDuos:              s.IsDuos,
-				partnerPlayerID:     p.partnerPlayerID,
-				partnerPlayerName:   p.partnerPlayerName,
-				heroCardID:          s.Player.HeroCardID,
-				partnerHeroCardID:   "",
-				turnSnapshots:       turnSnaps,
-				buffSources:         append([]BuffSource(nil), s.BuffSources...),
-				abilityCounters:     append([]AbilityCounter(nil), s.AbilityCounters...),
-				partnerBuffSources:  append([]BuffSource(nil), s.PartnerBuffSources...),
-				partnerAbilityCtrs:  append([]AbilityCounter(nil), s.PartnerAbilityCounters...),
-				modifications:       append([]StatMod(nil), s.Modifications...),
-				prevBuffSources:     prevBS,
-				prevAbilityCtrs:     prevAC,
-				prevModCount:        prevMC,
-				anomalyCardID:       s.AnomalyCardID,
-				anomalyName:         s.AnomalyName,
-				anomalyDescription:  s.AnomalyDescription,
-				availableTribes:     append([]string(nil), s.AvailableTribes...),
-			}
-			if s.Partner != nil {
-				p.reconnectStash.partnerHeroCardID = s.Partner.HeroCardID
-			}
-		} else {
-			p.reconnectStash = nil
-		}
-		p.gameSeq++
-		p.pendingPlacement = 0
-		p.localPlayerID = 0
-		p.localPlayerName = ""
-		p.localHeroID = 0
-		p.partnerPlayerID = 0
-		p.partnerPlayerName = ""
-		p.partnerHeroID = 0
-		p.isDuos = false
-		p.punishLeaversActive = false
-		p.duosFromTeammate = false
-		p.partnerCombatActive = false
-		p.partnerCombatHeroCtrl = 0
-		p.partnerCombatMinions = nil
-		p.partnerBoardSetupDone = false
-		p.combatPhaseActive = false
-		p.combatPhaseEntityIDs = nil
-		p.combatCopies = nil
-		p.entityController = make(map[int]int)
-		p.heroEntities = make(map[int]bool)
-		p.entityProps = make(map[int]*entityInfo)
-		p.localBuffs = newBuffTracker()
-		p.partnerBuffs = newBuffTracker()
-		p.dntTeamTotal = make(map[string][2]int)
-		p.dntPartnerAccum = make(map[string][2]int)
-		p.localCombatResult = 0
-		p.pendingHeroAttackerID = 0
-		p.bgTurnsStarted = 0
-		p.seenTribes = make(map[string]bool)
-		p.entityTribeReg = make(map[int]string)
-		p.tribeConfirmCount = make(map[string]int)
-		p.playerEntityIDs = make(map[int]int)
-		p.realPlayerIDs = make(map[int]int)
-		// Derive game ID from CREATE_GAME timestamp for stability across
-		// daemon restarts and reparse (plans 23+24). Falls back to gameSeq
-		// if timestamp is zero.
 		var gameID string
 		if !e.Timestamp.IsZero() {
-			gameID = fmt.Sprintf("game-%d", e.Timestamp.UnixMilli())
-		} else {
-			gameID = fmt.Sprintf("game-%d", p.gameSeq)
+			gameID = "game-" + strconv.FormatInt(e.Timestamp.UnixMilli(), 10)
 		}
-		p.machine.GameStart(gameID, e.Timestamp)
+		_ = p.OnGameStart(&action.GameStartAction{
+			ActionBase: action.ActionBase{Entity: action.EntityID(e.EntityID)},
+			GameID:     gameID,
+			Timestamp:  e.Timestamp,
+		})
 
 	case parser.EventPlayerDef:
-		p.handlePlayerDef(e)
+		hi, _ := strconv.ParseUint(e.Tags["hi"], 10, 64)
+		tag := e.EntityName
+		if tag == "" {
+			tag = e.Tags["BATTLETAG"]
+		}
+		_ = p.OnPlayerDef(&action.PlayerDefAction{
+			ActionBase:    action.ActionBase{Entity: action.EntityID(e.EntityID)},
+			PlayerID:      e.PlayerID,
+			BattleTag:     tag,
+			AccountHi:     hi,
+			HeroEntityID:  parseInt(e.Tags["HERO_ENTITY"]),
+			DuoTeammateID: parseInt(e.Tags["BACON_DUO_TEAMMATE_PLAYER_ID"]),
+			InitialTurn:   parseInt(e.Tags["TURN"]),
+			Resources:     parseInt(e.Tags["RESOURCES"]),
+			ResourcesUsed: parseInt(e.Tags["RESOURCES_USED"]),
+		})
 
 	case parser.EventPlayerName:
-		p.handlePlayerName(e)
+		_ = p.OnPlayerName(&action.PlayerNameAction{
+			ActionBase: action.ActionBase{Entity: action.EntityID(e.EntityID)},
+			PlayerID:   e.PlayerID,
+			BattleTag:  e.EntityName,
+		})
+
+	case parser.EventTurnStart:
+		turn, _ := strconv.Atoi(e.Tags["TURN"])
+		newPhase := action.PhaseRecruit
+		if turn%2 == 0 {
+			newPhase = action.PhaseCombat
+		}
+		_ = p.OnTurnTransition(&action.TurnTransitionAction{
+			ActionBase:     action.ActionBase{Entity: action.EntityID(e.EntityID)},
+			NewPhase:       newPhase,
+			GameEntityTurn: turn,
+		})
 
 	case parser.EventGameEnd:
-		p.flushPendingStatChanges()
-		// Record the final combat result before ending the game.
-		// The TURN-based streak update won't fire after the last combat.
-		if p.localCombatResult > 0 {
-			p.machine.RecordRoundWin()
-		} else if p.localCombatResult < 0 {
-			p.machine.RecordRoundLoss()
-		}
-		p.localCombatResult = 0
 		placement := p.pendingPlacement
-		if pl, ok := e.Tags["PLAYER_LEADERBOARD_PLACE"]; ok {
+		if pl := e.Tags["PLAYER_LEADERBOARD_PLACE"]; pl != "" {
 			if v, err := strconv.Atoi(pl); err == nil {
 				placement = v
 			}
 		}
-		p.pendingPlacement = 0
-		p.machine.GameEnd(placement, e.Timestamp)
-
-	case parser.EventTurnStart:
-		p.flushPendingStatChanges()
-		if t, ok := e.Tags["TURN"]; ok {
-			turn, _ := strconv.Atoi(t)
-			p.machine.SetGameEntityTurn(turn)
-			// Prune dead entities on recruit phase transition (odd GameEntity turn).
-			if turn%2 == 1 {
-				p.pruneStaleEntities()
-				p.combatCopies = nil
-			}
-		}
+		_ = p.OnGameEnd(&action.GameEndAction{
+			ActionBase: action.ActionBase{Entity: action.EntityID(e.EntityID)},
+			Placement:  placement,
+			Timestamp:  e.Timestamp,
+		})
 
 	case parser.EventGameEntityTags:
 		// Check for reconnect: STATE=RUNNING + TURN > 1 means mid-game reconnect.

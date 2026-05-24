@@ -7,8 +7,8 @@
 package builder
 
 import (
-	"fmt"
 	"strconv"
+	"time"
 
 	"battlestream.fixates.io/internal/gamestate/action"
 	"battlestream.fixates.io/internal/gamestate/card"
@@ -18,11 +18,10 @@ import (
 // ActionBuilder converts parser.GameEvents into typed Actions.
 // It is not goroutine-safe — call from a single event-loop goroutine.
 type ActionBuilder struct {
-	catalog     card.Catalog
-	phase       action.GamePhase
-	currentTurn int
-	// entityCards caches cardID lookups by entity ID to survive tag changes
-	// that arrive without a CardID.
+	catalog        card.Catalog
+	phase          action.GamePhase
+	gameEntityTurn int // raw GameEntity TURN (doubled)
+	// entityCards caches cardID by entity ID for tag-change events without CardID.
 	entityCards map[action.EntityID]string
 }
 
@@ -35,11 +34,10 @@ func New(catalog card.Catalog) *ActionBuilder {
 	}
 }
 
-// Build converts e into a typed Action. Returns nil if no action is needed
-// (e.g., an event not yet handled by the builder during incremental migration).
-// The dispatcher silently skips nil actions.
+// Build converts e into a typed Action. Returns nil if the event type is not
+// yet handled (non-migrated events during incremental migration). The dispatcher
+// silently skips nil returns.
 func (b *ActionBuilder) Build(e parser.GameEvent) action.Action {
-	// Cache entity → cardID for future tag-change lookups.
 	if e.CardID != "" && e.EntityID != 0 {
 		b.entityCards[action.EntityID(e.EntityID)] = e.CardID
 	}
@@ -55,12 +53,12 @@ func (b *ActionBuilder) Build(e parser.GameEvent) action.Action {
 		return b.buildTurnTransition(e)
 	case parser.EventGameEnd:
 		return b.buildGameEnd(e)
-	// EventGameEntityTags, EventEntityUpdate, EventTagChange handled in later phases.
+	// EventGameEntityTags, EventEntityUpdate, EventTagChange: Phase 2+ / Phase 3+
 	}
 	return nil
 }
 
-// ── Card lookup helpers ───────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 func (b *ActionBuilder) cardInfo(cardID string) *card.CardInfo {
 	if cardID == "" {
@@ -72,43 +70,67 @@ func (b *ActionBuilder) cardInfo(cardID string) *card.CardInfo {
 	return &card.CardInfo{ID: cardID}
 }
 
-func (b *ActionBuilder) blockCardInfo(e parser.GameEvent) *card.CardInfo {
-	return b.cardInfo(e.BlockCardID)
-}
-
 func (b *ActionBuilder) base(e parser.GameEvent) action.ActionBase {
 	return action.ActionBase{
 		Card:        b.cardInfo(e.CardID),
-		BlockCard:   b.blockCardInfo(e),
+		BlockCard:   b.cardInfo(e.BlockCardID),
 		Entity:      action.EntityID(e.EntityID),
-		Turn:        b.currentTurn,
 		Phase:       b.phase,
 		TriggerKind: action.TriggerDirectPlay,
 	}
+}
+
+func tagInt(tags map[string]string, key string) int {
+	if v, ok := tags[key]; ok {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return 0
+}
+
+func tagUint64(tags map[string]string, key string) uint64 {
+	if v, ok := tags[key]; ok {
+		if n, err := strconv.ParseUint(v, 10, 64); err == nil {
+			return n
+		}
+	}
+	return 0
 }
 
 // ── Lifecycle builders ────────────────────────────────────────────────────────
 
 func (b *ActionBuilder) buildGameStart(e parser.GameEvent) action.Action {
 	b.phase = action.PhaseIdle
+	b.gameEntityTurn = 0
 	b.entityCards = make(map[action.EntityID]string)
-	return &action.GameStartAction{ActionBase: b.base(e)}
+
+	var gameID string
+	if !e.Timestamp.IsZero() {
+		gameID = "game-" + strconv.FormatInt(e.Timestamp.UnixMilli(), 10)
+	}
+	return &action.GameStartAction{
+		ActionBase: b.base(e),
+		GameID:     gameID,
+		Timestamp:  e.Timestamp,
+	}
 }
 
 func (b *ActionBuilder) buildPlayerDef(e parser.GameEvent) action.Action {
-	var hi uint64
-	if v, ok := e.Tags["GameAccountId.hi"]; ok {
-		hi, _ = strconv.ParseUint(v, 10, 64)
-	}
 	tag := e.EntityName
 	if tag == "" {
 		tag = e.Tags["BATTLETAG"]
 	}
 	return &action.PlayerDefAction{
-		ActionBase: b.base(e),
-		PlayerID:   e.PlayerID,
-		BattleTag:  tag,
-		AccountHi:  hi,
+		ActionBase:    b.base(e),
+		PlayerID:      e.PlayerID,
+		BattleTag:     tag,
+		AccountHi:     tagUint64(e.Tags, "hi"),
+		HeroEntityID:  tagInt(e.Tags, "HERO_ENTITY"),
+		DuoTeammateID: tagInt(e.Tags, "BACON_DUO_TEAMMATE_PLAYER_ID"),
+		InitialTurn:   tagInt(e.Tags, "TURN"),
+		Resources:     tagInt(e.Tags, "RESOURCES"),
+		ResourcesUsed: tagInt(e.Tags, "RESOURCES_USED"),
 	}
 }
 
@@ -121,46 +143,26 @@ func (b *ActionBuilder) buildPlayerName(e parser.GameEvent) action.Action {
 }
 
 func (b *ActionBuilder) buildTurnTransition(e parser.GameEvent) action.Action {
-	// EventTurnStart fires on GameEntity TURN changes.
-	// Odd GameEntity TURN → PhaseRecruit; even → PhaseCombat.
-	turn := 0
-	if v, ok := e.Tags["TURN"]; ok {
-		if n, err := strconv.Atoi(v); err == nil {
-			turn = n
-		}
-	}
-
+	turn := tagInt(e.Tags, "TURN")
 	newPhase := action.PhaseRecruit
 	if turn%2 == 0 {
 		newPhase = action.PhaseCombat
 	}
 	b.phase = newPhase
+	b.gameEntityTurn = turn
 
 	return &action.TurnTransitionAction{
-		ActionBase: b.base(e),
-		NewPhase:   newPhase,
-		TurnNumber: b.currentTurn,
+		ActionBase:     b.base(e),
+		NewPhase:       newPhase,
+		GameEntityTurn: turn,
 	}
 }
 
 func (b *ActionBuilder) buildGameEnd(e parser.GameEvent) action.Action {
 	b.phase = action.PhaseGameOver
-	placement := 0
-	if v, ok := e.Tags["PLAYER_LEADERBOARD_PLACE"]; ok {
-		if n, err := strconv.Atoi(v); err == nil {
-			placement = n
-		}
-	}
 	return &action.GameEndAction{
 		ActionBase: b.base(e),
-		Placement:  placement,
+		Placement:  tagInt(e.Tags, "PLAYER_LEADERBOARD_PLACE"),
+		Timestamp:  time.Now(),
 	}
 }
-
-// Errorf formats a builder diagnostic message.
-func errorf(format string, args ...any) error {
-	return fmt.Errorf("builder: "+format, args...)
-}
-
-// suppress unused import warning during incremental development
-var _ = errorf

@@ -60,15 +60,17 @@ func runDispatchPath(t *testing.T, logPath string) gamestate.BGGameState {
 		for {
 			select {
 			case e := <-ch:
-				// Phase 1: build action (some events return nil) AND call Handle().
-				// As migration proceeds, Handle() calls are removed event by event.
 				if a := bldr.Build(e); a != nil {
+					// Migrated event: use dispatcher path only.
+					// Handle() is now a thin adapter that would call the same visitor
+					// method — calling both would double-process the event.
 					if err := disp.Dispatch(a); err != nil {
 						t.Errorf("dispatch error: %v", err)
 					}
+				} else {
+					// Not yet migrated: fall back to Handle().
+					proc.Handle(e)
 				}
-				// TODO(Phase 2+): remove this Handle() call for each migrated event type.
-				proc.Handle(e)
 			default:
 				return
 			}
