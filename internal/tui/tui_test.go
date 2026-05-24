@@ -308,8 +308,8 @@ func TestModsItems_GroupedSections(t *testing.T) {
 	if !strings.Contains(out, "TARGETED") {
 		t.Error("expected TARGETED section header")
 	}
-	if !strings.Contains(out, "Bloodgems") || !strings.Contains(out, "+4/+0") {
-		t.Error("expected Bloodgems +4/+0 in targeted section")
+	if !strings.Contains(out, "Bloodgems") || !strings.Contains(out, "+4 atk") {
+		t.Error("expected Bloodgems +4 atk in targeted section")
 	}
 	if !strings.Contains(out, "TYPE BUFFS") {
 		t.Error("expected TYPE BUFFS section header")

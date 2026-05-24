@@ -24,6 +24,8 @@ import (
 	"battlestream.fixates.io/internal/discovery"
 	"battlestream.fixates.io/internal/fileout"
 	"battlestream.fixates.io/internal/gamestate"
+	"battlestream.fixates.io/internal/gamestate/builder"
+	"battlestream.fixates.io/internal/gamestate/card"
 	"battlestream.fixates.io/internal/logconfig"
 	"battlestream.fixates.io/internal/parser"
 	"battlestream.fixates.io/internal/store"
@@ -255,6 +257,14 @@ func startDaemon(ctx context.Context, cfg *config.Config, profile *config.Profil
 	}()
 
 	// --- Event processing: parsedCh -> state machine + broadcast ---
+	catalog := card.NewFuncCatalog(gamestate.CardName)
+	bldr := builder.New(catalog)
+	disp := gamestate.NewActionDispatcher(
+		proc.AsRecruitVisitor(),
+		proc.AsCombatVisitor(),
+		proc.AsTransitionVisitor(),
+	)
+
 	go func() {
 		defer close(done)
 		interval := time.Duration(profile.Output.WriteIntervalMs) * time.Millisecond
@@ -267,7 +277,13 @@ func startDaemon(ctx context.Context, cfg *config.Config, profile *config.Profil
 				if !ok {
 					return
 				}
-				proc.Handle(e)
+				if a := bldr.Build(e); a != nil {
+					if err := disp.Dispatch(a); err != nil {
+						slog.Warn("dispatcher error", "err", err, "type", fmt.Sprintf("%T", a))
+					}
+				} else {
+					proc.Handle(e)
+				}
 
 				// Persist game end
 				if e.Type == parser.EventGameEnd {
@@ -945,6 +961,14 @@ func cmdReparse() *cobra.Command {
 			parsedCh := make(chan parser.GameEvent, 512)
 			p := parser.New(parsedCh)
 
+			rCatalog := card.NewFuncCatalog(gamestate.CardName)
+			rBldr := builder.New(rCatalog)
+			rDisp := gamestate.NewActionDispatcher(
+				proc.AsRecruitVisitor(),
+				proc.AsCombatVisitor(),
+				proc.AsTransitionVisitor(),
+			)
+
 			// Process events in a goroutine.
 			done := make(chan struct{})
 			gamesFound := 0
@@ -952,7 +976,13 @@ func cmdReparse() *cobra.Command {
 			go func() {
 				defer close(done)
 				for e := range parsedCh {
-					proc.Handle(e)
+					if a := rBldr.Build(e); a != nil {
+						if err := rDisp.Dispatch(a); err != nil {
+							slog.Warn("dispatcher error", "err", err, "type", fmt.Sprintf("%T", a))
+						}
+					} else {
+						proc.Handle(e)
+					}
 					if e.Type == parser.EventGameEnd {
 						gamesFound++
 						s := machine.State()

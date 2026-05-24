@@ -245,11 +245,12 @@ func Dump(grpcAddr string, width int) (string, error) {
 	}
 
 	m := &Model{
-		connState: stateConnected,
-		game:      game,
-		agg:       agg,
-		width:     width,
-		height:    40,
+		connState:      stateConnected,
+		game:           game,
+		agg:            agg,
+		width:          width,
+		height:         40,
+		showLastResult: true,
 	}
 	return m.View(), nil
 }
@@ -602,6 +603,9 @@ func (m *Model) View() string {
 	if m.game != nil && m.game.IsDuos {
 		helpText = "  [r] Refresh  [R] Stats  [d] Anomaly desc  [l] Last result  [o] Dashboard  [q] Quit  scroll: mouse wheel"
 	}
+	if m.width > 0 && len(helpText) > m.width {
+		helpText = helpText[:m.width]
+	}
 	help := styleHelp.Render(helpText)
 
 	return lipgloss.JoinVertical(lipgloss.Left, columns, rowSession, help)
@@ -674,7 +678,7 @@ func (m *Model) renderGamePanel(w int) string {
 			if m.game.AnomalyDescription != "" {
 				anomalyHint = styleDim.Render(" [d]")
 			}
-			b.WriteString(styleLabel.Render("Anomaly ") + styleValue.Render(m.game.AnomalyName) + anomalyHint + "\n")
+			b.WriteString(styleLabel.Render("Anomaly") + styleValue.Render(m.game.AnomalyName) + anomalyHint + "\n")
 			if m.showAnomalyDesc && m.game.AnomalyDescription != "" {
 				wrapped := lipgloss.NewStyle().Width(w - 10).Render(m.game.AnomalyDescription)
 				b.WriteString("        " + styleDim.Render(wrapped) + "\n")
@@ -903,7 +907,16 @@ func (m *Model) modsItems() string {
 		for _, bs := range g.targeted {
 			name := buffCategoryDisplayName(bs.Category)
 			color := buffCategoryColor(bs.Category)
-			line := fmt.Sprintf("  %-12s +%d/+%d", name, bs.Attack, bs.Health)
+			var buff string
+			switch {
+			case bs.Attack > 0 && bs.Health > 0:
+				buff = fmt.Sprintf("+%d/+%d", bs.Attack, bs.Health)
+			case bs.Attack > 0:
+				buff = fmt.Sprintf("+%d atk", bs.Attack)
+			default:
+				buff = fmt.Sprintf("+%d hp", bs.Health)
+			}
+			line := fmt.Sprintf("  %-12s %s", name, buff)
 			b.WriteString(lipgloss.NewStyle().Foreground(color).Render(line) + "\n")
 		}
 		b.WriteString("\n")
@@ -916,7 +929,16 @@ func (m *Model) modsItems() string {
 		for _, bs := range g.typeBuffs {
 			name := buffCategoryDisplayName(bs.Category)
 			color := buffCategoryColor(bs.Category)
-			line := fmt.Sprintf("  %-12s +%d/+%d", name, bs.Attack, bs.Health)
+			var buff string
+			switch {
+			case bs.Attack > 0 && bs.Health > 0:
+				buff = fmt.Sprintf("+%d/+%d", bs.Attack, bs.Health)
+			case bs.Attack > 0:
+				buff = fmt.Sprintf("+%d atk", bs.Attack)
+			default:
+				buff = fmt.Sprintf("+%d hp", bs.Health)
+			}
+			line := fmt.Sprintf("  %-12s %s", name, buff)
 			b.WriteString(lipgloss.NewStyle().Foreground(color).Render(line) + "\n")
 		}
 		b.WriteString("\n")
@@ -1248,7 +1270,11 @@ func renderHealthBar(current, max int32, barWidth int) string {
 	bar := styleHealthBar.Render(strings.Repeat("█", filled)) +
 		styleHealthBarEmpty.Render(strings.Repeat("░", empty))
 
-	label := fmt.Sprintf(" %d/%d", current, max)
+	displayHP := current
+	if displayHP < 0 {
+		displayHP = 0
+	}
+	label := fmt.Sprintf(" %d/%d", displayHP, max)
 	color := colorGreen
 	if pct < 0.25 {
 		color = colorRed
