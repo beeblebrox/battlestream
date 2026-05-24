@@ -32,6 +32,9 @@ import { BeetleBuffAction }      from './actions/beetle-buff.js';
 import { VolumizerBuffAction }   from './actions/volumizer-buff.js';
 import { ConsumedBuffAction }    from './actions/consumed-buff.js';
 import { DynamicBuffSlotAction } from './actions/buff-slot.js';
+// Opponent buttons
+import { OpponentHealthAction }     from './actions/opponent-health.js';
+import { OpponentTavernTierAction } from './actions/opponent-tavern-tier.js';
 
 streamDeck.actions.registerAction(new HealthAction());
 streamDeck.actions.registerAction(new ArmorAction());
@@ -61,6 +64,9 @@ streamDeck.actions.registerAction(new BeetleBuffAction());
 streamDeck.actions.registerAction(new VolumizerBuffAction());
 streamDeck.actions.registerAction(new ConsumedBuffAction());
 streamDeck.actions.registerAction(new DynamicBuffSlotAction());
+// Opponent buttons
+streamDeck.actions.registerAction(new OpponentHealthAction());
+streamDeck.actions.registerAction(new OpponentTavernTierAction());
 
 function makeClient(host: string, port: number, apiKey: string): BattlestreamClient {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

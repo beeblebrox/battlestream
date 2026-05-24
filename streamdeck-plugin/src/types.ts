@@ -45,6 +45,7 @@ export interface GameState {
   turn: number;
   tavern_tier: number;
   player: PlayerState;
+  opponent?: PlayerState;  // present only during combat
   board: MinionState[];
   placement: number;       // 0 while game is live, 1–8 at game over
   buff_sources: BuffSource[];
