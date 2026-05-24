@@ -780,7 +780,7 @@ func (m *Model) boardItems() string {
 		b.WriteString(styleDim.Render("(empty)"))
 	} else {
 		for _, mn := range m.game.Board {
-			b.WriteString(renderMinion(mn) + "\n")
+			b.WriteString(renderMinion(mn, m.boardVP.Width) + "\n")
 		}
 	}
 	return b.String()
@@ -793,7 +793,7 @@ func (m *Model) partnerBoardItems() string {
 	}
 	var b strings.Builder
 	for _, mn := range m.game.PartnerBoard {
-		b.WriteString(renderMinion(mn) + "\n")
+		b.WriteString(renderMinion(mn, m.partnerBoardVP.Width) + "\n")
 	}
 	return b.String()
 }
@@ -1316,17 +1316,25 @@ func tavernTierColor(tier int) lipgloss.Color {
 	}
 }
 
-func renderMinion(mn *bspb.MinionState) string {
+func renderMinion(mn *bspb.MinionState, maxW int) string {
 	var sb strings.Builder
+
+	nameW := maxW - 10
+	if nameW < 8 {
+		nameW = 8
+	}
+	if nameW > 22 || maxW == 0 {
+		nameW = 22
+	}
 
 	name := mn.Name
 	if name == "" {
 		name = mn.CardId
 	}
-	if len(name) > 22 {
-		name = name[:21] + "…"
+	if len(name) > nameW {
+		name = name[:nameW-1] + "…"
 	}
-	sb.WriteString(styleValue.Render(fmt.Sprintf("%-22s", name)))
+	sb.WriteString(styleValue.Render(fmt.Sprintf("%-*s", nameW, name)))
 	sb.WriteString(styleLabel.Render(" "))
 
 	// Attack / health

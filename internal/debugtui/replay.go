@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"battlestream.fixates.io/internal/gamestate"
+	"battlestream.fixates.io/internal/gamestate/builder"
+	"battlestream.fixates.io/internal/gamestate/card"
 	"battlestream.fixates.io/internal/parser"
 	"battlestream.fixates.io/internal/store"
 )
@@ -63,6 +65,13 @@ func LoadAllGamesWithProgress(paths []string, prog *loadProgress) (*Replay, erro
 	p := parser.New(ch)
 	machine := gamestate.New()
 	proc := gamestate.NewProcessor(machine)
+	catalog := card.NewFuncCatalog(gamestate.CardName)
+	bldr := builder.New(catalog)
+	disp := gamestate.NewActionDispatcher(
+		proc.AsRecruitVisitor(),
+		proc.AsCombatVisitor(),
+		proc.AsTransitionVisitor(),
+	)
 
 	var steps []Step
 	var games []GameSummary
@@ -76,7 +85,11 @@ func LoadAllGamesWithProgress(paths []string, prog *loadProgress) (*Replay, erro
 		for {
 			select {
 			case evt := <-ch:
-				proc.Handle(evt)
+				if a := bldr.Build(evt); a != nil {
+					_ = disp.Dispatch(a)
+				} else {
+					proc.Handle(evt)
+				}
 				snap := machine.State()
 				steps = append(steps, Step{
 					Index:    len(steps),
