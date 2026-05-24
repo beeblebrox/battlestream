@@ -208,16 +208,16 @@ func TestGameLog2026_05_08_ShopBuffSource(t *testing.T) {
 	t.Error("SHOP_BUFF category not found in buff_sources")
 }
 
-// TestGameLog2026_05_08_FreeRefreshCounter verifies the FREE_REFRESH ability counter is 1.
+// TestGameLog2026_05_08_FreeRefreshCounter verifies that the FREE_REFRESH ability counter is
+// cleared (absent) at game end. The counter was set to 1 during the game and then reset to 0
+// by BACON_FREE_REFRESH_COUNT=0 — the fix (Task 2) removes the counter on reset-to-zero.
 func TestGameLog2026_05_08_FreeRefreshCounter(t *testing.T) {
 	s := sharedLog20260508State(t)
 	for _, ac := range s.AbilityCounters {
 		if ac.Category == "FREE_REFRESH" {
-			if ac.Value != 1 {
-				t.Errorf("FREE_REFRESH value: expected 1, got %d", ac.Value)
-			}
+			t.Errorf("FREE_REFRESH counter should be absent at game end (reset to 0 clears it), got value=%d", ac.Value)
 			return
 		}
 	}
-	t.Error("FREE_REFRESH category not found in ability_counters")
+	// Counter correctly absent — it was cleared when BACON_FREE_REFRESH_COUNT reset to 0.
 }
