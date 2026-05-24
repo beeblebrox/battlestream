@@ -69,22 +69,27 @@ func (a *DntEnchantmentAction) AcceptRecruit(v RecruitVisitor) error { return v.
 
 // PlayerTagChangedAction fires when a player-level tag changes (Bloodgem values,
 // Elemental buff values, TavernSpell buff values, etc.).
+// ControllerID is the player= field from the log event (controller player ID);
+// the visitor uses it to guard against accepting non-local entity updates.
 type PlayerTagChangedAction struct {
 	ActionBase
-	Tag   string
-	Value int
+	Tag          string
+	Value        int
+	ControllerID int
 }
 
 func (a *PlayerTagChangedAction) actionMarker()                                {}
 func (a *PlayerTagChangedAction) recruitPhase()                                {}
 func (a *PlayerTagChangedAction) AcceptRecruit(v RecruitVisitor) error { return v.OnPlayerTagChanged(a) }
 
-// EconomyChangedAction fires when free-refresh count or next-turn gold bonus
-// changes during recruit phase.
+// EconomyChangedAction fires when an economy tag changes during recruit phase.
+// Tag identifies which counter changed (BACON_FREE_REFRESH_COUNT or
+// BACON_PLAYER_EXTRA_GOLD_NEXT_TURN); Value is the new absolute value.
 type EconomyChangedAction struct {
 	ActionBase
-	FreeRefreshDelta  int
-	GoldNextTurnDelta int
+	Tag          string
+	Value        int
+	ControllerID int
 }
 
 func (a *EconomyChangedAction) actionMarker()                               {}

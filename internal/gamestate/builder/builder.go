@@ -53,7 +53,9 @@ func (b *ActionBuilder) Build(e parser.GameEvent) action.Action {
 		return b.buildTurnTransition(e)
 	case parser.EventGameEnd:
 		return b.buildGameEnd(e)
-	// EventGameEntityTags, EventEntityUpdate, EventTagChange: Phase 2+ / Phase 3+
+	case parser.EventTagChange:
+		return b.buildTagChange(e)
+	// EventGameEntityTags, EventEntityUpdate: Phase 4+
 	}
 	return nil
 }
@@ -165,4 +167,53 @@ func (b *ActionBuilder) buildGameEnd(e parser.GameEvent) action.Action {
 		Placement:  tagInt(e.Tags, "PLAYER_LEADERBOARD_PLACE"),
 		Timestamp:  time.Now(),
 	}
+}
+
+// buildTagChange handles EventTagChange events for migrated player/economy tags.
+// Returns nil for all other tags so the drain falls back to Handle().
+func (b *ActionBuilder) buildTagChange(e parser.GameEvent) action.Action {
+	for tag, rawStr := range e.Tags {
+		switch tag {
+		case "BACON_BLOODGEMBUFFATKVALUE", "BACON_BLOODGEMBUFFHEALTHVALUE",
+			"BACON_ELEMENTAL_BUFFATKVALUE", "BACON_ELEMENTAL_BUFFHEALTHVALUE",
+			"TAVERN_SPELL_ATTACK_INCREASE", "TAVERN_SPELL_HEALTH_INCREASE":
+			val, _ := strconv.Atoi(rawStr)
+			return &action.PlayerTagChangedAction{
+				ActionBase:   b.base(e),
+				Tag:          tag,
+				Value:        val,
+				ControllerID: e.PlayerID,
+			}
+
+		case "BACON_FREE_REFRESH_COUNT":
+			raw, _ := strconv.Atoi(rawStr)
+			return &action.EconomyChangedAction{
+				ActionBase:   b.base(e),
+				Tag:          tag,
+				Value:        raw,
+				ControllerID: e.PlayerID,
+			}
+
+		case "BACON_PLAYER_EXTRA_GOLD_NEXT_TURN":
+			raw, _ := strconv.Atoi(rawStr)
+			if raw < 0 {
+				raw = 0
+			}
+			if b.phase == action.PhaseCombat {
+				return &action.CombatEconomyEffectAction{
+					ActionBase:   b.base(e),
+					Tag:          tag,
+					Value:        raw,
+					ControllerID: e.PlayerID,
+				}
+			}
+			return &action.EconomyChangedAction{
+				ActionBase:   b.base(e),
+				Tag:          tag,
+				Value:        raw,
+				ControllerID: e.PlayerID,
+			}
+		}
+	}
+	return nil
 }

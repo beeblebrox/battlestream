@@ -6,6 +6,8 @@ package gamestate
 //   Phase 1 — all no-ops (Handle() does all work)
 //   Phase 2 — lifecycle events migrated: OnGameStart, OnPlayerDef, OnPlayerName,
 //              OnTurnTransition, OnGameEnd
+//   Phase 3 — player buff tags and economy counters migrated: OnPlayerTagChanged,
+//              OnEconomyChanged, OnCombatEconomyEffect
 
 import (
 	"fmt"
@@ -205,7 +207,7 @@ func (p *Processor) OnPlayerName(a *action.PlayerNameAction) error {
 	return nil
 }
 
-// ── RecruitVisitor (no-ops until Phase 3+) ───────────────────────────────────
+// ── RecruitVisitor ────────────────────────────────────────────────────────────
 
 func (p *Processor) OnMinionBought(_ *action.MinionBoughtAction) error            { return nil }
 func (p *Processor) OnMinionSold(_ *action.MinionSoldAction) error                { return nil }
@@ -213,17 +215,92 @@ func (p *Processor) OnTavernUpgraded(_ *action.TavernUpgradedAction) error      
 func (p *Processor) OnTavernSpellPlayed(_ *action.TavernSpellPlayedAction) error  { return nil }
 func (p *Processor) OnMinionPermStatChanged(_ *action.MinionPermStatChangedAction) error { return nil }
 func (p *Processor) OnDntEnchantment(_ *action.DntEnchantmentAction) error        { return nil }
-func (p *Processor) OnPlayerTagChanged(_ *action.PlayerTagChangedAction) error     { return nil }
-func (p *Processor) OnEconomyChanged(_ *action.EconomyChangedAction) error        { return nil }
 
-// ── CombatVisitor (no-ops until Phase 6) ─────────────────────────────────────
+// OnPlayerTagChanged handles buff-source player tags: Bloodgem, Elemental, TavernSpell.
+// Guards against enchantment entities (e.g. Bacon_TagTransferPlayerE) that mirror
+// player tags with stale values.
+func (p *Processor) OnPlayerTagChanged(a *action.PlayerTagChangedAction) error {
+	entityID := int(a.Entity)
+	if entityID > 0 {
+		if info := p.entityProps[entityID]; info != nil && info.CardType == "ENCHANTMENT" {
+			return nil
+		}
+	}
+	if !p.isLocalEntityByIDAndController(entityID, a.ControllerID) {
+		return nil
+	}
+	p.updateBuffSourceFromPlayerTag(a.Tag, strconv.Itoa(a.Value))
+	return nil
+}
+
+// OnEconomyChanged handles BACON_FREE_REFRESH_COUNT and BACON_PLAYER_EXTRA_GOLD_NEXT_TURN
+// during recruit phase.
+func (p *Processor) OnEconomyChanged(a *action.EconomyChangedAction) error {
+	entityID := int(a.Entity)
+	if entityID > 0 {
+		if info := p.entityProps[entityID]; info != nil && info.CardType == "ENCHANTMENT" {
+			return nil
+		}
+	}
+	if !p.isLocalEntityByIDAndController(entityID, a.ControllerID) {
+		return nil
+	}
+	switch a.Tag {
+	case "BACON_FREE_REFRESH_COUNT":
+		if a.Value > 0 {
+			p.machine.SetAbilityCounter(CatFreeRefresh, a.Value, fmt.Sprintf("%d", a.Value))
+		}
+	case "BACON_PLAYER_EXTRA_GOLD_NEXT_TURN":
+		p.localBuffs.goldNextTurnSure = a.Value
+		p.updateGoldNextTurnCounter()
+	}
+	return nil
+}
+
+// ── CombatVisitor ─────────────────────────────────────────────────────────────
 
 func (p *Processor) OnMinionTempStatChanged(_ *action.MinionTempStatChangedAction) error { return nil }
 func (p *Processor) OnHeroDamaged(_ *action.HeroDamagedAction) error                    { return nil }
 func (p *Processor) OnMinionAttacked(_ *action.MinionAttackedAction) error               { return nil }
 func (p *Processor) OnDeathrattleTriggered(_ *action.DeathrattleTriggeredAction) error   { return nil }
 func (p *Processor) OnCombatTavernSpell(_ *action.CombatTavernSpellAction) error        { return nil }
-func (p *Processor) OnCombatEconomyEffect(_ *action.CombatEconomyEffectAction) error    { return nil }
+
+// OnCombatEconomyEffect handles BACON_PLAYER_EXTRA_GOLD_NEXT_TURN changes during combat
+// (e.g. from Overconfidence or rally spells that grant extra gold next turn).
+func (p *Processor) OnCombatEconomyEffect(a *action.CombatEconomyEffectAction) error {
+	entityID := int(a.Entity)
+	if entityID > 0 {
+		if info := p.entityProps[entityID]; info != nil && info.CardType == "ENCHANTMENT" {
+			return nil
+		}
+	}
+	if !p.isLocalEntityByIDAndController(entityID, a.ControllerID) {
+		return nil
+	}
+	if a.Tag == "BACON_PLAYER_EXTRA_GOLD_NEXT_TURN" {
+		p.localBuffs.goldNextTurnSure = a.Value
+		p.updateGoldNextTurnCounter()
+	}
+	return nil
+}
+
+// isLocalEntityByIDAndController returns true if entityID/controllerID belong to
+// the local player or hero. Used by Phase 3 visitor methods as the equivalent
+// of isPlayerOrHeroEntity() without requiring a parser.GameEvent.
+func (p *Processor) isLocalEntityByIDAndController(entityID, controllerID int) bool {
+	// Match local player entity (controllerID == localPlayerID).
+	if p.localPlayerID > 0 && controllerID == p.localPlayerID {
+		return true
+	}
+	// Match local hero entity (exact ID once known; fall back to hero registry).
+	if entityID > 0 {
+		if p.localHeroID > 0 {
+			return entityID == p.localHeroID
+		}
+		return p.heroEntities[entityID]
+	}
+	return false
+}
 
 // ── resetProcessorState clears all per-game processor fields ─────────────────
 
@@ -262,5 +339,3 @@ func (p *Processor) resetProcessorState() {
 	p.realPlayerIDs = make(map[int]int)
 }
 
-// suppress unused imports during migration
-var _ = strconv.Atoi

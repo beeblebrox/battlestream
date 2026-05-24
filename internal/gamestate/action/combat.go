@@ -60,9 +60,12 @@ func (a *CombatTavernSpellAction) AcceptCombat(v CombatVisitor) error { return v
 // CombatEconomyEffectAction fires when an economy tag (e.g.,
 // BACON_PLAYER_EXTRA_GOLD_NEXT_TURN) changes during combat. The effect applies
 // to the NEXT recruit phase but originates from a combat trigger.
+// Tag identifies the tag; Value is the new absolute value.
 type CombatEconomyEffectAction struct {
 	ActionBase
-	GoldNextTurnDelta int
+	Tag          string
+	Value        int
+	ControllerID int
 }
 
 func (a *CombatEconomyEffectAction) actionMarker()                                  {}
