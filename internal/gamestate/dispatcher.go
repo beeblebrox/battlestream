@@ -66,6 +66,9 @@ func (d *ActionDispatcher) Dispatch(a action.Action) error {
 
 	default:
 		// PhaseIdle, PhaseGameOver, PhaseUnknown: drop non-transition actions.
+		// Log at Debug so timing issues between game-start and first turn are visible.
+		slog.Debug("action: dropping non-transition action in idle/gameover phase — possible classifier timing issue",
+			"phase", d.phase, "type", fmt.Sprintf("%T", a))
 		return nil
 	}
 }

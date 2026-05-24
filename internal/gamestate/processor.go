@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"battlestream.fixates.io/internal/gamestate/action"
+	"battlestream.fixates.io/internal/gamestate/card"
 	"battlestream.fixates.io/internal/parser"
 )
 
@@ -56,11 +57,11 @@ type combatCopyPeak struct {
 // buffTracker holds buff source tracking state for the local player.
 // Encapsulates buff source state, Dnt counters, and economy counters.
 type buffTracker struct {
-	buffSourceState  map[string][2]int
-	shopBuffPrev     map[int][2]int
-	shopBuffGlobal   map[string][2]int // last absolute value per cumulative-Dnt category (BG_ShopBuff)
-	nomiCounter      [2]int
-	nomiAllCounter   [2]int
+	buffSourceState     map[string][2]int
+	shopBuffPrev        map[int][2]int
+	shopBuffGlobal      map[string][2]int // last absolute value per cumulative-Dnt category (BG_ShopBuff)
+	nomiCounter         [2]int
+	nomiAllCounter      [2]int
 	goldNextTurnSure    int
 	overconfidenceCount int
 }
@@ -77,28 +78,29 @@ func newBuffTracker() buffTracker {
 // If the subsequent EventGameEntityTags confirms a reconnect (STATE=RUNNING,
 // TURN > 1), this state is restored. Otherwise it is discarded.
 type reconnectStash struct {
-	gameID              string
-	startTime           time.Time
-	turn                int
-	tavernTier          int
-	isDuos              bool
-	partnerPlayerID     int
-	partnerPlayerName   string
-	heroCardID          string
-	partnerHeroCardID   string
-	turnSnapshots       []TurnSnapshot
-	buffSources         []BuffSource
-	abilityCounters     []AbilityCounter
-	partnerBuffSources  []BuffSource
-	partnerAbilityCtrs  []AbilityCounter
-	modifications       []StatMod
-	prevBuffSources     []BuffSource
-	prevAbilityCtrs     []AbilityCounter
-	prevModCount        int
-	anomalyCardID       string
-	anomalyName         string
-	anomalyDescription  string
-	availableTribes     []string
+	gameID             string
+	startTime          time.Time
+	turn               int
+	tavernTier         int
+	isDuos             bool
+	duosFromTeammate   bool
+	partnerPlayerID    int
+	partnerPlayerName  string
+	heroCardID         string
+	partnerHeroCardID  string
+	turnSnapshots      []TurnSnapshot
+	buffSources        []BuffSource
+	abilityCounters    []AbilityCounter
+	partnerBuffSources []BuffSource
+	partnerAbilityCtrs []AbilityCounter
+	modifications      []StatMod
+	prevBuffSources    []BuffSource
+	prevAbilityCtrs    []AbilityCounter
+	prevModCount       int
+	anomalyCardID      string
+	anomalyName        string
+	anomalyDescription string
+	availableTribes    []string
 }
 
 // Processor consumes parser.GameEvents and updates a Machine.
@@ -113,18 +115,18 @@ type Processor struct {
 	localHeroID     int    // entity ID of the local player's hero card
 
 	// Duos partner identity.
-	partnerPlayerID   int    // CONTROLLER value for the partner (from BACON_DUO_TEAMMATE_PLAYER_ID)
-	partnerPlayerName string
-	partnerHeroID     int    // entity ID of the partner's hero card
+	partnerPlayerID     int // CONTROLLER value for the partner (from BACON_DUO_TEAMMATE_PLAYER_ID)
+	partnerPlayerName   string
+	partnerHeroID       int // entity ID of the partner's hero card
 	isDuos              bool
 	punishLeaversActive bool // BACON_DUOS_PUNISH_LEAVERS=1 seen (not sufficient alone)
 	duosFromTeammate    bool // duos confirmed via BACON_DUO_TEAMMATE_PLAYER_ID (authoritative)
 
 	// Partner combat tracking
-	partnerCombatActive    bool          // true while partner's combat is in progress
-	partnerCombatHeroCtrl  int           // CONTROLLER of partner's hero copy in combat
-	partnerCombatMinions   []MinionState // collected partner minions during combat
-	partnerBoardSetupDone  bool          // true after first combat action (PROPOSED_ATTACKER) — stops collection
+	partnerCombatActive   bool          // true while partner's combat is in progress
+	partnerCombatHeroCtrl int           // CONTROLLER of partner's hero copy in combat
+	partnerCombatMinions  []MinionState // collected partner minions during combat
+	partnerBoardSetupDone bool          // true after first combat action (PROPOSED_ATTACKER) — stops collection
 	combatPhaseActive     bool          // true during the combat phase (BACON_CURRENT_COMBAT_PLAYER_ID > 0)
 	combatPhaseEntityIDs  []int         // entity IDs created during current combat phase (for retroactive scan)
 
@@ -137,9 +139,9 @@ type Processor struct {
 	// Entity registry — maps entity IDs to their controller PlayerIDs.
 	entityController map[int]int
 	// heroEntities tracks entity IDs known to be HERO card types.
-	heroEntities     map[int]bool
+	heroEntities map[int]bool
 	// entityProps tracks known properties of entities for zone transition handling.
-	entityProps      map[int]*entityInfo
+	entityProps map[int]*entityInfo
 
 	// Buffered stat changes for board-wide buff detection.
 	pendingStatChanges []pendingStatChange
@@ -174,8 +176,8 @@ type Processor struct {
 
 	// Available tribes detected from BACON_SUBSET_* tags.
 	seenTribes        map[string]bool
-	entityTribeReg    map[int]string  // entityID → tribe provisionally registered via TAG_CHANGE
-	tribeConfirmCount map[string]int  // tribe → count of single-tribe entities confirming it
+	entityTribeReg    map[int]string // entityID → tribe provisionally registered via TAG_CHANGE
+	tribeConfirmCount map[string]int // tribe → count of single-tribe entities confirming it
 
 	// playerEntityIDs maps player entity IDs (e.g. 2,3 for Duos with 4 players)
 	// to their PlayerID values. Used for deferred partner resolution.
@@ -192,8 +194,8 @@ func NewProcessor(m *Machine) *Processor {
 		entityProps:      make(map[int]*entityInfo),
 		localBuffs:       newBuffTracker(),
 		partnerBuffs:     newBuffTracker(),
-		dntTeamTotal:    make(map[string][2]int),
-		dntPartnerAccum: make(map[string][2]int),
+		dntTeamTotal:     make(map[string][2]int),
+		dntPartnerAccum:  make(map[string][2]int),
 		playerEntityIDs:  make(map[int]int),
 		realPlayerIDs:    make(map[int]int),
 	}
@@ -270,39 +272,16 @@ func (p *Processor) Handle(e parser.GameEvent) {
 		})
 
 	case parser.EventGameEntityTags:
-		// Check for reconnect: STATE=RUNNING + TURN > 1 means mid-game reconnect.
-		if p.reconnectStash != nil {
-			state := e.Tags["STATE"]
-			turn, _ := strconv.Atoi(e.Tags["TURN"])
-			if state == "RUNNING" && turn > 1 {
-				slog.Info("reconnect detected, restoring game state",
-					"origGameID", p.reconnectStash.gameID,
-					"origTurn", p.reconnectStash.turn,
-					"reconnectTurn", turn)
-				rs := p.reconnectStash
-				p.machine.RestoreFromReconnect(
-					rs.gameID, rs.startTime, rs.turn, rs.tavernTier,
-					rs.isDuos, rs.heroCardID, rs.partnerHeroCardID, rs.partnerPlayerName,
-					rs.buffSources, rs.abilityCounters,
-					rs.partnerBuffSources, rs.partnerAbilityCtrs,
-					rs.modifications, rs.turnSnapshots,
-					rs.prevBuffSources, rs.prevAbilityCtrs, rs.prevModCount,
-					rs.anomalyCardID, rs.anomalyName, rs.anomalyDescription,
-					rs.availableTribes,
-				)
-				p.isDuos = rs.isDuos
-				p.partnerPlayerID = rs.partnerPlayerID
-				p.partnerPlayerName = rs.partnerPlayerName
-				p.isReconnect = true
-			}
-			p.reconnectStash = nil
-		}
-		for tag, value := range e.Tags {
-			if tag == "BACON_DUOS_PUNISH_LEAVERS" && value == "1" {
-				p.punishLeaversActive = true
-				slog.Info("PUNISH_LEAVERS flag recorded (not sufficient alone for duos)", "tag", tag)
-			}
-		}
+		// Thin adapter: delegate to OnReconnect. PunishLeaversActive is read from tags
+		// so the backup duos detection path works for both the dispatcher and direct Handle() callers.
+		state := e.Tags["STATE"]
+		turn, _ := strconv.Atoi(e.Tags["TURN"])
+		_ = p.OnReconnect(&action.ReconnectAction{
+			ActionBase:          action.ActionBase{Entity: action.EntityID(e.EntityID)},
+			IsRunning:           state == "RUNNING",
+			Turn:                turn,
+			PunishLeaversActive: e.Tags["BACON_DUOS_PUNISH_LEAVERS"] == "1",
+		})
 
 	case parser.EventTagChange:
 		p.handleTagChange(e)
@@ -330,85 +309,6 @@ func (p *Processor) CheckStaleness() {
 	}
 }
 
-// handlePlayerDef identifies the local player from the CREATE_GAME block.
-// The local player has a real GameAccountId (hi≠0); the dummy/opponent has hi=0.
-// In Duos, there are 4 Player entities; 2 have real GameAccountIds.
-func (p *Processor) handlePlayerDef(e parser.GameEvent) {
-	hi := e.Tags["hi"]
-	isReal := hi != "" && hi != "0"
-
-	// Track all player entity IDs for deferred partner resolution.
-	if e.EntityID > 0 {
-		p.playerEntityIDs[e.EntityID] = e.PlayerID
-	}
-	if isReal {
-		p.realPlayerIDs[e.PlayerID] = e.EntityID
-	}
-
-	if isReal && p.localPlayerID == 0 {
-		// First real player — this is the local player.
-		p.localPlayerID = e.PlayerID
-		slog.Info("identified local player", "playerID", p.localPlayerID, "entityID", e.EntityID)
-		if heroStr := e.Tags["HERO_ENTITY"]; heroStr != "" {
-			if heroID, err := strconv.Atoi(heroStr); err == nil && heroID > 0 {
-				p.localHeroID = heroID
-				slog.Info("local hero entity set (tentative) from player def", "heroID", heroID)
-			}
-		}
-		// Check for Duos tag in the Player block.
-		if duoStr := e.Tags["BACON_DUO_TEAMMATE_PLAYER_ID"]; duoStr != "" {
-			if partnerID, err := strconv.Atoi(duoStr); err == nil && partnerID > 0 {
-				p.isDuos = true
-				p.duosFromTeammate = true
-				p.partnerPlayerID = partnerID
-				p.machine.SetDuosMode(true)
-				slog.Info("Duos detected from player def", "partnerPlayerID", partnerID)
-			}
-		}
-		// Capture initial state from Player entity tags (critical for reconnects
-		// where the entity carries mid-game TURN, RESOURCES, etc.).
-		if turn := e.Tags["TURN"]; turn != "" {
-			if t, _ := strconv.Atoi(turn); t > 0 {
-				p.machine.SetTurn(t)
-			}
-		}
-		if res := e.Tags["RESOURCES"]; res != "" {
-			p.machine.UpdateGold("RESOURCES", parseInt(res))
-		}
-		if used := e.Tags["RESOURCES_USED"]; used != "" {
-			p.machine.UpdateGold("RESOURCES_USED", parseInt(used))
-		}
-	} else if isReal && p.localPlayerID != 0 && e.PlayerID != p.localPlayerID {
-		// Second real player in Duos — check if this is the partner.
-		if p.isDuos && e.PlayerID == p.partnerPlayerID {
-			slog.Info("identified partner player from def", "playerID", e.PlayerID, "entityID", e.EntityID)
-			if heroStr := e.Tags["HERO_ENTITY"]; heroStr != "" {
-				if heroID, err := strconv.Atoi(heroStr); err == nil && heroID > 0 {
-					p.partnerHeroID = heroID
-					slog.Info("partner hero entity set (tentative) from player def", "heroID", heroID)
-				}
-			}
-		}
-	}
-}
-
-// handlePlayerName maps PlayerID to a display name.
-// In Duos, the DebugPrintGame lines show only two players: the local player
-// (real) and the bot player. The bot's PlayerName is the partner's battletag.
-func (p *Processor) handlePlayerName(e parser.GameEvent) {
-	if e.PlayerID == p.localPlayerID {
-		p.localPlayerName = e.EntityName
-		p.machine.UpdatePlayerName(e.EntityName)
-		slog.Info("local player name", "name", e.EntityName)
-	} else if p.isDuos && e.PlayerID != p.localPlayerID && p.partnerPlayerName == "" {
-		// In duos, the non-local PlayerName is the partner's battletag
-		// (carried by the bot player entity).
-		p.partnerPlayerName = e.EntityName
-		p.machine.UpdatePartnerName(e.EntityName)
-		slog.Info("partner player name", "name", e.EntityName)
-	}
-}
-
 func (p *Processor) handleTagChange(e parser.GameEvent) {
 	// Determine the controller for this entity.
 	controllerID := p.resolveController(e)
@@ -433,73 +333,40 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 	for tag, value := range e.Tags {
 		switch tag {
 		case "BACON_DUO_PASSABLE":
-			if value == "1" && !p.isDuos && p.punishLeaversActive {
-				p.isDuos = true
-				p.machine.SetDuosMode(true)
-				slog.Info("Duos detected from combined PUNISH_LEAVERS + DUO_PASSABLE")
-			}
+			// Thin adapter: delegate to OnDuosPassableChanged for the direct Handle() path.
+			val, _ := strconv.Atoi(value)
+			_ = p.OnDuosPassableChanged(&action.DuosPassableChangedAction{
+				ActionBase: action.ActionBase{Entity: action.EntityID(e.EntityID)},
+				Value:      val,
+			})
 
 		case "BACON_DUOS_PUNISH_LEAVERS":
-			if value == "0" && p.isDuos && !p.duosFromTeammate {
-				p.isDuos = false
-				p.punishLeaversActive = false
-				p.machine.SetDuosMode(false)
-				slog.Info("Duos cleared — PUNISH_LEAVERS changed to 0 (backup-only detection)")
-			}
+			// Thin adapter: delegate to OnDuosPunishLeaversChanged for the direct Handle() path.
+			val, _ := strconv.Atoi(value)
+			_ = p.OnDuosPunishLeaversChanged(&action.DuosPunishLeaversChangedAction{
+				ActionBase: action.ActionBase{Entity: action.EntityID(e.EntityID)},
+				Value:      val,
+			})
 
 		case "BACON_CURRENT_COMBAT_PLAYER_ID":
-			if p.isLocalPlayerEntity(e) {
-				combatPlayerID, _ := strconv.Atoi(value)
-
-				// If partner combat was active and is now ending, snapshot the board
-				if p.partnerCombatActive && combatPlayerID != p.partnerPlayerID {
-					p.finalizePartnerCombat()
-				}
-
-				// Track combat phase for entity collection.
-				if combatPlayerID > 0 && !p.combatPhaseActive {
-					p.combatPhaseActive = true
-					p.combatPhaseEntityIDs = nil
-				} else if combatPlayerID == 0 {
-					p.combatPhaseActive = false
-					p.combatPhaseEntityIDs = nil
-				}
-
-				// Deferred partner resolution
-				if combatPlayerID > 0 && combatPlayerID != p.localPlayerID && p.isDuos && p.partnerPlayerID == 0 {
-					p.resolvePartner(combatPlayerID)
-				}
-
-				// Start tracking if this is partner's combat
-				if combatPlayerID > 0 && combatPlayerID == p.partnerPlayerID {
-					p.partnerCombatActive = true
-					p.partnerCombatHeroCtrl = 0
-					p.partnerCombatMinions = nil
-					p.partnerBoardSetupDone = false
-					// Retroactively collect partner combat copies that were
-					// created before this flag fired. In duos the partner's
-					// hero copy (PLAYER_ID=partnerPlayerID, CONTROLLER=localPlayerID)
-					// and its minions often appear before BACON_CURRENT_COMBAT_PLAYER_ID.
-					p.collectPartnerCombatRetro()
-				}
-			}
+			combatPlayerID, _ := strconv.Atoi(value)
+			_ = p.OnCombatPlayerChanged(&action.CombatPlayerChangedAction{
+				ActionBase:     action.ActionBase{Entity: action.EntityID(e.EntityID)},
+				CombatPlayerID: combatPlayerID,
+				ControllerID:   controllerID,
+				EntityName:     e.EntityName,
+			})
 
 		case "BACON_DUO_TEAMMATE_PLAYER_ID":
-			// Duos detection: this tag on the local player entity identifies the partner.
 			if p.isLocalPlayerEntity(e) {
-				partnerID, _ := strconv.Atoi(value)
-				if partnerID > 0 && !p.isDuos {
-					p.isDuos = true
-					p.partnerPlayerID = partnerID
-					p.machine.SetDuosMode(true)
-					slog.Info("Duos detected", "partnerPlayerID", partnerID)
-					// Try to resolve partner name/hero from already-seen player defs.
-					if entityID, ok := p.realPlayerIDs[partnerID]; ok {
-						if info := p.entityProps[entityID]; info != nil && info.Name != "" {
-							p.partnerPlayerName = info.Name
-							p.machine.UpdatePartnerName(info.Name)
-						}
-					}
+				pid, _ := strconv.Atoi(value)
+				if pid > 0 {
+					_ = p.OnDuosTeammate(&action.DuosTeammateAction{
+						ActionBase:      action.ActionBase{Entity: action.EntityID(e.EntityID)},
+						PartnerPlayerID: pid,
+						ControllerID:    controllerID,
+						EntityName:      e.EntityName,
+					})
 				}
 			}
 
@@ -524,10 +391,13 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 					info.Health = parseInt(value)
 				}
 			}
-			if p.isLocalHero(e, controllerID) {
-				p.machine.UpdatePlayerTag(tag, value)
-			} else if p.isPartnerHero(e, controllerID) {
-				p.machine.UpdatePartnerTag(tag, value)
+			if p.isLocalHero(e, controllerID) || p.isPartnerHero(e, controllerID) {
+				_ = p.OnHeroStatChanged(&action.HeroStatChangedAction{
+					ActionBase:   action.ActionBase{Entity: action.EntityID(e.EntityID)},
+					Tag:          tag,
+					NewValue:     parseInt(value),
+					ControllerID: controllerID,
+				})
 			} else if e.EntityID > 0 && controllerID == p.localPlayerID {
 				phase := p.machine.Phase()
 				if phase == PhaseCombat {
@@ -580,51 +450,38 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 			}
 
 		case "PROPOSED_ATTACKER":
-			// GameEntity's PROPOSED_ATTACKER tag fires for every attack during combat.
-			// Buffer the hero attacker ID; we resolve the result when PROPOSED_DEFENDER arrives.
+			// Thin adapter: delegate to OnCombatAttacker for the direct Handle() path.
+			// The dispatcher path is handled via CombatAttackerAction from the builder.
 			if e.EntityName == "GameEntity" {
-				// First combat action means board setup is complete — stop collecting
-				// partner combat minions. Initial board entities arrive as FULL_ENTITY
-				// before any attacks; deathrattle/reborn spawns come after.
-				if p.partnerCombatActive && !p.partnerBoardSetupDone {
-					p.partnerBoardSetupDone = true
-				}
 				attackerID := parseInt(value)
-				if attackerID > 0 && p.heroEntities[attackerID] {
-					p.pendingHeroAttackerID = attackerID
-				} else {
-					p.pendingHeroAttackerID = 0
-				}
+				_ = p.OnCombatAttacker(&action.CombatAttackerAction{
+					ActionBase:     action.ActionBase{Entity: action.EntityID(e.EntityID)},
+					AttackerID:     attackerID,
+					IsHeroAttacker: attackerID > 0 && p.heroEntities[attackerID],
+				})
 			}
 
 		case "PROPOSED_DEFENDER":
-			// PROPOSED_DEFENDER fires right after PROPOSED_ATTACKER for each attack.
-			// When both attacker and defender are heroes, this is the end-of-combat
-			// hero attack. In Duos, multiple combats happen per round — only record
-			// the result for the combat involving the local hero.
-			if e.EntityName == "GameEntity" && p.pendingHeroAttackerID > 0 {
+			// Thin adapter: delegate to OnCombatDefender for the direct Handle() path.
+			// The dispatcher path is handled via CombatDefenderAction from the builder.
+			if e.EntityName == "GameEntity" {
 				defenderID := parseInt(value)
-				if defenderID > 0 && p.heroEntities[defenderID] {
-					// Both attacker and defender are heroes — end-of-combat attack.
-					// Winner's hero attacks the loser's hero.
-					if p.pendingHeroAttackerID == p.localHeroID {
-						// Local hero is the attacker → local won this combat.
-						p.localCombatResult = 1
-					} else if defenderID == p.localHeroID {
-						// Local hero is the defender → local lost this combat.
-						p.localCombatResult = -1
-					}
-					// If neither is the local hero, it's the partner's or another combat — ignore.
+				if defenderID > 0 {
+					_ = p.OnCombatDefender(&action.CombatDefenderAction{
+						ActionBase:     action.ActionBase{Entity: action.EntityID(e.EntityID)},
+						DefenderID:     defenderID,
+						IsHeroDefender: p.heroEntities[defenderID],
+					})
 				}
-				p.pendingHeroAttackerID = 0
 			}
 
 		case "DAMAGE":
-			if p.isLocalHero(e, controllerID) {
-				p.machine.UpdatePlayerTag(tag, value)
-			} else if p.isPartnerHero(e, controllerID) {
-				p.machine.UpdatePartnerTag(tag, value)
-			}
+			_ = p.OnHeroStatChanged(&action.HeroStatChangedAction{
+				ActionBase:   action.ActionBase{Entity: action.EntityID(e.EntityID)},
+				Tag:          tag,
+				NewValue:     parseInt(value),
+				ControllerID: controllerID,
+			})
 
 		case "ARMOR":
 			// Cache armor for all known hero entities so we can retroactively
@@ -634,62 +491,58 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 					info.Armor = parseInt(value)
 				}
 			}
-			if p.isLocalHero(e, controllerID) {
-				p.machine.UpdatePlayerTag(tag, value)
-			} else if p.isPartnerHero(e, controllerID) {
-				p.machine.UpdatePartnerTag(tag, value)
-			}
+			_ = p.OnHeroStatChanged(&action.HeroStatChangedAction{
+				ActionBase:   action.ActionBase{Entity: action.EntityID(e.EntityID)},
+				Tag:          tag,
+				NewValue:     parseInt(value),
+				ControllerID: controllerID,
+			})
 
 		case "SPELL_POWER":
-			if controllerID == p.localPlayerID || controllerID == 0 {
-				p.machine.UpdatePlayerTag(tag, value)
-			}
+			_ = p.OnHeroStatChanged(&action.HeroStatChangedAction{
+				ActionBase:   action.ActionBase{Entity: action.EntityID(e.EntityID)},
+				Tag:          tag,
+				NewValue:     parseInt(value),
+				ControllerID: controllerID,
+			})
 
 		case "PLAYER_TECH_LEVEL", "TAVERN_TIER":
-			// Guard: only accept tier from a positively-identified local entity.
-			// Require controllerID to be known (non-zero) and match localPlayerID,
-			// OR fall back to isLocalPlayerEntity only when controllerID is unknown.
-			// This prevents controllerID==0==localPlayerID from matching when
-			// localPlayerID has not yet been set (i.e. before CREATE_GAME resolves).
-			isLocal := (controllerID != 0 && controllerID == p.localPlayerID) ||
-				(controllerID == 0 && p.isLocalPlayerEntity(e))
-			if isLocal {
-				tier, _ := strconv.Atoi(value)
-				if tier > 0 {
-					p.machine.SetTavernTier(tier)
-				}
-			} else if p.isPartnerHero(e, controllerID) || p.isPartnerPlayerEntity(e) {
-				tier, _ := strconv.Atoi(value)
-				if tier > 0 {
-					p.machine.UpdatePartnerTag(tag, value)
-				}
-			}
+			tier, _ := strconv.Atoi(value)
+			_ = p.OnTavernTierChanged(&action.TavernTierChangedAction{
+				ActionBase:   action.ActionBase{Entity: action.EntityID(e.EntityID)},
+				Tag:          tag,
+				Tier:         tier,
+				ControllerID: controllerID,
+				EntityName:   e.EntityName,
+			})
 
 		case "PLAYER_TRIPLES":
-			// PLAYER_TRIPLES is set on the hero entity with the cumulative count.
-			if p.isLocalHero(e, controllerID) || p.isLocalPlayerEntity(e) {
-				p.machine.UpdatePlayerTag(tag, value)
-			} else if p.isPartnerHero(e, controllerID) || p.isPartnerPlayerEntity(e) {
-				p.machine.UpdatePartnerTag(tag, value)
-			}
+			val, _ := strconv.Atoi(value)
+			_ = p.OnPlayerTriplesChanged(&action.PlayerTriplesChangedAction{
+				ActionBase:   action.ActionBase{Entity: action.EntityID(e.EntityID)},
+				Value:        val,
+				ControllerID: controllerID,
+				EntityName:   e.EntityName,
+			})
 
 		case "RESOURCES", "RESOURCES_USED":
-			// Gold tracking: RESOURCES = total gold, RESOURCES_USED = spent gold.
-			// These fire on the player entity (not hero), so use isLocalPlayerEntity.
-			if p.isLocalPlayerEntity(e) {
-				p.machine.UpdateGold(tag, parseInt(value))
-			}
+			val, _ := strconv.Atoi(value)
+			_ = p.OnGoldChanged(&action.GoldChangedAction{
+				ActionBase:   action.ActionBase{Entity: action.EntityID(e.EntityID)},
+				Tag:          tag,
+				Value:        val,
+				ControllerID: e.PlayerID,
+				EntityName:   e.EntityName,
+			})
 
 		case "PLAYER_LEADERBOARD_PLACE":
-			// Track placement for the local player. In duos, the placement tag
-			// may fire on a newly-created hero copy (not the original Player entity),
-			// so also accept hero entities controlled by the local player.
-			isLocal := p.isLocalPlayerEntity(e) ||
-				(controllerID == p.localPlayerID && p.localPlayerID > 0 && p.heroEntities[e.EntityID])
-			if isLocal {
-				if pl, err := strconv.Atoi(value); err == nil && pl > 0 {
-					p.pendingPlacement = pl
-				}
+			if pl, err := strconv.Atoi(value); err == nil {
+				_ = p.OnPlacementChanged(&action.PlacementChangedAction{
+					ActionBase:   action.ActionBase{Entity: action.EntityID(e.EntityID)},
+					Value:        pl,
+					ControllerID: controllerID,
+					EntityName:   e.EntityName,
+				})
 			}
 
 		case "ZONE":
@@ -718,85 +571,23 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 		case "TURN":
 			// Player-specific TURN tag (not GameEntity).
 			// This gives us the actual BG turn number the player sees.
-			if p.isLocalPlayerEntity(e) {
-				turn, _ := strconv.Atoi(value)
-				if turn > 0 {
-					// Record outcome of the combat that just resolved (turns 2+).
-					// localCombatResult is set by PROPOSED_ATTACKER/DEFENDER hero pairs.
-					if p.bgTurnsStarted > 0 {
-						if p.localCombatResult > 0 {
-							p.machine.RecordRoundWin()
-						} else if p.localCombatResult < 0 {
-							p.machine.RecordRoundLoss()
-						}
-						// localCombatResult == 0 → tie or no hero attack — no streak change.
-					}
-					p.localCombatResult = 0
-					p.bgTurnsStarted++
-					p.flushPendingStatChanges()
-
-					// Reset Overconfidence count at turn boundary.
-					if p.localBuffs.overconfidenceCount > 0 {
-						p.localBuffs.overconfidenceCount = 0
-						p.updateGoldNextTurnCounter()
-					}
-
-					p.machine.SetTurn(turn)
-				}
-			}
+			turn, _ := strconv.Atoi(value)
+			_ = p.OnPlayerBGTurnChanged(&action.PlayerBGTurnChangedAction{
+				ActionBase:   action.ActionBase{Entity: action.EntityID(e.EntityID)},
+				Value:        turn,
+				ControllerID: controllerID,
+				EntityName:   e.EntityName,
+			})
 
 		case "HERO_ENTITY":
-			// Track which hero entity belongs to the local player.
-			if p.isLocalPlayerEntity(e) {
-				heroID, _ := strconv.Atoi(value)
-				if heroID > 0 && heroID != p.localHeroID {
-					shouldUpdate := p.localHeroID == 0
-					if !shouldUpdate {
-						if info := p.entityProps[p.localHeroID]; info != nil {
-							shouldUpdate = strings.HasPrefix(info.CardID, "TB_BaconShop_HERO_PH")
-						}
-					}
-					if shouldUpdate {
-						p.localHeroID = heroID
-						slog.Info("local hero entity updated", "heroID", heroID)
-						if info := p.entityProps[heroID]; info != nil {
-							if info.Health > 0 {
-								p.machine.UpdatePlayerTag("HEALTH", strconv.Itoa(info.Health))
-							}
-							if info.Armor > 0 {
-								p.machine.UpdatePlayerTag("ARMOR", strconv.Itoa(info.Armor))
-							}
-							if info.CardID != "" && !strings.HasPrefix(info.CardID, "TB_BaconShop_HERO_PH") {
-								p.machine.UpdateHeroCardID(info.CardID)
-							}
-						}
-					}
-				}
-			} else if p.isPartnerPlayerEntity(e) {
-				heroID, _ := strconv.Atoi(value)
-				if heroID > 0 && heroID != p.partnerHeroID {
-					shouldUpdate := p.partnerHeroID == 0
-					if !shouldUpdate {
-						if info := p.entityProps[p.partnerHeroID]; info != nil {
-							shouldUpdate = strings.HasPrefix(info.CardID, "TB_BaconShop_HERO_PH")
-						}
-					}
-					if shouldUpdate {
-						p.partnerHeroID = heroID
-						slog.Info("partner hero entity updated", "heroID", heroID)
-						if info := p.entityProps[heroID]; info != nil {
-							if info.Health > 0 {
-								p.machine.UpdatePartnerTag("HEALTH", strconv.Itoa(info.Health))
-							}
-							if info.Armor > 0 {
-								p.machine.UpdatePartnerTag("ARMOR", strconv.Itoa(info.Armor))
-							}
-							if info.CardID != "" && !strings.HasPrefix(info.CardID, "TB_BaconShop_HERO_PH") {
-								p.machine.UpdatePartnerHeroCardID(info.CardID)
-							}
-						}
-					}
-				}
+			heroID, _ := strconv.Atoi(value)
+			if heroID > 0 {
+				_ = p.OnHeroEntityAssigned(&action.HeroEntityAssignedAction{
+					ActionBase:   action.ActionBase{Entity: action.EntityID(e.EntityID)},
+					HeroEntityID: heroID,
+					ControllerID: controllerID,
+					EntityName:   e.EntityName,
+				})
 			}
 
 		case "BACON_BLOODGEMBUFFATKVALUE", "BACON_BLOODGEMBUFFHEALTHVALUE",
@@ -810,21 +601,38 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 			}
 
 		case "BACON_FREE_REFRESH_COUNT":
-			if p.isPlayerOrHeroEntity(e, controllerID) {
-				raw, _ := strconv.Atoi(value)
-				if raw > 0 {
-					p.machine.SetAbilityCounter(CatFreeRefresh, raw, fmt.Sprintf("%d", raw))
-				}
-			}
+			raw, _ := strconv.Atoi(value)
+			_ = p.OnEconomyChanged(&action.EconomyChangedAction{
+				ActionBase:   action.ActionBase{Entity: action.EntityID(e.EntityID)},
+				Tag:          tag,
+				Value:        raw,
+				ControllerID: controllerID,
+				EntityName:   e.EntityName,
+			})
 
 		case "BACON_PLAYER_EXTRA_GOLD_NEXT_TURN":
-			if p.isPlayerOrHeroEntity(e, controllerID) {
-				raw, _ := strconv.Atoi(value)
-				if raw < 0 {
-					raw = 0
-				}
-				p.localBuffs.goldNextTurnSure = raw
-				p.updateGoldNextTurnCounter()
+			// Thin adapter: delegate to OnEconomyChanged (recruit) or OnCombatEconomyEffect
+			// (combat) for the direct Handle() path. The builder emits the phase-appropriate
+			// action; Handle() mirrors that logic here.
+			raw, _ := strconv.Atoi(value)
+			if raw < 0 {
+				raw = 0
+			}
+			if p.machine.Phase() == PhaseCombat {
+				_ = p.OnCombatEconomyEffect(&action.CombatEconomyEffectAction{
+					ActionBase:   action.ActionBase{Entity: action.EntityID(e.EntityID)},
+					Tag:          tag,
+					Value:        raw,
+					ControllerID: e.PlayerID,
+				})
+			} else {
+				_ = p.OnEconomyChanged(&action.EconomyChangedAction{
+					ActionBase:   action.ActionBase{Entity: action.EntityID(e.EntityID)},
+					Tag:          tag,
+					Value:        raw,
+					ControllerID: e.PlayerID,
+					EntityName:   e.EntityName,
+				})
 			}
 
 		case "TAG_SCRIPT_DATA_NUM_1", "TAG_SCRIPT_DATA_NUM_2":
@@ -841,27 +649,21 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 			}
 
 		case "3809":
-			// SpellsPlayedForNagasCounter (HDT) — total spells played this game for
-			// Thaumaturgist/ArcaneCannoneer/ShowyCyclist/Groundbreaker synergy.
-			// Only show when one of those minions is on the board (mirrors HDT ShouldShow).
-			if p.isPlayerOrHeroEntity(e, controllerID) {
-				raw, _ := strconv.Atoi(value)
-				snap := p.machine.State()
-				if HasNagaSynergyMinion(snap.Board) {
-					stacks := 1 + (raw / 4)
-					progress := raw % 4
-					display := fmt.Sprintf("Tier %d · %d/4", stacks, progress)
-					p.machine.SetAbilityCounter(CatNagaSpells, raw, display)
-				} else {
-					p.machine.RemoveAbilityCounter(CatNagaSpells)
-				}
-			}
+			raw, _ := strconv.Atoi(value)
+			_ = p.OnSpellcraftChanged(&action.SpellcraftChangedAction{
+				ActionBase:   action.ActionBase{Entity: action.EntityID(e.EntityID)},
+				Value:        raw,
+				ControllerID: controllerID,
+				EntityName:   e.EntityName,
+			})
 
 		case "CONTROLLER":
-			// Update entity controller registry.
 			if e.EntityID > 0 {
 				ctrl, _ := strconv.Atoi(value)
-				p.entityController[e.EntityID] = ctrl
+				_ = p.OnEntityControllerChanged(&action.EntityControllerChangedAction{
+					ActionBase:   action.ActionBase{Entity: action.EntityID(e.EntityID)},
+					ControllerID: ctrl,
+				})
 			}
 
 		default:
@@ -1009,174 +811,49 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 		}
 	}
 
-	// Detect anomaly from FULL_ENTITY with CARDTYPE=BATTLEGROUND_ANOMALY.
-	if cardType == "BATTLEGROUND_ANOMALY" && info.CardID != "" {
-		name := CardName(info.CardID)
-		if name == "" {
-			name = info.CardID
-		}
-		desc := CardDescription(info.CardID)
-		p.machine.SetAnomaly(info.CardID, name, desc)
-		return
+	// Dispatch to visitor method for machine mutations.
+	// Entity registry (entityProps, entityController, heroEntities) is already written above.
+	switch cardType {
+	case "BATTLEGROUND_ANOMALY":
+		_ = p.OnAnomalyRegistered(&action.AnomalyRegisteredAction{
+			ActionBase: action.ActionBase{
+				Entity: action.EntityID(e.EntityID),
+				Card:   p.cardInfoFromProps(e.EntityID),
+			},
+		})
+	case "ENCHANTMENT":
+		_ = p.OnEnchantmentRegistered(&action.EnchantmentRegisteredAction{
+			ActionBase:   action.ActionBase{Entity: action.EntityID(e.EntityID)},
+			ControllerID: controllerID,
+		})
+	case "HERO":
+		_ = p.OnHeroRegistered(&action.HeroRegisteredAction{
+			ActionBase: action.ActionBase{
+				Entity: action.EntityID(e.EntityID),
+				Card:   p.cardInfoFromProps(e.EntityID),
+			},
+			ControllerID: controllerID,
+			PlayerID:     info.PlayerID,
+			Tags:         e.Tags,
+		})
+	default:
+		_ = p.OnMinionRegistered(&action.MinionRegisteredAction{
+			ActionBase:   action.ActionBase{Entity: action.EntityID(e.EntityID)},
+			ControllerID: controllerID,
+			Zone:         info.Zone,
+			ZonePosition: info.ZonePosition,
+		})
 	}
+}
 
-	// Handle enchantment entities — track buff sources.
-	if cardType == "ENCHANTMENT" {
-		p.handleEnchantmentEntity(e, info)
-		return
+// cardInfoFromProps constructs a card.CardInfo from the entity registry.
+// Returns nil when entityID is unknown or has no CardID.
+func (p *Processor) cardInfoFromProps(entityID int) *card.CardInfo {
+	info := p.entityProps[entityID]
+	if info == nil || info.CardID == "" {
+		return nil
 	}
-
-	// If this is a HERO entity owned by the local player, track its stats.
-	if cardType == "HERO" && controllerID == p.localPlayerID {
-		if p.localHeroID > 0 && e.EntityID != p.localHeroID {
-			return
-		}
-		if hp, ok := e.Tags["HEALTH"]; ok {
-			p.machine.UpdatePlayerTag("HEALTH", hp)
-		}
-		if dmg, ok := e.Tags["DAMAGE"]; ok {
-			p.machine.UpdatePlayerTag("DAMAGE", dmg)
-		}
-		if armor, ok := e.Tags["ARMOR"]; ok {
-			p.machine.UpdatePlayerTag("ARMOR", armor)
-		}
-		if tier, ok := e.Tags["PLAYER_TECH_LEVEL"]; ok {
-			if t, _ := strconv.Atoi(tier); t > 0 {
-				p.machine.SetTavernTier(t)
-			}
-		}
-		if triples, ok := e.Tags["PLAYER_TRIPLES"]; ok {
-			p.machine.UpdatePlayerTag("PLAYER_TRIPLES", triples)
-		}
-		if e.CardID != "" && !strings.HasPrefix(e.CardID, "TB_BaconShop_HERO_PH") {
-			if !p.isReconnect || p.machine.State().Player.HeroCardID == "" {
-				p.machine.UpdateHeroCardID(e.CardID)
-			}
-		}
-		return
-	}
-	// Partner hero entity — identified by PLAYER_ID tag matching partner.
-	// In BG Duos, the partner hero has CONTROLLER=<botID> but PLAYER_ID=<partnerPlayerID>.
-	if cardType == "HERO" && p.isDuos && p.partnerPlayerID > 0 {
-		if pidStr, ok := e.Tags["PLAYER_ID"]; ok {
-			pid, _ := strconv.Atoi(pidStr)
-			if pid == p.partnerPlayerID {
-				if p.partnerHeroID == 0 || e.EntityID == p.partnerHeroID {
-					p.partnerHeroID = e.EntityID
-					p.heroEntities[e.EntityID] = true
-					slog.Info("partner hero identified via PLAYER_ID tag",
-						"entityID", e.EntityID, "cardID", e.CardID, "playerID", pid)
-					if hp, ok := e.Tags["HEALTH"]; ok {
-						p.machine.UpdatePartnerTag("HEALTH", hp)
-					}
-					if dmg, ok := e.Tags["DAMAGE"]; ok {
-						p.machine.UpdatePartnerTag("DAMAGE", dmg)
-					}
-					if armor, ok := e.Tags["ARMOR"]; ok {
-						p.machine.UpdatePartnerTag("ARMOR", armor)
-					}
-					if tier, ok := e.Tags["PLAYER_TECH_LEVEL"]; ok {
-						p.machine.UpdatePartnerTag("PLAYER_TECH_LEVEL", tier)
-					}
-					if triples, ok := e.Tags["PLAYER_TRIPLES"]; ok {
-						p.machine.UpdatePartnerTag("PLAYER_TRIPLES", triples)
-					}
-					if e.CardID != "" && !strings.HasPrefix(e.CardID, "TB_BaconShop_HERO_PH") {
-						if !p.isReconnect || (p.machine.State().Partner == nil || p.machine.State().Partner.HeroCardID == "") {
-							p.machine.UpdatePartnerHeroCardID(e.CardID)
-						}
-					}
-					if e.EntityName != "" && p.partnerPlayerName == "" {
-						p.partnerPlayerName = cleanEntityName(e.EntityName)
-						p.machine.UpdatePartnerName(p.partnerPlayerName)
-					}
-					return
-				}
-			}
-		}
-	}
-	// Partner hero entity — fallback via controller match.
-	if cardType == "HERO" && p.isDuos && controllerID == p.partnerPlayerID {
-		if p.partnerHeroID > 0 && e.EntityID != p.partnerHeroID {
-			return
-		}
-		if hp, ok := e.Tags["HEALTH"]; ok {
-			p.machine.UpdatePartnerTag("HEALTH", hp)
-		}
-		if dmg, ok := e.Tags["DAMAGE"]; ok {
-			p.machine.UpdatePartnerTag("DAMAGE", dmg)
-		}
-		if armor, ok := e.Tags["ARMOR"]; ok {
-			p.machine.UpdatePartnerTag("ARMOR", armor)
-		}
-		if tier, ok := e.Tags["PLAYER_TECH_LEVEL"]; ok {
-			p.machine.UpdatePartnerTag("PLAYER_TECH_LEVEL", tier)
-		}
-		if triples, ok := e.Tags["PLAYER_TRIPLES"]; ok {
-			p.machine.UpdatePartnerTag("PLAYER_TRIPLES", triples)
-		}
-		if e.CardID != "" && !strings.HasPrefix(e.CardID, "TB_BaconShop_HERO_PH") {
-			if !p.isReconnect || (p.machine.State().Partner == nil || p.machine.State().Partner.HeroCardID == "") {
-				p.machine.UpdatePartnerHeroCardID(e.CardID)
-			}
-		}
-		return
-	}
-
-	// For minions: require ATK or HEALTH, and filter by controller.
-	if info.Attack == 0 && info.Health == 0 {
-		return
-	}
-
-	// Skip non-minion entities (heroes, enchantments, etc.)
-	if info.CardType != "MINION" {
-		return
-	}
-
-	// Register local player's SETASIDE minions as combat copies during combat.
-	// Their subsequent TAG_CHANGE ATK/HEALTH events will reveal the real
-	// (enchantment-inclusive) recruit stats before being stripped to base.
-	if info.Zone == "SETASIDE" && controllerID == p.localPlayerID &&
-		p.machine.Phase() == PhaseCombat && info.CardID != "" {
-		if p.combatCopies == nil {
-			p.combatCopies = make(map[int]*combatCopyPeak)
-		}
-		p.combatCopies[e.EntityID] = &combatCopyPeak{
-			CardID: info.CardID,
-			ATK:    info.Attack,
-			Health: info.Health,
-		}
-		// If the FULL_ENTITY already has non-base stats, sync immediately.
-		if info.Attack > 0 || info.Health > 0 {
-			p.machine.UpdateSnapshotFromCombatCopy(e.EntityID, info.CardID, info.Attack, info.Health)
-		}
-	}
-
-	// Only add minions in PLAY zone to the board.
-	if info.Zone != "PLAY" {
-		return
-	}
-
-	if p.machine.Phase() == PhaseGameOver {
-		return
-	}
-	mn := MinionState{
-		EntityID:   e.EntityID,
-		CardID:     info.CardID,
-		Name:       info.Name,
-		Attack:     info.Attack,
-		Health:     info.Health,
-		MinionType: info.Race,
-	}
-	if (mn.Name == "" || isBareNumber(mn.Name)) && mn.CardID != "" {
-		mn.Name = CardName(mn.CardID)
-	}
-	if controllerID == p.localPlayerID {
-		p.machine.UpsertMinion(mn)
-		if p.machine.Phase() == PhaseRecruit {
-			p.machine.UpdateBoardSnapshot()
-		}
-	}
+	return &card.CardInfo{ID: info.CardID, Name: CardName(info.CardID)}
 }
 
 // resolveController returns the controller PlayerID for the entity in a

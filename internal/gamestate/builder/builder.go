@@ -23,6 +23,9 @@ type ActionBuilder struct {
 	gameEntityTurn int // raw GameEntity TURN (doubled)
 	// entityCards caches cardID by entity ID for tag-change events without CardID.
 	entityCards map[action.EntityID]string
+	// entityTypes caches CARDTYPE by entity ID for Phase 8 hero/minion disambiguation
+	// in buildTagChange. Populated from EventEntityUpdate blocks (which return nil from Build).
+	entityTypes map[action.EntityID]string
 }
 
 // New creates a builder backed by the given card catalog.
@@ -31,6 +34,7 @@ func New(catalog card.Catalog) *ActionBuilder {
 		catalog:     catalog,
 		phase:       action.PhaseIdle,
 		entityCards: make(map[action.EntityID]string),
+		entityTypes: make(map[action.EntityID]string),
 	}
 }
 
@@ -38,6 +42,8 @@ func New(catalog card.Catalog) *ActionBuilder {
 // yet handled (non-migrated events during incremental migration). The dispatcher
 // silently skips nil returns.
 func (b *ActionBuilder) Build(e parser.GameEvent) action.Action {
+	// Cache card ID by entity ID so tag-change events can inherit card info
+	// from their entity's earlier FULL_ENTITY/SHOW_ENTITY block.
 	if e.CardID != "" && e.EntityID != 0 {
 		b.entityCards[action.EntityID(e.EntityID)] = e.CardID
 	}
@@ -55,7 +61,16 @@ func (b *ActionBuilder) Build(e parser.GameEvent) action.Action {
 		return b.buildGameEnd(e)
 	case parser.EventTagChange:
 		return b.buildTagChange(e)
-	// EventGameEntityTags, EventEntityUpdate: Phase 4+
+	case parser.EventGameEntityTags:
+		return b.buildReconnect(e)
+	}
+
+	// Populate entityTypes cache for Phase 8 (hero vs minion disambiguation in buildTagChange).
+	// Returns nil — EventEntityUpdate is still handled by Handle() in Phase 7.4.
+	if e.Type == parser.EventEntityUpdate && e.EntityID != 0 {
+		if ct := e.Tags["CARDTYPE"]; ct != "" {
+			b.entityTypes[action.EntityID(e.EntityID)] = ct
+		}
 	}
 	return nil
 }
@@ -73,8 +88,13 @@ func (b *ActionBuilder) cardInfo(cardID string) *card.CardInfo {
 }
 
 func (b *ActionBuilder) base(e parser.GameEvent) action.ActionBase {
+	cardID := e.CardID
+	// Fall back to the cached card ID for entities seen in earlier FULL_ENTITY blocks.
+	if cardID == "" && e.EntityID != 0 {
+		cardID = b.entityCards[action.EntityID(e.EntityID)]
+	}
 	return action.ActionBase{
-		Card:        b.cardInfo(e.CardID),
+		Card:        b.cardInfo(cardID),
 		BlockCard:   b.cardInfo(e.BlockCardID),
 		Entity:      action.EntityID(e.EntityID),
 		Phase:       b.phase,
@@ -106,6 +126,7 @@ func (b *ActionBuilder) buildGameStart(e parser.GameEvent) action.Action {
 	b.phase = action.PhaseIdle
 	b.gameEntityTurn = 0
 	b.entityCards = make(map[action.EntityID]string)
+	b.entityTypes = make(map[action.EntityID]string)
 
 	var gameID string
 	if !e.Timestamp.IsZero() {
@@ -169,19 +190,33 @@ func (b *ActionBuilder) buildGameEnd(e parser.GameEvent) action.Action {
 	}
 }
 
-// buildTagChange handles EventTagChange events for migrated player/economy tags.
-// Returns nil for all other tags (or for any migrated tag during non-recruit phases)
-// so the drain falls back to Handle(). These player-state tags can fire at any phase;
-// only the recruit-phase path goes through the dispatcher — other phases still use Handle().
-func (b *ActionBuilder) buildTagChange(e parser.GameEvent) action.Action {
-	if b.phase != action.PhaseRecruit {
-		return nil
+// buildReconnect handles EventGameEntityTags: emits a ReconnectAction carrying the
+// current STATE and TURN values so OnReconnect can detect mid-game reconnects.
+func (b *ActionBuilder) buildReconnect(e parser.GameEvent) action.Action {
+	state := e.Tags["STATE"]
+	turn := tagInt(e.Tags, "TURN")
+	return &action.ReconnectAction{
+		ActionBase:          b.base(e),
+		IsRunning:           state == "RUNNING",
+		Turn:                turn,
+		PunishLeaversActive: e.Tags["BACON_DUOS_PUNISH_LEAVERS"] == "1",
 	}
+}
+
+// buildTagChange handles EventTagChange events for migrated player/economy tags.
+// Buff-source tags (Bloodgem, Elemental, TavernSpell) and economy counters are
+// recruit-phase only. BACON_PLAYER_EXTRA_GOLD_NEXT_TURN is special: it fires
+// during both recruit (normal gold grant) and combat (Overconfidence mechanic),
+// so we emit the appropriate action type per phase.
+func (b *ActionBuilder) buildTagChange(e parser.GameEvent) action.Action {
 	for tag, rawStr := range e.Tags {
 		switch tag {
 		case "BACON_BLOODGEMBUFFATKVALUE", "BACON_BLOODGEMBUFFHEALTHVALUE",
 			"BACON_ELEMENTAL_BUFFATKVALUE", "BACON_ELEMENTAL_BUFFHEALTHVALUE",
 			"TAVERN_SPELL_ATTACK_INCREASE", "TAVERN_SPELL_HEALTH_INCREASE":
+			if b.phase != action.PhaseRecruit {
+				return nil
+			}
 			val, _ := strconv.Atoi(rawStr)
 			return &action.PlayerTagChangedAction{
 				ActionBase:   b.base(e),
@@ -192,6 +227,9 @@ func (b *ActionBuilder) buildTagChange(e parser.GameEvent) action.Action {
 			}
 
 		case "BACON_FREE_REFRESH_COUNT":
+			if b.phase != action.PhaseRecruit {
+				return nil
+			}
 			raw, _ := strconv.Atoi(rawStr)
 			return &action.EconomyChangedAction{
 				ActionBase:   b.base(e),
@@ -206,12 +244,170 @@ func (b *ActionBuilder) buildTagChange(e parser.GameEvent) action.Action {
 			if raw < 0 {
 				raw = 0
 			}
-			return &action.EconomyChangedAction{
+			if b.phase == action.PhaseCombat {
+				// Overconfidence and rally spells grant gold during combat.
+				return &action.CombatEconomyEffectAction{
+					ActionBase:   b.base(e),
+					Tag:          tag,
+					Value:        raw,
+					ControllerID: e.PlayerID,
+				}
+			}
+			if b.phase == action.PhaseRecruit {
+				return &action.EconomyChangedAction{
+					ActionBase:   b.base(e),
+					Tag:          tag,
+					Value:        raw,
+					ControllerID: e.PlayerID,
+					EntityName:   e.EntityName,
+				}
+			}
+			return nil
+
+		case "PLAYER_TRIPLES":
+			val, _ := strconv.Atoi(rawStr)
+			return &action.PlayerTriplesChangedAction{
 				ActionBase:   b.base(e),
-				Tag:          tag,
-				Value:        raw,
+				Value:        val,
 				ControllerID: e.PlayerID,
 				EntityName:   e.EntityName,
+			}
+
+		case "RESOURCES", "RESOURCES_USED":
+			val, _ := strconv.Atoi(rawStr)
+			return &action.GoldChangedAction{
+				ActionBase:   b.base(e),
+				Tag:          tag,
+				Value:        val,
+				ControllerID: e.PlayerID,
+				EntityName:   e.EntityName,
+			}
+
+		case "PLAYER_TECH_LEVEL", "TAVERN_TIER":
+			tier, _ := strconv.Atoi(rawStr)
+			return &action.TavernTierChangedAction{
+				ActionBase:   b.base(e),
+				Tag:          tag,
+				Tier:         tier,
+				ControllerID: e.PlayerID,
+				EntityName:   e.EntityName,
+			}
+
+		case "PLAYER_LEADERBOARD_PLACE":
+			val, _ := strconv.Atoi(rawStr)
+			return &action.PlacementChangedAction{
+				ActionBase:   b.base(e),
+				Value:        val,
+				ControllerID: e.PlayerID,
+				EntityName:   e.EntityName,
+			}
+
+		case "3809":
+			val, _ := strconv.Atoi(rawStr)
+			return &action.SpellcraftChangedAction{
+				ActionBase:   b.base(e),
+				Value:        val,
+				ControllerID: e.PlayerID,
+				EntityName:   e.EntityName,
+			}
+
+		case "TURN":
+			val, _ := strconv.Atoi(rawStr)
+			return &action.PlayerBGTurnChangedAction{
+				ActionBase:   b.base(e),
+				Value:        val,
+				ControllerID: e.PlayerID,
+				EntityName:   e.EntityName,
+			}
+
+		case "BACON_DUO_TEAMMATE_PLAYER_ID":
+			pid, _ := strconv.Atoi(rawStr)
+			if pid > 0 {
+				return &action.DuosTeammateAction{
+					ActionBase:      b.base(e),
+					PartnerPlayerID: pid,
+					ControllerID:    e.PlayerID,
+					EntityName:      e.EntityName,
+				}
+			}
+			return nil
+
+		case "HERO_ENTITY":
+			heroID, _ := strconv.Atoi(rawStr)
+			if heroID > 0 {
+				return &action.HeroEntityAssignedAction{
+					ActionBase:   b.base(e),
+					HeroEntityID: heroID,
+					ControllerID: e.PlayerID,
+					EntityName:   e.EntityName,
+				}
+			}
+			return nil
+
+		case "PROPOSED_ATTACKER":
+			if b.phase != action.PhaseCombat {
+				return nil
+			}
+			if e.EntityName != "GameEntity" {
+				return nil
+			}
+			attackerID, _ := strconv.Atoi(rawStr)
+			isHero := attackerID > 0 && b.entityTypes[action.EntityID(attackerID)] == "HERO"
+			return &action.CombatAttackerAction{
+				ActionBase:     b.base(e),
+				AttackerID:     attackerID,
+				IsHeroAttacker: isHero,
+			}
+
+		case "PROPOSED_DEFENDER":
+			if b.phase != action.PhaseCombat {
+				return nil
+			}
+			if e.EntityName != "GameEntity" {
+				return nil
+			}
+			defenderID, _ := strconv.Atoi(rawStr)
+			if defenderID <= 0 {
+				return nil
+			}
+			isHero := b.entityTypes[action.EntityID(defenderID)] == "HERO"
+			return &action.CombatDefenderAction{
+				ActionBase:     b.base(e),
+				DefenderID:     defenderID,
+				IsHeroDefender: isHero,
+			}
+
+		case "BACON_DUO_PASSABLE":
+			val, _ := strconv.Atoi(rawStr)
+			return &action.DuosPassableChangedAction{
+				ActionBase: b.base(e),
+				Value:      val,
+			}
+
+		case "BACON_DUOS_PUNISH_LEAVERS":
+			val, _ := strconv.Atoi(rawStr)
+			return &action.DuosPunishLeaversChangedAction{
+				ActionBase: b.base(e),
+				Value:      val,
+			}
+
+		case "CONTROLLER":
+			ctrl, _ := strconv.Atoi(rawStr)
+			if e.EntityID > 0 {
+				return &action.EntityControllerChangedAction{
+					ActionBase:   b.base(e),
+					ControllerID: ctrl,
+				}
+			}
+			return nil
+
+		case "BACON_CURRENT_COMBAT_PLAYER_ID":
+			combatPlayerID, _ := strconv.Atoi(rawStr)
+			return &action.CombatPlayerChangedAction{
+				ActionBase:     b.base(e),
+				CombatPlayerID: combatPlayerID,
+				ControllerID:   e.PlayerID,
+				EntityName:     e.EntityName,
 			}
 		}
 	}

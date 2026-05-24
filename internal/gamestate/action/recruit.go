@@ -11,15 +11,15 @@ type MinionBoughtAction struct {
 	ControllerID int
 }
 
-func (a *MinionBoughtAction) actionMarker()                           {}
-func (a *MinionBoughtAction) recruitPhase()                           {}
+func (a *MinionBoughtAction) actionMarker()                        {}
+func (a *MinionBoughtAction) recruitPhase()                        {}
 func (a *MinionBoughtAction) AcceptRecruit(v RecruitVisitor) error { return v.OnMinionBought(a) }
 
 // MinionSoldAction fires when a player sells a minion from the board.
 type MinionSoldAction struct{ ActionBase }
 
-func (a *MinionSoldAction) actionMarker()                          {}
-func (a *MinionSoldAction) recruitPhase()                          {}
+func (a *MinionSoldAction) actionMarker()                        {}
+func (a *MinionSoldAction) recruitPhase()                        {}
 func (a *MinionSoldAction) AcceptRecruit(v RecruitVisitor) error { return v.OnMinionSold(a) }
 
 // TavernUpgradedAction fires when the player purchases a tavern tier upgrade.
@@ -28,8 +28,8 @@ type TavernUpgradedAction struct {
 	NewTier int
 }
 
-func (a *TavernUpgradedAction) actionMarker()                             {}
-func (a *TavernUpgradedAction) recruitPhase()                             {}
+func (a *TavernUpgradedAction) actionMarker()                        {}
+func (a *TavernUpgradedAction) recruitPhase()                        {}
 func (a *TavernUpgradedAction) AcceptRecruit(v RecruitVisitor) error { return v.OnTavernUpgraded(a) }
 
 // TavernSpellPlayedAction fires when a player plays a tavern spell from hand
@@ -37,9 +37,11 @@ func (a *TavernUpgradedAction) AcceptRecruit(v RecruitVisitor) error { return v.
 // CombatTavernSpellAction instead).
 type TavernSpellPlayedAction struct{ ActionBase }
 
-func (a *TavernSpellPlayedAction) actionMarker()                               {}
-func (a *TavernSpellPlayedAction) recruitPhase()                               {}
-func (a *TavernSpellPlayedAction) AcceptRecruit(v RecruitVisitor) error { return v.OnTavernSpellPlayed(a) }
+func (a *TavernSpellPlayedAction) actionMarker() {}
+func (a *TavernSpellPlayedAction) recruitPhase() {}
+func (a *TavernSpellPlayedAction) AcceptRecruit(v RecruitVisitor) error {
+	return v.OnTavernSpellPlayed(a)
+}
 
 // MinionPermStatChangedAction fires when a minion's ATK or Health changes
 // during recruit phase (permanent — persists beyond combat).
@@ -53,9 +55,11 @@ type MinionPermStatChangedAction struct {
 	ControllerID int
 }
 
-func (a *MinionPermStatChangedAction) actionMarker()                                  {}
-func (a *MinionPermStatChangedAction) recruitPhase()                                  {}
-func (a *MinionPermStatChangedAction) AcceptRecruit(v RecruitVisitor) error { return v.OnMinionPermStatChanged(a) }
+func (a *MinionPermStatChangedAction) actionMarker() {}
+func (a *MinionPermStatChangedAction) recruitPhase() {}
+func (a *MinionPermStatChangedAction) AcceptRecruit(v RecruitVisitor) error {
+	return v.OnMinionPermStatChanged(a)
+}
 
 // DntEnchantmentAction fires when a Dnt (Deathnote) enchantment's
 // TAG_SCRIPT_DATA_NUM_1 or TAG_SCRIPT_DATA_NUM_2 changes — these are the
@@ -67,8 +71,8 @@ type DntEnchantmentAction struct {
 	Value int    // raw script data value
 }
 
-func (a *DntEnchantmentAction) actionMarker()                              {}
-func (a *DntEnchantmentAction) recruitPhase()                              {}
+func (a *DntEnchantmentAction) actionMarker()                        {}
+func (a *DntEnchantmentAction) recruitPhase()                        {}
 func (a *DntEnchantmentAction) AcceptRecruit(v RecruitVisitor) error { return v.OnDntEnchantment(a) }
 
 // PlayerTagChangedAction fires when a player-level tag changes (Bloodgem values,
@@ -83,9 +87,11 @@ type PlayerTagChangedAction struct {
 	EntityName   string
 }
 
-func (a *PlayerTagChangedAction) actionMarker()                                {}
-func (a *PlayerTagChangedAction) recruitPhase()                                {}
-func (a *PlayerTagChangedAction) AcceptRecruit(v RecruitVisitor) error { return v.OnPlayerTagChanged(a) }
+func (a *PlayerTagChangedAction) actionMarker() {}
+func (a *PlayerTagChangedAction) recruitPhase() {}
+func (a *PlayerTagChangedAction) AcceptRecruit(v RecruitVisitor) error {
+	return v.OnPlayerTagChanged(a)
+}
 
 // EconomyChangedAction fires when an economy tag changes during recruit phase.
 // Tag identifies which counter changed (BACON_FREE_REFRESH_COUNT or
@@ -99,6 +105,6 @@ type EconomyChangedAction struct {
 	EntityName   string
 }
 
-func (a *EconomyChangedAction) actionMarker()                               {}
-func (a *EconomyChangedAction) recruitPhase()                               {}
+func (a *EconomyChangedAction) actionMarker()                        {}
+func (a *EconomyChangedAction) recruitPhase()                        {}
 func (a *EconomyChangedAction) AcceptRecruit(v RecruitVisitor) error { return v.OnEconomyChanged(a) }

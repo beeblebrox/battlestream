@@ -372,6 +372,10 @@ func cmdDaemon() *cobra.Command {
 			} else if os.Getenv("BS_NO_AUTH") == "true" {
 				cfg.API.APIKey = ""
 			}
+			if cmd.Flags().Changed("rest-addr") {
+				restAddr, _ := cmd.Flags().GetString("rest-addr")
+				cfg.API.RESTAddr = restAddr
+			}
 
 			profile, err := cfg.GetProfile(profileFlag)
 			if err != nil {
@@ -405,6 +409,7 @@ func cmdDaemon() *cobra.Command {
 		},
 	}
 	cmd.Flags().Bool("no-auth", false, "Accept all requests without checking the API key (for local plugin use)")
+	cmd.Flags().String("rest-addr", "", "REST/WebSocket listen address (overrides config, e.g. 127.0.0.1:8082)")
 	return cmd
 }
 

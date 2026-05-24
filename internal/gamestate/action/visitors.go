@@ -24,6 +24,15 @@ type CombatVisitor interface {
 	// via rally). Action.Card is the spell; Action.BlockCard is the trigger source.
 	OnCombatTavernSpell(*CombatTavernSpellAction) error
 	OnCombatEconomyEffect(*CombatEconomyEffectAction) error
+	// OnCombatOutcome records the win/loss result for the local player from a
+	// hero-vs-hero attack (PROPOSED_ATTACKER + PROPOSED_DEFENDER resolution).
+	OnCombatOutcome(*CombatOutcomeAction) error
+	// OnCombatAttacker fires when GameEntity PROPOSED_ATTACKER changes during combat.
+	// Marks partner board setup as done and buffers the hero attacker ID.
+	OnCombatAttacker(*CombatAttackerAction) error
+	// OnCombatDefender fires when GameEntity PROPOSED_DEFENDER changes during combat.
+	// Resolves the win/loss outcome using pendingHeroAttackerID set by OnCombatAttacker.
+	OnCombatDefender(*CombatDefenderAction) error
 }
 
 // TransitionVisitor handles game lifecycle events dispatched regardless of phase.
@@ -36,4 +45,21 @@ type TransitionVisitor interface {
 	OnReconnect(*ReconnectAction) error
 	OnPlayerDef(*PlayerDefAction) error
 	OnPlayerName(*PlayerNameAction) error
+	OnPlayerTriplesChanged(*PlayerTriplesChangedAction) error
+	OnGoldChanged(*GoldChangedAction) error
+	OnTavernTierChanged(*TavernTierChangedAction) error
+	OnPlacementChanged(*PlacementChangedAction) error
+	OnSpellcraftChanged(*SpellcraftChangedAction) error
+	OnPlayerBGTurnChanged(*PlayerBGTurnChangedAction) error
+	OnAnomalyRegistered(*AnomalyRegisteredAction) error
+	OnEnchantmentRegistered(*EnchantmentRegisteredAction) error
+	OnHeroRegistered(*HeroRegisteredAction) error
+	OnMinionRegistered(*MinionRegisteredAction) error
+	OnHeroStatChanged(*HeroStatChangedAction) error
+	OnDuosTeammate(*DuosTeammateAction) error
+	OnHeroEntityAssigned(*HeroEntityAssignedAction) error
+	OnDuosPassableChanged(*DuosPassableChangedAction) error
+	OnDuosPunishLeaversChanged(*DuosPunishLeaversChangedAction) error
+	OnEntityControllerChanged(*EntityControllerChangedAction) error
+	OnCombatPlayerChanged(*CombatPlayerChangedAction) error
 }

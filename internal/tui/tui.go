@@ -698,7 +698,14 @@ func (m *Model) renderHeroPanel(w int) string {
 	}
 	b.WriteString(styleLabel.Render("Armor   ") + styleValue.Render(armor) + "\n")
 	b.WriteString(styleLabel.Render("Triples ") + styleValue.Render(fmt.Sprintf("%d", p.TripleCount)) + "\n")
-	b.WriteString(styleLabel.Render("Gold    ") + styleValue.Render(fmt.Sprintf("%d/%d", p.CurrentGold, p.MaxGold)) + "\n")
+	gold := "—"
+	if p.MaxGold > 0 {
+		gold = fmt.Sprintf("%d/%d", p.CurrentGold, p.MaxGold)
+	}
+	b.WriteString(styleLabel.Render("Gold    ") + styleValue.Render(gold) + "\n")
+	if p.SpellPower > 0 {
+		b.WriteString(styleLabel.Render("Spell   ") + styleValue.Render(fmt.Sprintf("+%d", p.SpellPower)) + "\n")
+	}
 	if p.HeroCardId != "" {
 		b.WriteString(styleLabel.Render("Hero    ") + styleValue.Render(gamestate.CardName(p.HeroCardId)) + "\n")
 	}

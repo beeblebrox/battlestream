@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"battlestream.fixates.io/internal/gamestate"
+	"battlestream.fixates.io/internal/gamestate/action"
 	"battlestream.fixates.io/internal/gamestate/builder"
 	"battlestream.fixates.io/internal/gamestate/card"
 	"battlestream.fixates.io/internal/parser"
@@ -126,13 +127,19 @@ func TestGoldenState_DispatchProducesSameResultAsHandle(t *testing.T) {
 		t.Errorf("Player.Name: ref=%q got=%q", ref.Player.Name, got.Player.Name)
 	}
 
-	// ── TODO: enable in Phase 2 (economy / player tags) ─────────────────────
-	// if ref.Player.TavernTier != got.Player.TavernTier { t.Errorf(...) }
-	// if ref.Player.Health != got.Player.Health { t.Errorf(...) }
-	// if ref.Player.CurrentGold != got.Player.CurrentGold { t.Errorf(...) }
-	// if ref.Player.TripleCount != got.Player.TripleCount { t.Errorf(...) }
-	// if ref.Player.WinStreak != got.Player.WinStreak { t.Errorf(...) }
-	// if ref.Player.LossStreak != got.Player.LossStreak { t.Errorf(...) }
+	// ── Phase 2 assertions (economy / player tags) ───────────────────────────
+	if ref.Player.TavernTier != got.Player.TavernTier {
+		t.Errorf("Player.TavernTier: ref=%d got=%d", ref.Player.TavernTier, got.Player.TavernTier)
+	}
+	if ref.Player.Health != got.Player.Health {
+		t.Errorf("Player.Health: ref=%d got=%d", ref.Player.Health, got.Player.Health)
+	}
+	if ref.Player.CurrentGold != got.Player.CurrentGold {
+		t.Errorf("Player.CurrentGold: ref=%d got=%d", ref.Player.CurrentGold, got.Player.CurrentGold)
+	}
+	if ref.Player.TripleCount != got.Player.TripleCount {
+		t.Errorf("Player.TripleCount: ref=%d got=%d", ref.Player.TripleCount, got.Player.TripleCount)
+	}
 
 	// ── Phase 4 assertions (Dnt enchantments) ───────────────────────────────
 	if !buffSourcesEqual(ref.BuffSources, got.BuffSources) {
@@ -156,9 +163,34 @@ func TestGoldenState_DispatchProducesSameResultAsHandle(t *testing.T) {
 		}
 	}
 
-	// ── TODO: enable in Phase 6 (combat / win-loss) ─────────────────────────
-	// if ref.Player.WinStreak != got.Player.WinStreak { t.Errorf(...) }
-	// if ref.Player.LossStreak != got.Player.LossStreak { t.Errorf(...) }
+	// ── Phase 6 assertions (combat / win-loss) ───────────────────────────────
+	// PROPOSED_ATTACKER/DEFENDER still handled by Handle() in both paths.
+	if ref.Player.WinStreak != got.Player.WinStreak {
+		t.Errorf("Player.WinStreak: ref=%d got=%d", ref.Player.WinStreak, got.Player.WinStreak)
+	}
+	if ref.Player.LossStreak != got.Player.LossStreak {
+		t.Errorf("Player.LossStreak: ref=%d got=%d", ref.Player.LossStreak, got.Player.LossStreak)
+	}
+
+	// ── Additional field assertions (all delegated through Handle()) ──────────
+	if ref.Player.HeroCardID != got.Player.HeroCardID {
+		t.Errorf("Player.HeroCardID: ref=%q got=%q", ref.Player.HeroCardID, got.Player.HeroCardID)
+	}
+	if ref.Player.Armor != got.Player.Armor {
+		t.Errorf("Player.Armor: ref=%d got=%d", ref.Player.Armor, got.Player.Armor)
+	}
+	if ref.Player.Damage != got.Player.Damage {
+		t.Errorf("Player.Damage: ref=%d got=%d", ref.Player.Damage, got.Player.Damage)
+	}
+	if ref.AnomalyCardID != got.AnomalyCardID {
+		t.Errorf("AnomalyCardID: ref=%q got=%q", ref.AnomalyCardID, got.AnomalyCardID)
+	}
+	if len(ref.AvailableTribes) != len(got.AvailableTribes) {
+		t.Errorf("AvailableTribes length: ref=%d got=%d", len(ref.AvailableTribes), len(got.AvailableTribes))
+	}
+	if len(ref.Modifications) != len(got.Modifications) {
+		t.Errorf("Modifications length: ref=%d got=%d", len(ref.Modifications), len(got.Modifications))
+	}
 }
 
 // TestGoldenState_PhaseEnforcement verifies that dispatching a combat action
@@ -173,14 +205,34 @@ func TestGoldenState_PhaseEnforcement(t *testing.T) {
 		proc.AsTransitionVisitor(),
 	)
 
-	// Force recruit phase by dispatching a TurnTransitionAction.
-	_ = disp
+	// Advance dispatcher to PhaseRecruit via a TurnTransitionAction (odd turn).
+	turnAction := &action.TurnTransitionAction{
+		NewPhase:       action.PhaseRecruit,
+		GameEntityTurn: 1,
+	}
+	if err := disp.Dispatch(turnAction); err != nil {
+		t.Fatalf("dispatching TurnTransitionAction: %v", err)
+	}
 
-	// TODO(Phase 5): once MinionTempStatChangedAction and board state are wired,
-	// dispatch a MinionTempStatChangedAction during PhaseRecruit and assert:
-	// 1. No board state mutation occurred.
-	// 2. The dispatcher logged a "non-recruit action during recruit phase" warning.
-	t.Skip("Phase enforcement test enabled in Phase 5")
+	// Board must be empty before the test action.
+	if len(m.State().Board) != 0 {
+		t.Fatalf("expected empty board before test, got %d minions", len(m.State().Board))
+	}
+
+	// Dispatch a combat-phase action (MinionTempStatChangedAction) during PhaseRecruit.
+	// The dispatcher must reject it: log a "builder bug" warning and skip it.
+	wrongPhaseAction := &action.MinionTempStatChangedAction{
+		Stat:     "ATK",
+		NewValue: 99,
+	}
+	if err := disp.Dispatch(wrongPhaseAction); err != nil {
+		t.Errorf("Dispatch returned error for wrong-phase action (expected nil): %v", err)
+	}
+
+	// Board must still be empty — the action must not have mutated state.
+	if len(m.State().Board) != 0 {
+		t.Errorf("Board was mutated by wrong-phase action: got %d minions", len(m.State().Board))
+	}
 }
 
 // ── Comparison helpers ────────────────────────────────────────────────────────

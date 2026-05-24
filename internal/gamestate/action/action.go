@@ -16,7 +16,7 @@ type EntityID int
 type GamePhase int
 
 const (
-	PhaseUnknown  GamePhase = iota
+	PhaseUnknown GamePhase = iota
 	PhaseIdle
 	PhaseRecruit
 	PhaseCombat
@@ -50,7 +50,7 @@ type ActionBase struct {
 
 	Entity      EntityID
 	Turn        int
-	Phase       GamePhase   // for logging/diagnostics only; dispatch uses the dispatcher's own phase
+	Phase       GamePhase // for logging/diagnostics only; dispatch uses the dispatcher's own phase
 	TriggerKind TriggerKind
 }
 
