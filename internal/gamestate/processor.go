@@ -1157,13 +1157,8 @@ func (p *Processor) isPlayerOrHeroEntity(e parser.GameEvent, controllerID int) b
 	return p.isLocalPlayerEntity(e) || p.isLocalHero(e, controllerID)
 }
 
-// updateMinionStat updates a minion's stat from a raw parser event.
-func (p *Processor) updateMinionStat(e parser.GameEvent, stat, value string) {
-	p.updateMinionStatByID(e.EntityID, e.EntityName, stat, parseInt(value))
-}
-
-// updateMinionStatByID is the core stat-update path; called by both the parser-event
-// adapter above and the Phase 5 visitor (OnMinionPermStatChanged).
+// updateMinionStatByID is the core stat-update path called by the Phase 5 visitor
+// (OnMinionPermStatChanged).
 func (p *Processor) updateMinionStatByID(entityID int, entityName, stat string, newVal int) {
 	if entityID <= 0 {
 		return

@@ -1724,7 +1724,7 @@ func TestPendingStatChangesCapFlush(t *testing.T) {
 			PlayerID: 7,
 			Tags:     map[string]string{"ATK": fmt.Sprintf("%d", newAtk)},
 		}
-		p.updateMinionStat(e, "ATK", fmt.Sprintf("%d", newAtk))
+		p.updateMinionStatByID(e.EntityID, e.EntityName, "ATK", newAtk)
 		// Reset stored value so the next iteration for this entity sees a fresh delta.
 		if info2 := p.entityProps[entityID]; info2 != nil {
 			info2.Attack = newAtk - 1
