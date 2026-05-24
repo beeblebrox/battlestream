@@ -7,6 +7,7 @@ export class HealthAction extends BaseStat {
   label = 'HEALTH';
   gradient = ['#7b0000', '#c0392b'] as const;
   extract(s: GameState) {
+    if (s.player.max_health === 0) return { value: '—', subtitle: '' };
     const hp = s.player.health - s.player.damage;
     return { value: String(hp), subtitle: `/ ${s.player.max_health}` };
   }

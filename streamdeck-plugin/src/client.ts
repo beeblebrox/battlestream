@@ -36,8 +36,17 @@ export class BattlestreamClient {
 
   connect(): void {
     this.destroyed = false;
+    this.backoff = BACKOFF_INITIAL;
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.pollTimer !== null) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
     this.openSSE();
-    this.fetchState();
+    void this.fetchState();
     this.pollTimer = setInterval(() => { void this.fetchState(); }, POLL_INTERVAL);
   }
 

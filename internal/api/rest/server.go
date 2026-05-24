@@ -483,12 +483,18 @@ type wsHub struct {
 	mu         sync.Mutex
 }
 
+const (
+	wsWriteTimeout = 10 * time.Second
+	wsPingInterval = 30 * time.Second
+	wsPongTimeout  = 60 * time.Second
+)
+
 func newHub() *wsHub {
 	return &wsHub{
 		clients:    make(map[*wsClient]bool),
 		broadcast:  make(chan []byte, 256),
 		register:   make(chan *wsClient),
-		unregister: make(chan *wsClient),
+		unregister: make(chan *wsClient, 8),
 	}
 }
 
@@ -530,10 +536,28 @@ type wsClient struct {
 }
 
 func (c *wsClient) writePump() {
-	defer c.conn.Close()
-	for msg := range c.send {
-		if err := c.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-			return
+	ticker := time.NewTicker(wsPingInterval)
+	defer func() {
+		ticker.Stop()
+		c.conn.Close()
+	}()
+	for {
+		select {
+		case msg, ok := <-c.send:
+			_ = c.conn.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
+			if !ok {
+				// Hub closed the channel — send close frame and exit.
+				_ = c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				return
+			}
+			if err := c.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+				return
+			}
+		case <-ticker.C:
+			_ = c.conn.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
+			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
 		}
 	}
 }
@@ -544,6 +568,10 @@ func (c *wsClient) readPump() {
 		c.conn.Close()
 	}()
 	c.conn.SetReadLimit(512)
+	_ = c.conn.SetReadDeadline(time.Now().Add(wsPongTimeout))
+	c.conn.SetPongHandler(func(string) error {
+		return c.conn.SetReadDeadline(time.Now().Add(wsPongTimeout))
+	})
 	for {
 		if _, _, err := c.conn.ReadMessage(); err != nil {
 			return

@@ -7,6 +7,7 @@ export class GoldAction extends BaseStat {
   label = 'GOLD';
   gradient = ['#5c4a00', '#d4a017'] as const;
   extract(s: GameState) {
+    if (s.player.max_gold === 0) return { value: '—', subtitle: '' };
     return { value: String(s.player.current_gold), subtitle: `/ ${s.player.max_gold}` };
   }
 }
