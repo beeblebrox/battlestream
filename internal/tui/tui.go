@@ -1009,7 +1009,9 @@ func buffCategoryColor(cat string) lipgloss.Color {
 		"GOLD_NEXT_TURN":  colorGold,
 		"CONSUMED":        colorDim,
 		"GENERAL":         colorGeneral,
-		"MINIONS_SOLD":    colorDim,
+		"MINIONS_SOLD":      colorDim,
+		"SPELLS_CAST":       colorTavern,
+		"SPELLCRAFT_CAST":   colorRightmost,
 	}
 	if c, ok := colors[cat]; ok {
 		return c
