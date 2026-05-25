@@ -753,6 +753,7 @@ func (p *Processor) OnCombatPlayerChanged(a *action.CombatPlayerChangedAction) e
 		p.partnerCombatActive = true
 		p.partnerCombatHeroCtrl = 0
 		p.partnerCombatMinions = nil
+		p.opponentCombatMinions = nil
 		p.partnerBoardSetupDone = false
 		p.collectPartnerCombatRetro()
 	}
@@ -1026,6 +1027,7 @@ func (p *Processor) resetProcessorState() {
 	p.partnerCombatActive = false
 	p.partnerCombatHeroCtrl = 0
 	p.partnerCombatMinions = nil
+	p.opponentCombatMinions = nil
 	p.partnerBoardSetupDone = false
 	p.combatPhaseActive = false
 	p.combatPhaseEntityIDs = nil

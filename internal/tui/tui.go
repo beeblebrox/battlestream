@@ -599,9 +599,9 @@ func (m *Model) View() string {
 	rowSession := m.renderSessionBar(m.width - 2)
 
 	// ── Help bar ──
-	helpText := "  [r] Refresh game  [R] Refresh stats  [d] Anomaly desc  [l] Last result  [o] Dashboard  [q] Quit  scroll: mouse wheel"
+	helpText := "  [r] Refresh game  [R] Refresh stats  [d] Anomaly desc  [l] Last result  [o] Dashboard  [q] Quit  scroll: PgUp/PgDn/wheel"
 	if m.game != nil && m.game.IsDuos {
-		helpText = "  [r] Refresh  [R] Stats  [d] Anomaly desc  [l] Last result  [o] Dashboard  [q] Quit  scroll: mouse wheel"
+		helpText = "  [r] Refresh  [R] Stats  [d] Anomaly desc  [l] Last result  [o] Dashboard  [q] Quit  scroll: PgUp/PgDn/wheel"
 	}
 	if m.width > 0 {
 		runes := []rune(helpText)
@@ -798,7 +798,7 @@ func (m *Model) renderHeroPanel(w int) string {
 func (m *Model) boardItems() string {
 	var b strings.Builder
 	if m.game == nil || len(m.game.Board) == 0 {
-		b.WriteString(styleDim.Render("(empty)"))
+		b.WriteString(styleDim.Render("(no minions in play)"))
 	} else {
 		for _, mn := range m.game.Board {
 			b.WriteString(renderMinion(mn, m.boardVP.Width) + "\n")
@@ -823,7 +823,7 @@ func (m *Model) partnerBoardItems() string {
 func (m *Model) partnerModsItems() string {
 	var b strings.Builder
 	if m.game == nil || len(m.game.PartnerBuffSources) == 0 {
-		return styleDim.Render("(awaiting combat data)")
+		return styleDim.Render("(awaiting first combat)")
 	}
 
 	sources := make([]*bspb.BuffSource, len(m.game.PartnerBuffSources))
@@ -1224,12 +1224,12 @@ func (m *Model) renderSessionBar(w int) string {
 		a := m.agg
 		wins := styleWin.Render(fmt.Sprintf("W: %d", a.Wins))
 		losses := styleLoss.Render(fmt.Sprintf("L: %d", a.Losses))
-		avg := styleValue.Render(fmt.Sprintf("%.1f", a.AvgPlacement))
+		avg := styleValue.Render(fmt.Sprintf("%.1f avg", a.AvgPlacement))
 		games := styleValue.Render(fmt.Sprintf("%d", a.GamesPlayed))
 
 		b.WriteString(styleLabel.Render("SESSION  "))
 		b.WriteString(wins + "  " + losses)
-		b.WriteString(styleLabel.Render("  Avg ") + avg)
+		b.WriteString("  " + avg)
 		b.WriteString(styleLabel.Render("  Games ") + games)
 
 		if a.BestPlacement > 0 {

@@ -126,6 +126,7 @@ type Processor struct {
 	partnerCombatActive   bool          // true while partner's combat is in progress
 	partnerCombatHeroCtrl int           // CONTROLLER of partner's hero copy in combat
 	partnerCombatMinions  []MinionState // collected partner minions during combat
+	opponentCombatMinions []MinionState // collected opponent minions during partner's combat
 	partnerBoardSetupDone bool          // true after first combat action (PROPOSED_ATTACKER) — stops collection
 	combatPhaseActive     bool          // true during the combat phase (BACON_CURRENT_COMBAT_PLAYER_ID > 0)
 	combatPhaseEntityIDs  []int         // entity IDs created during current combat phase (for retroactive scan)
@@ -810,6 +811,25 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 			p.partnerCombatMinions = append(p.partnerCombatMinions, mn)
 		}
 	}
+	// Collect opponent board during partner's combat: minions with a controller that
+	// is neither the local player nor zero (i.e. some other bot controller).
+	if p.partnerCombatActive && !p.partnerBoardSetupDone &&
+		cardType == "MINION" && zonePos > 0 &&
+		info.Attack > 0 && info.Health > 0 && info.Zone == "PLAY" &&
+		controllerID > 0 && controllerID != p.localPlayerID {
+		mn := MinionState{
+			EntityID:   e.EntityID,
+			CardID:     info.CardID,
+			Name:       info.Name,
+			Attack:     info.Attack,
+			Health:     info.Health,
+			MinionType: info.Race,
+		}
+		if (mn.Name == "" || isBareNumber(mn.Name)) && mn.CardID != "" {
+			mn.Name = CardName(mn.CardID)
+		}
+		p.opponentCombatMinions = append(p.opponentCombatMinions, mn)
+	}
 
 	// Dispatch to visitor method for machine mutations.
 	// Everything above this line is pre-visitor work that is intentionally NOT delegated
@@ -958,9 +978,22 @@ func (p *Processor) updatePartnerCombatMinion(entityID int, stat string, val int
 			return
 		}
 	}
+	// Also update opponent combat minions — they receive buffed stats via TAG_CHANGE
+	// before PROPOSED_ATTACKER fires, just like partner minions.
+	for i := range p.opponentCombatMinions {
+		if p.opponentCombatMinions[i].EntityID == entityID {
+			switch stat {
+			case "ATK":
+				p.opponentCombatMinions[i].Attack = val
+			case "HEALTH":
+				p.opponentCombatMinions[i].Health = val
+			}
+			return
+		}
+	}
 }
 
-// finalizePartnerCombat snapshots the collected partner combat minions.
+// finalizePartnerCombat snapshots the collected partner combat minions and opponent minions.
 func (p *Processor) finalizePartnerCombat() {
 	p.partnerCombatActive = false
 	if len(p.partnerCombatMinions) > 0 {
@@ -983,6 +1016,24 @@ func (p *Processor) finalizePartnerCombat() {
 		slog.Info("partner board captured from combat", "minions", len(p.partnerCombatMinions), "turn", turn)
 	}
 	p.partnerCombatMinions = nil
+
+	// Snapshot the opponent board collected during partner's combat.
+	if len(p.opponentCombatMinions) > 0 {
+		sort.Slice(p.opponentCombatMinions, func(i, j int) bool {
+			posI, posJ := 0, 0
+			if info := p.entityProps[p.opponentCombatMinions[i].EntityID]; info != nil {
+				posI = info.ZonePosition
+			}
+			if info := p.entityProps[p.opponentCombatMinions[j].EntityID]; info != nil {
+				posJ = info.ZonePosition
+			}
+			return posI < posJ
+		})
+		p.machine.SetOpponentBoard(p.opponentCombatMinions)
+		slog.Info("opponent board captured from partner combat", "minions", len(p.opponentCombatMinions))
+	}
+	p.opponentCombatMinions = nil
+
 	p.partnerCombatHeroCtrl = 0
 	p.partnerBoardSetupDone = false
 }
@@ -1019,30 +1070,40 @@ func (p *Processor) collectPartnerCombatRetro() {
 	}
 	// Collect minions with the same controller from combat-phase entities.
 	// Only include minions with ZonePosition > 0 (initial board setup minions).
+	// Also collect opponent minions: any PLAY minion whose controller is not localPlayerID.
 	for _, eid := range p.combatPhaseEntityIDs {
 		info := p.entityProps[eid]
 		if info == nil {
 			continue
 		}
+		ctrl := p.entityController[eid]
 		if info.CardType == "MINION" && info.Zone == "PLAY" &&
 			info.ZonePosition > 0 &&
-			info.Attack > 0 && info.Health > 0 &&
-			p.entityController[eid] == heroCtrl {
+			info.Attack > 0 && info.Health > 0 {
 			mn := MinionState{
-				EntityID: eid,
-				CardID:   info.CardID,
-				Name:     info.Name,
-				Attack:   info.Attack,
-				Health:   info.Health,
+				EntityID:   eid,
+				CardID:     info.CardID,
+				Name:       info.Name,
+				Attack:     info.Attack,
+				Health:     info.Health,
+				MinionType: info.Race,
 			}
 			if (mn.Name == "" || isBareNumber(mn.Name)) && mn.CardID != "" {
 				mn.Name = CardName(mn.CardID)
 			}
-			p.partnerCombatMinions = append(p.partnerCombatMinions, mn)
+			if ctrl == heroCtrl {
+				p.partnerCombatMinions = append(p.partnerCombatMinions, mn)
+			} else if ctrl > 0 && ctrl != p.localPlayerID {
+				// Opponent minion: controlled by a different bot (not local player).
+				p.opponentCombatMinions = append(p.opponentCombatMinions, mn)
+			}
 		}
 	}
 	if len(p.partnerCombatMinions) > 0 {
 		slog.Debug("partner minions collected retroactively", "count", len(p.partnerCombatMinions))
+	}
+	if len(p.opponentCombatMinions) > 0 {
+		slog.Debug("opponent minions collected retroactively", "count", len(p.opponentCombatMinions))
 	}
 }
 

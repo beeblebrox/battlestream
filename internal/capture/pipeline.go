@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"battlestream.fixates.io/internal/gamestate"
+	"battlestream.fixates.io/internal/gamestate/builder"
+	"battlestream.fixates.io/internal/gamestate/card"
 	"battlestream.fixates.io/internal/parser"
 	"battlestream.fixates.io/internal/watcher"
 )
@@ -62,19 +64,32 @@ func (s *logEventSource) Close() error {
 
 // machineStateTracker wraps gamestate.Machine + Processor into a StateTracker.
 type machineStateTracker struct {
-	machine   *gamestate.Machine
-	processor *gamestate.Processor
+	machine    *gamestate.Machine
+	processor  *gamestate.Processor
+	builder    *builder.ActionBuilder
+	dispatcher *gamestate.ActionDispatcher
 }
 
 // NewStateTracker creates a StateTracker backed by gamestate.Machine/Processor.
 func NewStateTracker() StateTracker {
 	m := gamestate.New()
 	p := gamestate.NewProcessor(m)
-	return &machineStateTracker{machine: m, processor: p}
+	catalog := card.NewFuncCatalog(gamestate.CardName)
+	bldr := builder.New(catalog)
+	disp := gamestate.NewActionDispatcher(
+		p.AsRecruitVisitor(),
+		p.AsCombatVisitor(),
+		p.AsTransitionVisitor(),
+	)
+	return &machineStateTracker{machine: m, processor: p, builder: bldr, dispatcher: disp}
 }
 
 func (t *machineStateTracker) Apply(event parser.GameEvent) {
-	t.processor.Handle(event)
+	if a := t.builder.Build(event); a != nil {
+		_ = t.dispatcher.Dispatch(a)
+	} else {
+		t.processor.Handle(event)
+	}
 }
 
 func (t *machineStateTracker) Snapshot() CaptureState {

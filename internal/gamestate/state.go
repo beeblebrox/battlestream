@@ -768,6 +768,22 @@ func (m *Machine) SetPartnerBoard(minions []MinionState, turn int) {
 	}
 }
 
+// SetOpponentBoard sets the opponent board snapshot from combat copy minions seen
+// during the partner's combat phase.
+func (m *Machine) SetOpponentBoard(minions []MinionState) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(minions) > 7 {
+		minions = minions[:7]
+	}
+	cp := make([]MinionState, len(minions))
+	for i, mn := range minions {
+		cp[i] = mn
+		cp[i].Enchantments = append([]Enchantment(nil), mn.Enchantments...)
+	}
+	m.state.OpponentBoard = cp
+}
+
 // MarkPartnerBoardStale marks the partner board snapshot as stale (not updated this turn).
 func (m *Machine) MarkPartnerBoardStale() {
 	m.mu.Lock()

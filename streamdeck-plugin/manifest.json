@@ -116,6 +116,34 @@
       "Icon": "imgs/category",
       "Controllers": ["Keypad"],
       "States": [{ "Image": "imgs/category" }]
+    },
+    {
+      "UUID": "com.battlestream.streamdeck.opponent-health",
+      "Name": "Opponent Health",
+      "Icon": "imgs/category",
+      "Controllers": ["Keypad"],
+      "States": [{ "Image": "imgs/category" }]
+    },
+    {
+      "UUID": "com.battlestream.streamdeck.opponent-tavern-tier",
+      "Name": "Opponent Tavern Tier",
+      "Icon": "imgs/category",
+      "Controllers": ["Keypad"],
+      "States": [{ "Image": "imgs/category" }]
+    },
+    {
+      "UUID": "com.battlestream.streamdeck.tribes",
+      "Name": "Available Tribes",
+      "Icon": "imgs/category",
+      "Controllers": ["Keypad"],
+      "States": [{ "Image": "imgs/category" }]
+    },
+    {
+      "UUID": "com.battlestream.streamdeck.total-buffs",
+      "Name": "Total Buffs",
+      "Icon": "imgs/category",
+      "Controllers": ["Keypad"],
+      "States": [{ "Image": "imgs/category" }]
     }
   ]
 }

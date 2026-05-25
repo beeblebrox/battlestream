@@ -36,6 +36,7 @@ import { DynamicBuffSlotAction } from './actions/buff-slot.js';
 import { OpponentHealthAction }     from './actions/opponent-health.js';
 import { OpponentTavernTierAction } from './actions/opponent-tavern-tier.js';
 import { AvailableTribesAction }    from './actions/tribes.js';
+import { TotalBuffsAction }         from './actions/total-buffs.js';
 
 streamDeck.actions.registerAction(new HealthAction());
 streamDeck.actions.registerAction(new ArmorAction());
@@ -69,6 +70,8 @@ streamDeck.actions.registerAction(new DynamicBuffSlotAction());
 streamDeck.actions.registerAction(new OpponentHealthAction());
 streamDeck.actions.registerAction(new OpponentTavernTierAction());
 streamDeck.actions.registerAction(new AvailableTribesAction());
+// Summary buttons
+streamDeck.actions.registerAction(new TotalBuffsAction());
 
 function makeClient(host: string, port: number, apiKey: string): BattlestreamClient {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

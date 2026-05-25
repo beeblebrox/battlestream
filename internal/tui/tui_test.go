@@ -357,3 +357,144 @@ func TestModsItems_TavernWideOmittedWhenZero(t *testing.T) {
 		t.Error("TAVERN-WIDE section should be omitted when all tavern-wide sources are zero")
 	}
 }
+
+// TestView_HeroPanel_IdleState verifies that a connected model with a nil game
+// renders the hero panel idle message and does not render stale player data.
+func TestView_HeroPanel_IdleState(t *testing.T) {
+	m := &Model{
+		connState: stateConnected,
+		game:      nil,
+		agg:       makeTestAgg(),
+		width:     120,
+		height:    40,
+	}
+	out := m.View()
+	stripped := stripANSI(out)
+
+	if !strings.Contains(stripped, "waiting for player") {
+		t.Error("expected 'waiting for player' in idle hero panel, got:\n" + stripped)
+	}
+	if strings.Contains(stripped, "no player data") {
+		t.Error("unexpected 'no player data' text — should only show 'waiting for player'")
+	}
+}
+
+// TestView_DuosPartnerZeroState verifies that when a duos game has a Partner
+// with all-zero fields, the partner divider is present and Tavern/Triples show
+// "—" instead of "0".
+func TestView_DuosPartnerZeroState(t *testing.T) {
+	game := &bspb.GameState{
+		GameId:     "test-duos-zero",
+		Phase:      "RECRUIT",
+		Turn:       3,
+		TavernTier: 2,
+		IsDuos:     true,
+		Player: &bspb.PlayerStats{
+			Name:      "LocalPlayer#1111",
+			Health:    40,
+			MaxHealth: 40,
+		},
+		Partner: &bspb.PlayerStats{}, // all zero fields
+	}
+
+	m := &Model{
+		connState: stateConnected,
+		game:      game,
+		agg:       makeTestAgg(),
+		width:     120,
+		height:    40,
+	}
+
+	out := m.renderHeroPanel(57) // right column inner width
+	stripped := stripANSI(out)
+
+	// The partner divider must be present.
+	if !strings.Contains(stripped, "─ Partner ─") {
+		t.Errorf("expected '─ Partner ─' divider in duos hero panel, got:\n%s", stripped)
+	}
+
+	// Both Tavern and Triples should show "—" for zero values.
+	if !strings.Contains(stripped, "—") {
+		t.Errorf("expected '—' placeholder for zero Tavern/Triples in duos zero state, got:\n%s", stripped)
+	}
+
+	// "Tavern  0" must NOT appear — the zero-guard must fire.
+	if strings.Contains(stripped, "Tavern  0") {
+		t.Errorf("'Tavern  0' should not appear when TavernTier is zero; expected '—'")
+	}
+
+	// "Triples 0" must NOT appear — the zero-guard must fire.
+	if strings.Contains(stripped, "Triples 0") {
+		t.Errorf("'Triples 0' should not appear when TripleCount is zero; expected '—'")
+	}
+}
+
+// TestView_DuosPartnerPopulated verifies that a duos game with a fully
+// populated Partner renders the partner name, tavern tier stars, and triple
+// count correctly.
+func TestView_DuosPartnerPopulated(t *testing.T) {
+	game := &bspb.GameState{
+		GameId:     "test-duos-pop",
+		Phase:      "RECRUIT",
+		Turn:       5,
+		TavernTier: 3,
+		IsDuos:     true,
+		Player: &bspb.PlayerStats{
+			Name:        "LocalPlayer#1111",
+			Health:      40,
+			MaxHealth:   40,
+			TripleCount: 1, // non-zero so local "Triples —" doesn't appear
+		},
+		Partner: &bspb.PlayerStats{
+			Name:        "Partner#5678",
+			TavernTier:  4,
+			TripleCount: 2,
+		},
+	}
+
+	m := &Model{
+		connState: stateConnected,
+		game:      game,
+		agg:       makeTestAgg(),
+		width:     120,
+		height:    40,
+	}
+
+	out := m.renderHeroPanel(57)
+	stripped := stripANSI(out)
+
+	// Partner name must appear.
+	if !strings.Contains(stripped, "Partner#5678") {
+		t.Errorf("expected 'Partner#5678' in populated duos hero panel, got:\n%s", stripped)
+	}
+
+	// Tier 4 renders as "4 ★★★★☆☆" — verify the digit is present.
+	if !strings.Contains(stripped, "4") {
+		t.Errorf("expected tier '4' in rendered tavern tier, got:\n%s", stripped)
+	}
+
+	// Four filled stars for tier 4.
+	if !strings.Contains(stripped, "★★★★") {
+		t.Errorf("expected four filled stars (★★★★) for tier 4, got:\n%s", stripped)
+	}
+
+	// Partner triple count "2" must appear somewhere after the partner divider.
+	// We verify by checking the partner section substring.
+	partnerIdx := strings.Index(stripped, "─ Partner ─")
+	if partnerIdx == -1 {
+		t.Fatal("partner divider not found; cannot check partner fields")
+	}
+	partnerSection := stripped[partnerIdx:]
+	if !strings.Contains(partnerSection, "2") {
+		t.Errorf("expected triple count '2' in partner section, got:\n%s", partnerSection)
+	}
+
+	// "—" must NOT appear in the partner section for Tavern or Triples,
+	// since both are non-zero.
+	if strings.Contains(partnerSection, "Tavern  —") {
+		t.Errorf("'Tavern  —' should not appear in partner section when TavernTier=4")
+	}
+	if strings.Contains(partnerSection, "Triples —") {
+		t.Errorf("'Triples —' should not appear in partner section when TripleCount=2")
+	}
+}
