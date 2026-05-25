@@ -565,16 +565,19 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 			if value == "PLAY" && e.EntityID > 0 {
 				if p.machine.Phase() != PhaseGameOver {
 					info := p.entityProps[e.EntityID]
-					if info != nil && info.CardType == "SPELL" && controllerID == p.localPlayerID {
-						if p.machine.Phase() == PhaseCombat {
-							_ = p.OnCombatTavernSpell(&action.CombatTavernSpellAction{
-								ActionBase: action.ActionBase{Entity: action.EntityID(e.EntityID)},
-							})
-						} else {
-							_ = p.OnTavernSpellPlayed(&action.TavernSpellPlayedAction{
-								ActionBase: action.ActionBase{Entity: action.EntityID(e.EntityID)},
-							})
+					if info != nil && info.CardType == "SPELL" {
+						if controllerID == p.localPlayerID {
+							if p.machine.Phase() == PhaseCombat {
+								_ = p.OnCombatTavernSpell(&action.CombatTavernSpellAction{
+									ActionBase: action.ActionBase{Entity: action.EntityID(e.EntityID)},
+								})
+							} else if p.machine.Phase() == PhaseRecruit {
+								_ = p.OnTavernSpellPlayed(&action.TavernSpellPlayedAction{
+									ActionBase: action.ActionBase{Entity: action.EntityID(e.EntityID)},
+								})
+							}
 						}
+						// Non-local SPELL → ignore, never route to OnMinionBought.
 					} else {
 						_ = p.OnMinionBought(&action.MinionBoughtAction{
 							ActionBase:   action.ActionBase{Entity: action.EntityID(e.EntityID)},
