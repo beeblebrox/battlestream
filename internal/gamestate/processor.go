@@ -812,7 +812,18 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 	}
 
 	// Dispatch to visitor method for machine mutations.
-	// Entity registry (entityProps, entityController, heroEntities) is already written above.
+	// Everything above this line is pre-visitor work that is intentionally NOT delegated
+	// to visitor methods:
+	//   - Entity registry writes (entityProps, entityController, heroEntities): raw property
+	//     bags that must be populated before any visitor can query them via cardInfoFromProps
+	//     or resolveController. Visitors read this registry; they must not write to it.
+	//   - Tribe detection (trackTribesFromEntity): scans raw BACON_SUBSET tags which are
+	//     only present in the original FULL_ENTITY/SHOW_ENTITY block, not in TAG_CHANGE events.
+	//   - Partner combat tracking (partnerCombatActive, partnerCombatMinions): irreducible
+	//     duos-specific state that depends on cross-cutting fields (controllerID, cardType,
+	//     zonePos, info) already computed above, and has no natural visitor home.
+	//   - Combat-phase entity ID accumulation (combatPhaseEntityIDs): bookkeeping for
+	//     retroactive partner board resolution; likewise cross-cutting.
 	switch cardType {
 	case "BATTLEGROUND_ANOMALY":
 		_ = p.OnAnomalyRegistered(&action.AnomalyRegisteredAction{

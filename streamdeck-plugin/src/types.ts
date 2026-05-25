@@ -52,6 +52,7 @@ export interface GameState {
   ability_counters: AbilityCounter[];
   anomaly_name: string;
   is_duos: boolean;
+  available_tribes?: string[];
 }
 
 export interface ClientConfig {

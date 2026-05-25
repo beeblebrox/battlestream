@@ -705,7 +705,7 @@ func (m *Model) renderHeroPanel(w int) string {
 	var b strings.Builder
 
 	if m.game == nil || m.game.Player == nil {
-		b.WriteString(styleDim.Render("no player data") + "\n\n\n\n")
+		b.WriteString(styleDim.Render("waiting for player…") + "\n\n\n\n")
 		return styleBorder.Width(w).Render(b.String())
 	}
 
@@ -771,15 +771,24 @@ func (m *Model) renderHeroPanel(w int) string {
 	// Partner section in Duos.
 	if m.game.IsDuos && m.game.Partner != nil {
 		partner := m.game.Partner
-		b.WriteString(styleDim.Render("─ Partner ─") + "\n")
+		b.WriteString("\n")
+		b.WriteString(styleLabel.Render("─ Partner ─") + "\n")
 		if partner.Name != "" {
 			b.WriteString(styleLabel.Render("Name    ") + styleValue.Render(partner.Name) + "\n")
 		}
 		if partner.HeroCardId != "" {
 			b.WriteString(styleLabel.Render("Hero    ") + styleValue.Render(gamestate.CardName(partner.HeroCardId)) + "\n")
 		}
-		b.WriteString(styleLabel.Render("Tavern  ") + renderTavernTier(int(partner.TavernTier)) + "\n")
-		b.WriteString(styleLabel.Render("Triples ") + styleValue.Render(fmt.Sprintf("%d", partner.TripleCount)) + "\n")
+		partnerTavern := styleValue.Render("—")
+		if partner.TavernTier > 0 {
+			partnerTavern = renderTavernTier(int(partner.TavernTier))
+		}
+		b.WriteString(styleLabel.Render("Tavern  ") + partnerTavern + "\n")
+		partnerTriples := "—"
+		if partner.TripleCount > 0 {
+			partnerTriples = fmt.Sprintf("%d", partner.TripleCount)
+		}
+		b.WriteString(styleLabel.Render("Triples ") + styleValue.Render(partnerTriples) + "\n")
 	}
 
 	return styleBorder.Width(w).Render(b.String())
@@ -1356,7 +1365,14 @@ func renderMinion(mn *bspb.MinionState, maxW int) string {
 	stats := fmt.Sprintf("%d/%d", mn.Attack, mn.Health)
 	sb.WriteString(lipgloss.NewStyle().Foreground(colorGold).Render(stats))
 
-	// Buffs — only show non-zero components to avoid noisy "+0".
+	// Compute remaining budget after name field + separator + stats digits.
+	used := nameW + 1 + len(stats)
+	budget := maxW - used
+	if maxW == 0 {
+		budget = 99
+	}
+
+	// Buffs — only show non-zero components to avoid noisy "+0"; gated on budget.
 	if mn.BuffAttack != 0 || mn.BuffHealth != 0 {
 		var buff string
 		switch {
@@ -1367,15 +1383,13 @@ func renderMinion(mn *bspb.MinionState, maxW int) string {
 		default:
 			buff = fmt.Sprintf(" (+%d hp)", mn.BuffHealth)
 		}
-		sb.WriteString(styleWin.Render(buff))
+		if budget >= len(buff) {
+			sb.WriteString(styleWin.Render(buff))
+			budget -= len(buff)
+		}
 	}
 
 	// Tribe and enchantment count — suppress when remaining width budget is too tight.
-	used := nameW + 1 + len(stats) // name field + separator + stats digits
-	budget := maxW - used
-	if maxW == 0 {
-		budget = 99
-	}
 	if mn.MinionType != "" && mn.MinionType != "INVALID" {
 		tribeStr := fmt.Sprintf(" [%s]", strings.ToLower(mn.MinionType))
 		if budget >= len(tribeStr) {
