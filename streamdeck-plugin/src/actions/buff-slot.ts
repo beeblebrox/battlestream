@@ -2,7 +2,7 @@ import { action, SingletonAction, type WillAppearEvent, type WillDisappearEvent 
 import { store } from '../state.js';
 import { renderButton } from '../render.js';
 import { CATEGORY_META, DYNAMIC_CATEGORIES, categoryIconPath } from '../categories.js';
-import type { BuffSource, GameState } from '../types.js';
+import type { AbilityCounter, BuffSource, GameState } from '../types.js';
 
 export interface SlotState {
   category: string;
@@ -73,6 +73,11 @@ export class DynamicBuffSlotAction extends SingletonAction<Record<string, never>
       const { atk, hp } = sumCategories(state.buff_sources ?? [], meta.aggregateCategories);
       if (atk !== 0 || hp !== 0) active.set(cat, true);
     }
+    for (const ac of state.ability_counters ?? []) {
+      if (CATEGORY_META[ac.category]?.isAbilityCounter && ac.value > 0) {
+        active.set(ac.category, true);
+      }
+    }
 
     // Clear slots whose category is no longer active.
     for (const [id, slot] of this.slots) {
@@ -136,7 +141,10 @@ export class DynamicBuffSlotAction extends SingletonAction<Record<string, never>
     const meta = CATEGORY_META[slot.category];
     // state is non-null here: assign() clears slots when state is null
     let value: string;
-    if (meta?.aggregateCategories) {
+    if (meta?.isAbilityCounter) {
+      const ac = state!.ability_counters?.find((c: AbilityCounter) => c.category === slot.category);
+      value = ac ? String(ac.value) : '0';
+    } else if (meta?.aggregateCategories) {
       const { atk, hp } = sumCategories(state!.buff_sources ?? [], meta.aggregateCategories);
       value = `+${atk}/+${hp}`;
     } else {

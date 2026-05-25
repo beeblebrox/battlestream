@@ -577,6 +577,38 @@ func (m *Machine) SetBuffSource(category string, atk, hp int) {
 	})
 }
 
+// HasMinion reports whether entityID is currently on the local player's board.
+func (m *Machine) HasMinion(entityID int) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, mn := range m.state.Board {
+		if mn.EntityID == entityID {
+			return true
+		}
+	}
+	return false
+}
+
+// GetAbilityCounter returns the current value of an ability counter by category.
+// Returns 0 if the category is not found.
+func (m *Machine) GetAbilityCounter(category string) int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, ac := range m.state.AbilityCounters {
+		if ac.Category == category {
+			return ac.Value
+		}
+	}
+	return 0
+}
+
+// GetPlayerTripleCount returns the local player's current triple count.
+func (m *Machine) GetPlayerTripleCount() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.state.Player.TripleCount
+}
+
 // SetAbilityCounter upserts an ability counter by category.
 func (m *Machine) SetAbilityCounter(category string, value int, display string) {
 	m.mu.Lock()

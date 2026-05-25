@@ -176,6 +176,7 @@ var CategoryDisplayName = map[string]string{
 	CatFreeRefresh:     "Refreshes",
 	CatGoldNextTurn:    "Bonus Gold",
 	CatConsumed:        "Consumed",
+	"MINIONS_SOLD":     "Sold",
 	CatShopBuff:        "Shop Buff",
 	CatGeneral:         "General",
 }

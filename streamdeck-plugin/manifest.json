@@ -40,6 +40,7 @@
     { "UUID": "com.battlestream.streamdeck.bloodgem-buff",    "Name": "Bloodgem Buff",    "Icon": "imgs/actions/bloodgem-buff",    "Controllers": ["Keypad"], "States": [{"Image": "imgs/actions/bloodgem-buff"}] },
     { "UUID": "com.battlestream.streamdeck.elemental-buff",   "Name": "Elemental Buff",   "Icon": "imgs/actions/elemental-buff",   "Controllers": ["Keypad"], "States": [{"Image": "imgs/actions/elemental-buff"}] },
     { "UUID": "com.battlestream.streamdeck.spellcraft",       "Name": "Spellcraft",       "Icon": "imgs/actions/spellcraft",       "Controllers": ["Keypad"], "States": [{"Image": "imgs/actions/spellcraft"}] },
+    { "UUID": "com.battlestream.streamdeck.minions-sold",    "Name": "Minions Sold",    "Icon": "imgs/actions/minions-sold",    "Controllers": ["Keypad"], "States": [{"Image": "imgs/actions/minions-sold"}] },
     {
       "UUID": "com.battlestream.streamdeck.tavern-wide-buff",
       "Name": "Tavern-Wide Buff",

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"battlestream.fixates.io/internal/gamestate/action"
 	"battlestream.fixates.io/internal/parser"
 )
 
@@ -3292,5 +3293,288 @@ func TestNoStashFromIdlePhase(t *testing.T) {
 	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Date(2026, 3, 24, 19, 0, 0, 0, time.UTC)})
 	if p.reconnectStash != nil {
 		t.Error("should not stash when starting from idle phase")
+	}
+}
+
+// ── MinionsSold counter tests ─────────────────────────────────────────────────
+
+// setupRecruitPhase brings the processor into recruit phase (GameEntity turn 1)
+// with the local player identified. Returns the machine and processor.
+func setupRecruitPhase(t *testing.T) (*Machine, *Processor) {
+	t.Helper()
+	m, p := newProc()
+	setupGame(p)
+	// Advance to recruit phase via GameEntity TURN=1 (odd = recruit).
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTurnStart,
+		Tags: map[string]string{"TURN": "1"},
+	})
+	if m.State().Phase != PhaseRecruit {
+		t.Fatalf("expected RECRUIT phase after EventTurnStart TURN=1, got %s", m.State().Phase)
+	}
+	return m, p
+}
+
+// minionSold fires OnMinionSold directly with the given entity ID.
+func minionSold(p *Processor, entityID int) {
+	_ = p.OnMinionSold(&action.MinionSoldAction{
+		ActionBase: action.ActionBase{Entity: action.EntityID(entityID)},
+	})
+}
+
+// TestMinionsSoldBasicIncrement verifies that one sell increments the counter to 1.
+func TestMinionsSoldBasicIncrement(t *testing.T) {
+	m, p := setupRecruitPhase(t)
+	m.UpsertMinion(MinionState{EntityID: 300, Name: "Murloc", Attack: 1, Health: 1})
+
+	minionSold(p, 300)
+
+	ac := findAbilityCounter(m, "MINIONS_SOLD")
+	if ac == nil {
+		t.Fatal("expected MINIONS_SOLD ability counter to be set after one sell, got nil")
+	}
+	if ac.Value != 1 {
+		t.Errorf("expected MINIONS_SOLD=1 after one sell, got %d", ac.Value)
+	}
+	if ac.Display != "1" {
+		t.Errorf("expected display=%q, got %q", "1", ac.Display)
+	}
+}
+
+// TestMinionsSoldMultipleSells verifies that 3 sells produce a counter value of 3.
+func TestMinionsSoldMultipleSells(t *testing.T) {
+	m, p := setupRecruitPhase(t)
+	m.UpsertMinion(MinionState{EntityID: 301, Name: "A", Attack: 1, Health: 1})
+	m.UpsertMinion(MinionState{EntityID: 302, Name: "B", Attack: 2, Health: 2})
+	m.UpsertMinion(MinionState{EntityID: 303, Name: "C", Attack: 3, Health: 3})
+
+	minionSold(p, 301)
+	minionSold(p, 302)
+	minionSold(p, 303)
+
+	ac := findAbilityCounter(m, "MINIONS_SOLD")
+	if ac == nil {
+		t.Fatal("expected MINIONS_SOLD ability counter after 3 sells, got nil")
+	}
+	if ac.Value != 3 {
+		t.Errorf("expected MINIONS_SOLD=3 after 3 sells, got %d", ac.Value)
+	}
+}
+
+// TestMinionsSoldResetOnNewGame verifies that the counter is cleared when a new game starts.
+func TestMinionsSoldResetOnNewGame(t *testing.T) {
+	m, p := setupRecruitPhase(t)
+	m.UpsertMinion(MinionState{EntityID: 401, Name: "X", Attack: 1, Health: 1})
+	m.UpsertMinion(MinionState{EntityID: 402, Name: "Y", Attack: 2, Health: 2})
+
+	minionSold(p, 401)
+	minionSold(p, 402)
+
+	ac := findAbilityCounter(m, "MINIONS_SOLD")
+	if ac == nil || ac.Value != 2 {
+		t.Fatalf("pre-condition: expected MINIONS_SOLD=2, got %v", ac)
+	}
+
+	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Time{}})
+
+	s := m.State()
+	for _, counter := range s.AbilityCounters {
+		if counter.Category == "MINIONS_SOLD" {
+			t.Errorf("expected MINIONS_SOLD counter absent after new game, got value=%d", counter.Value)
+		}
+	}
+}
+
+// TestMinionsSoldCombatDeathIgnored verifies that minion deaths during combat do not count.
+func TestMinionsSoldCombatDeathIgnored(t *testing.T) {
+	m, p := setupRecruitPhase(t)
+	m.UpsertMinion(MinionState{EntityID: 500, Name: "Fighter", Attack: 3, Health: 3})
+
+	// Transition to combat phase via even GameEntity TURN.
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTurnStart,
+		Tags: map[string]string{"TURN": "2"},
+	})
+	if m.State().Phase != PhaseCombat {
+		t.Skipf("could not enter combat phase, skipping combat guard test")
+	}
+
+	minionSold(p, 500)
+
+	ac := findAbilityCounter(m, "MINIONS_SOLD")
+	if ac != nil && ac.Value > 0 {
+		t.Errorf("expected MINIONS_SOLD=0 after combat death, got %d", ac.Value)
+	}
+}
+
+// TestMinionsSoldNonBoardEntityIgnored verifies that zone changes for entities not on the
+// local board (opponent minions, tavern minions, etc.) do not count as sells.
+func TestMinionsSoldNonBoardEntityIgnored(t *testing.T) {
+	_, p := setupRecruitPhase(t)
+
+	// Fire OnMinionSold for entity 9999, which was never added to the local board.
+	minionSold(p, 9999)
+
+	// No board minion exists for 9999, so counter must remain absent/zero.
+	m, _ := setupRecruitPhase(t) // fresh machine for reading (p's machine already modified)
+	_ = m
+	// Read from the same processor's machine via the action result.
+	// Re-derive by calling OnMinionSold again with a fresh machine.
+	// Simpler: just directly check via the processor's machine exposed by newProc.
+	m2, p2 := newProc()
+	setupGame(p2)
+	p2.Handle(parser.GameEvent{Type: parser.EventTurnStart, Tags: map[string]string{"TURN": "1"}})
+	minionSold(p2, 9999) // not on board
+	ac := findAbilityCounter(m2, "MINIONS_SOLD")
+	if ac != nil && ac.Value > 0 {
+		t.Errorf("expected MINIONS_SOLD=0 for non-board entity, got %d", ac.Value)
+	}
+}
+
+// tripleFormed fires OnPlayerTriplesChanged for the local player (entity 20, controller 7,
+// name "Moch#1358" as set by setupGame) with the given cumulative triple count.
+// This clears the tripleFormationActive gate opened by tripleEnchantGraveyard.
+func tripleFormed(p *Processor, cumulativeTriples int) {
+	_ = p.OnPlayerTriplesChanged(&action.PlayerTriplesChangedAction{
+		ActionBase:   action.ActionBase{Entity: action.EntityID(20)},
+		Value:        cumulativeTriples,
+		ControllerID: 7,
+		EntityName:   "Moch#1358",
+	})
+}
+
+// tripleEnchantGraveyard simulates the TB_BaconShop_3ofKindChecke enchantment going
+// GRAVEYARD (the first event in a triple sequence). Sets tripleFormationActive on the
+// processor, which blocks subsequent MINIONS_SOLD increments until tripleFormed fires.
+func tripleEnchantGraveyard(p *Processor, entityID int) {
+	p.entityProps[entityID] = &entityInfo{CardID: "TB_BaconShop_3ofKindChecke"}
+	_ = p.OnMinionSold(&action.MinionSoldAction{
+		ActionBase: action.ActionBase{Entity: action.EntityID(entityID)},
+	})
+}
+
+// TestMinionsSoldTriple_AllOnBoard verifies that a 2-board-minion triple is not counted
+// as sells: the enchantment gate blocks both PLAY→SETASIDE board removals.
+func TestMinionsSoldTriple_AllOnBoard(t *testing.T) {
+	m, p := setupRecruitPhase(t)
+
+	m.UpsertMinion(MinionState{EntityID: 201, Name: "Murloc A", Attack: 2, Health: 1})
+	m.UpsertMinion(MinionState{EntityID: 202, Name: "Murloc B", Attack: 2, Health: 1})
+
+	// Enchant fires first → gate opens.
+	tripleEnchantGraveyard(p, 200)
+
+	// Both board minions move PLAY→SETASIDE — gate suppresses counter increments.
+	minionSold(p, 201)
+	minionSold(p, 202)
+
+	// PLAYER_TRIPLES fires → gate clears.
+	tripleFormed(p, 1)
+
+	ac := findAbilityCounter(m, "MINIONS_SOLD")
+	if ac != nil {
+		t.Errorf("expected MINIONS_SOLD absent after all-board triple, got value=%d", ac.Value)
+	}
+}
+
+// TestMinionsSoldTriple_WithPriorSells verifies that a legitimate sell before the triple
+// is preserved: the gate only suppresses the board removals during formation.
+func TestMinionsSoldTriple_WithPriorSells(t *testing.T) {
+	m, p := setupRecruitPhase(t)
+
+	m.UpsertMinion(MinionState{EntityID: 301, Name: "Murloc A", Attack: 2, Health: 1})
+	m.UpsertMinion(MinionState{EntityID: 302, Name: "Murloc B", Attack: 2, Health: 1})
+	m.UpsertMinion(MinionState{EntityID: 303, Name: "Murloc C", Attack: 2, Health: 1})
+
+	// One legitimate sell before the triple.
+	minionSold(p, 301)
+
+	// Enchant fires → gate opens. Two board removals suppressed.
+	tripleEnchantGraveyard(p, 300)
+	minionSold(p, 302)
+	minionSold(p, 303)
+
+	tripleFormed(p, 1)
+
+	ac := findAbilityCounter(m, "MINIONS_SOLD")
+	if ac == nil {
+		t.Fatal("expected MINIONS_SOLD=1 after triple (real sell preserved), got nil")
+	}
+	if ac.Value != 1 {
+		t.Errorf("expected MINIONS_SOLD=1 after triple, got %d", ac.Value)
+	}
+	if ac.Display != "1" {
+		t.Errorf("expected display=%q, got %q", "1", ac.Display)
+	}
+}
+
+// TestMinionsSoldTriple_HandOnly verifies that a triple where all 3 copies are in hand
+// (0 board removals) does not corrupt the counter with a retroactive negative correction.
+func TestMinionsSoldTriple_HandOnly(t *testing.T) {
+	m, p := setupRecruitPhase(t)
+
+	// Sell 2 real minions before the triple.
+	m.UpsertMinion(MinionState{EntityID: 501, Name: "Rat", Attack: 1, Health: 1})
+	m.UpsertMinion(MinionState{EntityID: 502, Name: "Rat", Attack: 1, Health: 1})
+	minionSold(p, 501)
+	minionSold(p, 502)
+
+	// Hand-only triple: enchant fires, no board removals, PLAYER_TRIPLES fires.
+	tripleEnchantGraveyard(p, 500)
+	tripleFormed(p, 1)
+
+	// The 2 real sells must be preserved — no correction should have fired.
+	ac := findAbilityCounter(m, "MINIONS_SOLD")
+	if ac == nil {
+		t.Fatal("expected MINIONS_SOLD=2 after hand-only triple, got nil")
+	}
+	if ac.Value != 2 {
+		t.Errorf("expected MINIONS_SOLD=2 after hand-only triple, got %d", ac.Value)
+	}
+}
+
+// TestMinionsSoldTriple_MixedBoard verifies a 1-board-2-hand triple: only one SETASIDE
+// fires from the board, but the gate suppresses it so no false positive accumulates.
+func TestMinionsSoldTriple_MixedBoard(t *testing.T) {
+	m, p := setupRecruitPhase(t)
+
+	m.UpsertMinion(MinionState{EntityID: 601, Name: "Rat", Attack: 1, Health: 1})
+
+	// Enchant → gate opens. One board removal suppressed. Two hand copies don't fire OnMinionSold.
+	tripleEnchantGraveyard(p, 600)
+	minionSold(p, 601)
+	tripleFormed(p, 1)
+
+	ac := findAbilityCounter(m, "MINIONS_SOLD")
+	if ac != nil {
+		t.Errorf("expected MINIONS_SOLD absent after 1-board-2-hand triple, got value=%d", ac.Value)
+	}
+}
+
+// TestMinionsSoldTriple_FlagClearedAfterTriple verifies that sells after a triple are
+// counted normally once tripleFormed clears the gate.
+func TestMinionsSoldTriple_FlagClearedAfterTriple(t *testing.T) {
+	m, p := setupRecruitPhase(t)
+
+	m.UpsertMinion(MinionState{EntityID: 701, Name: "Rat A", Attack: 1, Health: 1})
+	m.UpsertMinion(MinionState{EntityID: 702, Name: "Rat B", Attack: 1, Health: 1})
+	m.UpsertMinion(MinionState{EntityID: 703, Name: "Rat C", Attack: 1, Health: 1})
+
+	// Triple formation.
+	tripleEnchantGraveyard(p, 700)
+	minionSold(p, 701)
+	minionSold(p, 702)
+	tripleFormed(p, 1)
+
+	// Now sell one more minion — gate is clear, this should count.
+	m.UpsertMinion(MinionState{EntityID: 703, Name: "Rat C", Attack: 1, Health: 1})
+	minionSold(p, 703)
+
+	ac := findAbilityCounter(m, "MINIONS_SOLD")
+	if ac == nil {
+		t.Fatal("expected MINIONS_SOLD=1 after post-triple sell, got nil")
+	}
+	if ac.Value != 1 {
+		t.Errorf("expected MINIONS_SOLD=1 after post-triple sell, got %d", ac.Value)
 	}
 }

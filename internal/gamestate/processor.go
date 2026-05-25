@@ -184,6 +184,12 @@ type Processor struct {
 	// to their PlayerID values. Used for deferred partner resolution.
 	playerEntityIDs map[int]int // entityID → PlayerID
 	realPlayerIDs   map[int]int // PlayerID → entityID, for all players with real GameAccountIds
+
+	// tripleFormationActive is set when TB_BaconShop_3ofKindChecke goes GRAVEYARD and
+	// cleared after PLAYER_TRIPLES increments. While active, MINIONS_SOLD increments are
+	// suppressed so that triple-consumed board minions are not counted as sells regardless
+	// of whether they came from the board or hand.
+	tripleFormationActive bool
 }
 
 // NewProcessor returns a Processor that updates the given Machine.

@@ -9,6 +9,7 @@ jest.mock('@elgato/streamdeck', () => ({
 import type { GameState } from '../../types.js';
 import { TavernWideBuffAction } from '../../actions/tavern-wide-buff.js';
 import { SpellPowerAction }     from '../../actions/spell-power.js';
+import { MinionsSoldAction }    from '../../actions/minions-sold.js';
 
 const base: GameState = {
   game_id: '', phase: 'RECRUIT', turn: 1, tavern_tier: 1,
@@ -42,6 +43,24 @@ describe('SpellPowerAction', () => {
   });
   test('returns +0/+0 when TAVERN_SPELL absent', () => {
     expect(new SpellPowerAction().extract(base).value).toBe('+0/+0');
+  });
+});
+
+describe('MinionsSoldAction', () => {
+  test('returns count from MINIONS_SOLD ability counter', () => {
+    const a = new MinionsSoldAction();
+    const s: GameState = { ...base, ability_counters: [{ category: 'MINIONS_SOLD', value: 5, display: 'sold' }] };
+    expect(a.extract(s).value).toBe('5');
+  });
+
+  test('returns "0" when MINIONS_SOLD counter is absent', () => {
+    expect(new MinionsSoldAction().extract(base).value).toBe('0');
+  });
+
+  test('returns "0" when MINIONS_SOLD value is 0', () => {
+    const a = new MinionsSoldAction();
+    const s: GameState = { ...base, ability_counters: [{ category: 'MINIONS_SOLD', value: 0, display: 'sold' }] };
+    expect(a.extract(s).value).toBe('0');
   });
 });
 

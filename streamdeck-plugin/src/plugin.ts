@@ -18,6 +18,7 @@ import { PhaseAction }           from './actions/phase.js';
 import { MinionCountAction }     from './actions/minion-count.js';
 import { AnomalyAction }         from './actions/anomaly.js';
 import { SpellcraftAction }      from './actions/spellcraft.js';
+import { MinionsSoldAction }      from './actions/minions-sold.js';
 // Buff buttons
 import { TavernWideBuffAction }  from './actions/tavern-wide-buff.js';
 import { BloodgemBuffAction }    from './actions/bloodgem-buff.js';
@@ -52,6 +53,7 @@ streamDeck.actions.registerAction(new PhaseAction());
 streamDeck.actions.registerAction(new MinionCountAction());
 streamDeck.actions.registerAction(new AnomalyAction());
 streamDeck.actions.registerAction(new SpellcraftAction());
+streamDeck.actions.registerAction(new MinionsSoldAction());
 // Buff buttons
 streamDeck.actions.registerAction(new TavernWideBuffAction());
 streamDeck.actions.registerAction(new BloodgemBuffAction());

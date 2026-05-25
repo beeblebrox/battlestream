@@ -8,6 +8,7 @@ export interface CategoryMeta {
   gradient: readonly [string, string];
   iconFile?: string;
   aggregateCategories?: string[];
+  isAbilityCounter?: boolean;
 }
 
 export const TAVERN_WIDE_CATEGORIES = new Set([
@@ -28,6 +29,7 @@ export const CATEGORY_META: Record<string, CategoryMeta> = {
   CONSUMED:         { displayName: 'Consumed',     group: 'TYPE_BUFFS', gradient: ['#120a20', '#4a3070'], iconFile: 'consumed-buff.png' },
   TAVERN_SPELL:     { displayName: 'SPELL PWR',    group: 'TYPE_BUFFS', gradient: ['#4a004a', '#a93226'], iconFile: 'spell-power.png' },
   TAVERN_WIDE:      { displayName: 'TVN WIDE',     group: 'TAVERN_WIDE', gradient: ['#001a26', '#1a6b8a'], iconFile: 'tavern-wide-buff.png', aggregateCategories: ['NOMI_ALL', 'SHOP_BUFF', 'GENERAL'] },
+  MINIONS_SOLD:     { displayName: 'Sold',         group: 'TYPE_BUFFS',  gradient: ['#1a0a00', '#c0392b'], iconFile: 'minions-sold.png', isAbilityCounter: true },
 };
 
 export const DYNAMIC_CATEGORIES = new Set(Object.keys(CATEGORY_META));

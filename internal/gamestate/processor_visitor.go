@@ -115,6 +115,8 @@ func (p *Processor) OnGameStart(a *action.GameStartAction) error {
 // phase on the Machine, and prunes stale combat entities on recruit transitions.
 func (p *Processor) OnTurnTransition(a *action.TurnTransitionAction) error {
 	p.flushPendingStatChanges()
+	// Safety: clear any stale triple gate that was never resolved by PLAYER_TRIPLES.
+	p.tripleFormationActive = false
 	turn := a.GameEntityTurn
 	if turn == 0 {
 		return nil
@@ -269,6 +271,8 @@ func (p *Processor) OnPlayerTriplesChanged(a *action.PlayerTriplesChangedAction)
 	isLocal := p.actionIsLocalHeroOrPlayer(entityID, a.ControllerID, a.EntityName)
 	if isLocal {
 		p.machine.UpdatePlayerTag("PLAYER_TRIPLES", strconv.Itoa(a.Value))
+		// Clear the triple-formation gate opened by TB_BaconShop_3ofKindChecke GRAVEYARD.
+		p.tripleFormationActive = false
 		return nil
 	}
 	if p.actionIsPartnerHeroOrPlayer(entityID, a.ControllerID, a.EntityName) {
@@ -772,10 +776,28 @@ func (p *Processor) OnMinionBought(a *action.MinionBoughtAction) error {
 // OnMinionSold handles non-PLAY zone transitions: removes minion from board.
 func (p *Processor) OnMinionSold(a *action.MinionSoldAction) error {
 	entityID := int(a.Entity)
+
+	// TB_BaconShop_3ofKindChecke going GRAVEYARD fires before the consumed minion
+	// zone changes during triple formation. Gate subsequent board removals so they
+	// are not counted as sells. The gate is cleared in OnPlayerTriplesChanged.
+	if info := p.entityProps[entityID]; info != nil && info.CardID == "TB_BaconShop_3ofKindChecke" {
+		p.tripleFormationActive = true
+		return nil
+	}
+
+	// Capture guards before mutation: only count explicit sells by the local player.
+	// Phase guard prevents combat deaths from counting; board guard filters opponent entities.
+	isRecruit := p.machine.Phase() == PhaseRecruit
+	isOnBoard := p.machine.HasMinion(entityID)
+
 	p.machine.RemoveMinion(entityID)
 	p.machine.RemoveEnchantmentsForEntity(entityID)
 	if p.machine.Phase() == PhaseRecruit {
 		p.machine.UpdateBoardSnapshot()
+	}
+	if isRecruit && isOnBoard && !p.tripleFormationActive {
+		count := p.machine.GetAbilityCounter("MINIONS_SOLD") + 1
+		p.machine.SetAbilityCounter("MINIONS_SOLD", count, fmt.Sprintf("%d", count))
 	}
 	return nil
 }
