@@ -1078,4 +1078,5 @@ func (p *Processor) resetProcessorState() {
 	p.tribeConfirmCount = make(map[string]int)
 	p.playerEntityIDs = make(map[int]int)
 	p.realPlayerIDs = make(map[int]int)
+	p.spellsPlayedTotal = 0
 }

@@ -190,6 +190,10 @@ type Processor struct {
 	// suppressed so that triple-consumed board minions are not counted as sells regardless
 	// of whether they came from the board or hand.
 	tripleFormationActive bool
+
+	// spellsPlayedTotal is the last-seen absolute value of NUM_SPELLS_PLAYED_THIS_GAME
+	// on the local player entity. Used to compute the delta when the tag increments.
+	spellsPlayedTotal int
 }
 
 // NewProcessor returns a Processor that updates the given Machine.
@@ -532,6 +536,21 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 				EntityName:   e.EntityName,
 			})
 
+		case "NUM_SPELLS_PLAYED_THIS_GAME":
+			// Authoritative spell-play counter from the game engine — treats BG tavern
+			// spells as MINIONs in the log, so the old ZONE=PLAY/CardType==SPELL path
+			// was fundamentally unreliable.  Use the absolute value and compute deltas.
+			val, _ := strconv.Atoi(value)
+			if p.actionIsLocalPlayerEntity(e.EntityID, e.EntityName) && val > p.spellsPlayedTotal {
+				delta := val - p.spellsPlayedTotal
+				p.spellsPlayedTotal = val
+				for i := 0; i < delta; i++ {
+					_ = p.OnTavernSpellPlayed(&action.TavernSpellPlayedAction{
+						ActionBase: action.ActionBase{Entity: action.EntityID(e.EntityID)},
+					})
+				}
+			}
+
 		case "RESOURCES", "RESOURCES_USED":
 			val, _ := strconv.Atoi(value)
 			_ = p.OnGoldChanged(&action.GoldChangedAction{
@@ -563,20 +582,18 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 				}
 				if value == "PLAY" && p.machine.Phase() != PhaseGameOver {
 					if info != nil && info.CardType == "SPELL" {
-						// Only count spells that came from HAND — filters out system spells
-						// (TB_BaconShop_* etc.) that fire SETASIDE→PLAY during turn init.
-						if prevZone == "HAND" && controllerID == p.localPlayerID {
-							if p.machine.Phase() == PhaseCombat {
-								_ = p.OnCombatTavernSpell(&action.CombatTavernSpellAction{
-									ActionBase: action.ActionBase{Entity: action.EntityID(e.EntityID)},
-								})
-							} else if p.machine.Phase() == PhaseRecruit {
-								_ = p.OnTavernSpellPlayed(&action.TavernSpellPlayedAction{
-									ActionBase: action.ActionBase{Entity: action.EntityID(e.EntityID)},
-								})
-							}
+						// SPELLS_CAST (recruit phase) is now tracked via NUM_SPELLS_PLAYED_THIS_GAME
+						// player tag — BG tavern spells appear as CARDTYPE=MINION in the log, so
+						// the ZONE=PLAY / CardType==SPELL path only fires for system / combat spells.
+						// Keep the combat path for SPELLCRAFT_CAST (rally-triggered combat spells
+						// that do have CARDTYPE=SPELL in the log).
+						if prevZone == "HAND" && controllerID == p.localPlayerID &&
+							p.machine.Phase() == PhaseCombat {
+							_ = p.OnCombatTavernSpell(&action.CombatTavernSpellAction{
+								ActionBase: action.ActionBase{Entity: action.EntityID(e.EntityID)},
+							})
 						}
-						// Non-local or non-HAND SPELL → ignore, never route to OnMinionBought.
+						// SPELL entities must never route to OnMinionBought (they are not minions).
 					} else {
 						_ = p.OnMinionBought(&action.MinionBoughtAction{
 							ActionBase:   action.ActionBase{Entity: action.EntityID(e.EntityID)},
