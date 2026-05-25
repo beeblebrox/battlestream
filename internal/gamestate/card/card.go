@@ -1,3 +1,5 @@
+// Package card provides the Catalog interface and card-type classification
+// used by the ActionBuilder to resolve entity card types during event processing.
 package card
 
 // CardType classifies the kind of card.

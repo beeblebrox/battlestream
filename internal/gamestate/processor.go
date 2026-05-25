@@ -928,19 +928,6 @@ func (p *Processor) isLocalPlayerEntity(e parser.GameEvent) bool {
 	return false
 }
 
-// isPartnerPlayerEntity checks whether the event's entity is the partner player entity.
-func (p *Processor) isPartnerPlayerEntity(e parser.GameEvent) bool {
-	if !p.isDuos || p.partnerPlayerID == 0 {
-		return false
-	}
-	if e.PlayerID == p.partnerPlayerID {
-		return true
-	}
-	if e.PlayerID == 0 && p.partnerPlayerName != "" && e.EntityName == p.partnerPlayerName {
-		return true
-	}
-	return false
-}
 
 // isPartnerHero checks whether the entity is the partner's hero card.
 func (p *Processor) isPartnerHero(e parser.GameEvent, controllerID int) bool {
