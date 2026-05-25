@@ -554,19 +554,18 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 
 		case "ZONE":
 			if e.EntityID > 0 {
-				// Update stored zone and track Overconfidence Dnt zone transitions.
 				info := p.entityProps[e.EntityID]
+				prevZone := ""
 				if info != nil {
-					prevZone := info.Zone
+					prevZone = info.Zone
 					info.Zone = value
 					p.handleOverconfidenceZone(info.CardID, value, prevZone, controllerID)
 				}
-			}
-			if value == "PLAY" && e.EntityID > 0 {
-				if p.machine.Phase() != PhaseGameOver {
-					info := p.entityProps[e.EntityID]
+				if value == "PLAY" && p.machine.Phase() != PhaseGameOver {
 					if info != nil && info.CardType == "SPELL" {
-						if controllerID == p.localPlayerID {
+						// Only count spells that came from HAND — filters out system spells
+						// (TB_BaconShop_* etc.) that fire SETASIDE→PLAY during turn init.
+						if prevZone == "HAND" && controllerID == p.localPlayerID {
 							if p.machine.Phase() == PhaseCombat {
 								_ = p.OnCombatTavernSpell(&action.CombatTavernSpellAction{
 									ActionBase: action.ActionBase{Entity: action.EntityID(e.EntityID)},
@@ -577,7 +576,7 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 								})
 							}
 						}
-						// Non-local SPELL → ignore, never route to OnMinionBought.
+						// Non-local or non-HAND SPELL → ignore, never route to OnMinionBought.
 					} else {
 						_ = p.OnMinionBought(&action.MinionBoughtAction{
 							ActionBase:   action.ActionBase{Entity: action.EntityID(e.EntityID)},
@@ -585,7 +584,8 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 						})
 					}
 				}
-			} else if e.EntityID > 0 && p.machine.Phase() != PhaseGameOver {
+			}
+			if e.EntityID > 0 && value != "PLAY" && p.machine.Phase() != PhaseGameOver {
 				_ = p.OnMinionSold(&action.MinionSoldAction{
 					ActionBase: action.ActionBase{Entity: action.EntityID(e.EntityID)},
 				})
