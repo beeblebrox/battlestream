@@ -802,8 +802,13 @@ func (p *Processor) OnMinionSold(a *action.MinionSoldAction) error {
 	return nil
 }
 
-func (p *Processor) OnTavernUpgraded(_ *action.TavernUpgradedAction) error       { return nil }
-func (p *Processor) OnTavernSpellPlayed(_ *action.TavernSpellPlayedAction) error { return nil }
+func (p *Processor) OnTavernUpgraded(_ *action.TavernUpgradedAction) error { return nil }
+
+func (p *Processor) OnTavernSpellPlayed(_ *action.TavernSpellPlayedAction) error {
+	count := p.machine.GetAbilityCounter(CatSpellsCast) + 1
+	p.machine.SetAbilityCounter(CatSpellsCast, count, fmt.Sprintf("%d", count))
+	return nil
+}
 
 // OnMinionPermStatChanged handles ATK/HEALTH changes during recruit phase.
 func (p *Processor) OnMinionPermStatChanged(a *action.MinionPermStatChangedAction) error {
@@ -876,7 +881,11 @@ func (p *Processor) OnMinionTempStatChanged(a *action.MinionTempStatChangedActio
 func (p *Processor) OnHeroDamaged(_ *action.HeroDamagedAction) error                   { return nil }
 func (p *Processor) OnMinionAttacked(_ *action.MinionAttackedAction) error             { return nil }
 func (p *Processor) OnDeathrattleTriggered(_ *action.DeathrattleTriggeredAction) error { return nil }
-func (p *Processor) OnCombatTavernSpell(_ *action.CombatTavernSpellAction) error       { return nil }
+func (p *Processor) OnCombatTavernSpell(_ *action.CombatTavernSpellAction) error {
+	count := p.machine.GetAbilityCounter(CatSpellcraftCast) + 1
+	p.machine.SetAbilityCounter(CatSpellcraftCast, count, fmt.Sprintf("%d", count))
+	return nil
+}
 
 // OnCombatAttacker handles GameEntity PROPOSED_ATTACKER changes during combat.
 // On the first combat action, marks partner board setup as done to stop collecting

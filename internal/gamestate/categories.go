@@ -20,6 +20,8 @@ const (
 	CatGoldNextTurn    = "GOLD_NEXT_TURN"
 	CatShopBuff        = "SHOP_BUFF"
 	CatGeneral         = "GENERAL"
+	CatSpellsCast      = "SPELLS_CAST"
+	CatSpellcraftCast  = "SPELLCRAFT_CAST"
 )
 
 // categoryByEnchantmentCardID maps exact enchantment CardIDs to categories.
@@ -179,6 +181,8 @@ var CategoryDisplayName = map[string]string{
 	"MINIONS_SOLD":     "Sold",
 	CatShopBuff:        "Shop Buff",
 	CatGeneral:         "General",
+	CatSpellsCast:      "Spells Cast",
+	CatSpellcraftCast:  "Craft Cast",
 }
 
 // Buff group constants — used by the TUI and Stream Deck plugin to cluster

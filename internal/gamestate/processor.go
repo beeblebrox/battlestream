@@ -564,10 +564,23 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 			}
 			if value == "PLAY" && e.EntityID > 0 {
 				if p.machine.Phase() != PhaseGameOver {
-					_ = p.OnMinionBought(&action.MinionBoughtAction{
-						ActionBase:   action.ActionBase{Entity: action.EntityID(e.EntityID)},
-						ControllerID: controllerID,
-					})
+					info := p.entityProps[e.EntityID]
+					if info != nil && info.CardType == "SPELL" && controllerID == p.localPlayerID {
+						if p.machine.Phase() == PhaseCombat {
+							_ = p.OnCombatTavernSpell(&action.CombatTavernSpellAction{
+								ActionBase: action.ActionBase{Entity: action.EntityID(e.EntityID)},
+							})
+						} else {
+							_ = p.OnTavernSpellPlayed(&action.TavernSpellPlayedAction{
+								ActionBase: action.ActionBase{Entity: action.EntityID(e.EntityID)},
+							})
+						}
+					} else {
+						_ = p.OnMinionBought(&action.MinionBoughtAction{
+							ActionBase:   action.ActionBase{Entity: action.EntityID(e.EntityID)},
+							ControllerID: controllerID,
+						})
+					}
 				}
 			} else if e.EntityID > 0 && p.machine.Phase() != PhaseGameOver {
 				_ = p.OnMinionSold(&action.MinionSoldAction{
