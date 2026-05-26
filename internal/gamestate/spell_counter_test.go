@@ -423,6 +423,111 @@ func TestSpellcraftCastNonLocalIgnored(t *testing.T) {
 	}
 }
 
+// ── SPELLCRAFT_CAST via tag 3809 (0→positive during combat) ─────────────────
+
+// tag3809Change fires a TAG_CHANGE for tag "3809" on the given entity.
+func tag3809Change(p *Processor, entityID int, value int) {
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventTagChange,
+		EntityID: entityID,
+		Tags:     map[string]string{"3809": fmt.Sprintf("%d", value)},
+	})
+}
+
+// enterCombat advances the processor to PhaseCombat via GameEntity TURN=2 (even=combat).
+func enterCombat(p *Processor) {
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTurnStart,
+		Tags: map[string]string{"TURN": "2"},
+	})
+}
+
+// TestSpellcraftCastViaTag3809_FiresOnce verifies that a 0→positive transition on
+// the local player entity during combat increments SPELLCRAFT_CAST by 1.
+func TestSpellcraftCastViaTag3809_FiresOnce(t *testing.T) {
+	m, p := setupRecruitPhase(t)
+	enterCombat(p)
+
+	// Simulate TagTransferPlayerEnchant reset+restore: 0 is the initial value,
+	// then N>0 means a spellcraft trigger fired.
+	tag3809Change(p, 20, 3) // 0→3 during combat
+
+	ac := findAbilityCounter(m, CatSpellcraftCast)
+	if ac == nil {
+		t.Fatal("expected SPELLCRAFT_CAST after 0→3 transition in combat, got nil")
+	}
+	if ac.Value != 1 {
+		t.Errorf("expected SPELLCRAFT_CAST=1, got %d", ac.Value)
+	}
+}
+
+// TestSpellcraftCastViaTag3809_ZeroToZeroIgnored verifies that 0→0 (no spells
+// accumulated) does not increment SPELLCRAFT_CAST.
+func TestSpellcraftCastViaTag3809_ZeroToZeroIgnored(t *testing.T) {
+	m, p := setupRecruitPhase(t)
+	enterCombat(p)
+
+	tag3809Change(p, 20, 0) // 0→0, no spellcraft charges
+
+	ac := findAbilityCounter(m, CatSpellcraftCast)
+	if ac != nil {
+		t.Errorf("SPELLCRAFT_CAST should not increment on 0→0 transition, got value=%d", ac.Value)
+	}
+}
+
+// TestSpellcraftCastViaTag3809_RecruitPhaseIgnored verifies that tag 3809 changes
+// during recruit phase (accumulating charges, not triggering) are not counted.
+func TestSpellcraftCastViaTag3809_RecruitPhaseIgnored(t *testing.T) {
+	m, p := setupRecruitPhase(t)
+	// Still in recruit phase — tag 3809 increments as spells are played.
+	tag3809Change(p, 20, 1)
+	tag3809Change(p, 20, 2)
+	tag3809Change(p, 20, 3)
+
+	ac := findAbilityCounter(m, CatSpellcraftCast)
+	if ac != nil {
+		t.Errorf("SPELLCRAFT_CAST must not fire during recruit phase, got value=%d", ac.Value)
+	}
+}
+
+// TestSpellcraftCastViaTag3809_NonLocalIgnored verifies that tag 3809 on a
+// non-local entity (opponent) does not increment SPELLCRAFT_CAST.
+func TestSpellcraftCastViaTag3809_NonLocalIgnored(t *testing.T) {
+	m, p := setupRecruitPhase(t)
+	enterCombat(p)
+
+	// entityID=99 is not the local player entity (EntityID=20).
+	tag3809Change(p, 99, 5) // non-local player entity
+
+	ac := findAbilityCounter(m, CatSpellcraftCast)
+	if ac != nil {
+		t.Errorf("non-local tag 3809 should not increment SPELLCRAFT_CAST, got value=%d", ac.Value)
+	}
+}
+
+// TestSpellcraftCastViaTag3809_DuosMultipleFights verifies that each combat fight
+// in a Duos turn (0→N→0→M pattern) counts as a separate trigger.
+func TestSpellcraftCastViaTag3809_DuosMultipleFights(t *testing.T) {
+	m, p := setupRecruitPhase(t)
+	enterCombat(p)
+
+	// Fight 1: TagTransferPlayerEnchant resets to 0, then restores to 2.
+	tag3809Change(p, 20, 0) // reset (prevSpellcraftValue was 0 in recruit → same, no trigger)
+	tag3809Change(p, 20, 2) // 0→2: trigger fires
+
+	// Fight 2: same pattern with 3 charges.
+	tag3809Change(p, 20, 0) // reset
+	tag3809Change(p, 20, 3) // 0→3: trigger fires
+
+	ac := findAbilityCounter(m, CatSpellcraftCast)
+	if ac == nil {
+		t.Fatal("expected SPELLCRAFT_CAST after two Duos combat fights, got nil")
+	}
+	if ac.Value != 2 {
+		t.Errorf("expected SPELLCRAFT_CAST=2 for two Duos fights, got %d", ac.Value)
+	}
+}
+
 // ── Cross-phase independence ──────────────────────────────────────────────────
 
 // TestSpellCountersAreIndependent verifies that SPELLS_CAST and SPELLCRAFT_CAST

@@ -194,6 +194,10 @@ type Processor struct {
 	// spellsPlayedTotal is the last-seen absolute value of NUM_SPELLS_PLAYED_THIS_GAME
 	// on the local player entity. Used to compute the delta when the tag increments.
 	spellsPlayedTotal int
+
+	// prevSpellcraftValue is the last-seen value of tag 3809 on the local player entity.
+	// A 0→positive transition during PhaseCombat indicates a spellcraft trigger fired.
+	prevSpellcraftValue int
 }
 
 // NewProcessor returns a Processor that updates the given Machine.
