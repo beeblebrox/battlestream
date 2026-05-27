@@ -637,7 +637,10 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 			// Only accept player entities and heroes — not enchantments like
 			// Bacon_TagTransferPlayerE which mirror player tags with stale values
 			// and would overwrite the real buff source counters.
-			if p.isPlayerOrHeroEntity(e, controllerID) {
+			// Skip during combat: BG29_813e and similar save/restore enchantments
+			// zero these tags at combat start and restore via PowerTaskList (filtered),
+			// leaving a spurious ComputeBloodgemValue(0)=1 without this guard.
+			if p.machine.Phase() != PhaseCombat && p.isPlayerOrHeroEntity(e, controllerID) {
 				p.updateBuffSourceFromPlayerTag(tag, value)
 			}
 

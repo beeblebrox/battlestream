@@ -997,6 +997,56 @@ func TestProcessorBloodgemValueComputation(t *testing.T) {
 	t.Error("expected BLOODGEM buff source, not found")
 }
 
+// TestBloodgemCombatSaveRestoreIgnored verifies that the BG29_813e combat save/restore
+// mechanism does not corrupt the bloodgem display. During combat, the game zeros the
+// BACON_BLOODGEM* tags (save) and later restores them via PowerTaskList (filtered).
+// Without the fix, ComputeBloodgemValue(0)=1 would leave a false "+1/+1" in the state.
+func TestBloodgemCombatSaveRestoreIgnored(t *testing.T) {
+	m, p := setupRecruitPhase(t)
+
+	// Accumulate real bloodgem buffs during recruit: ATK raw=2 → effective 3, HP raw=4 → effective 5.
+	bloodgemTag := func(tag, val string) {
+		p.Handle(parser.GameEvent{
+			Type:       parser.EventTagChange,
+			PlayerID:   7,
+			EntityName: "Moch#1358",
+			Tags:       map[string]string{tag: val},
+		})
+	}
+	bloodgemTag("BACON_BLOODGEMBUFFATKVALUE", "2")
+	bloodgemTag("BACON_BLOODGEMBUFFHEALTHVALUE", "4")
+
+	// Advance to combat (GameEntity TURN=2 → even = combat).
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTurnStart,
+		Tags: map[string]string{"TURN": "2"},
+	})
+	if m.State().Phase != PhaseCombat {
+		t.Fatalf("expected COMBAT phase after TURN=2, got %s", m.State().Phase)
+	}
+
+	// Simulate BG29_813e save/restore: game fires real value then zeros both tags.
+	bloodgemTag("BACON_BLOODGEMBUFFATKVALUE", "2")
+	bloodgemTag("BACON_BLOODGEMBUFFATKVALUE", "0")
+	bloodgemTag("BACON_BLOODGEMBUFFHEALTHVALUE", "0")
+
+	// PowerTaskList restoration (filtered out by parser) never reaches us.
+	// Display must show the recruit-phase values, not the spurious ComputeBloodgemValue(0)=1.
+	s := m.State()
+	for _, bs := range s.BuffSources {
+		if bs.Category == CatBloodgem {
+			if bs.Attack != 3 {
+				t.Errorf("bloodgem ATK: expected 3 (recruit value), got %d (combat zero corrupted it)", bs.Attack)
+			}
+			if bs.Health != 5 {
+				t.Errorf("bloodgem HP: expected 5 (recruit value), got %d (combat zero corrupted it)", bs.Health)
+			}
+			return
+		}
+	}
+	t.Error("expected BLOODGEM buff source, not found")
+}
+
 func TestProcessorEnchantmentCleanupOnDeath(t *testing.T) {
 	m, p := newProc()
 	setupGame(p)
