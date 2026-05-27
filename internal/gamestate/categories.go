@@ -174,15 +174,15 @@ var CategoryDisplayName = map[string]string{
 	CatVolumizer:       "Volumizer",
 	CatLightfang:       "Lightfang",
 	CatNomiAll:         "Nomi Dream",
-	CatNagaSpells:      "Spells Played",
+	CatNagaSpells:      "Naga Stacks",
 	CatFreeRefresh:     "Refreshes",
 	CatGoldNextTurn:    "Bonus Gold",
 	CatConsumed:        "Consumed",
 	"MINIONS_SOLD":     "Sold",
 	CatShopBuff:        "Shop Buff",
 	CatGeneral:         "General",
-	CatSpellsCast:      "Spells Cast",
-	CatSpellcraftCast:  "Craft Cast",
+	CatSpellsCast:      "Spells Played",
+	CatSpellcraftCast:  "Spellcraft",
 }
 
 // Buff group constants — used by the TUI and Stream Deck plugin to cluster

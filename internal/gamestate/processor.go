@@ -15,21 +15,22 @@ import (
 
 // entityInfo stores known properties of an entity for board tracking.
 type entityInfo struct {
-	CardID       string
-	Name         string
-	CardType     string
-	Race         string // CARDRACE tag (e.g. "BEAST", "DRAGON", "MECHANICAL")
-	Attack       int
-	Health       int
-	Armor        int // cached for retroactive hero identification
-	Zone         string
-	ZonePosition int // ZONE_POSITION tag (>0 for initial board minions)
-	CreatorID    int
-	AttachedTo   int
-	ScriptData1  int
-	ScriptData2  int
-	Subsets      int // count of BACON_SUBSET_* tags seen (for multi-tribe detection)
-	PlayerID     int // PLAYER_ID tag value (for hero entities in duos)
+	CardID         string
+	Name           string
+	CardType       string
+	Race           string // CARDRACE tag (e.g. "BEAST", "DRAGON", "MECHANICAL")
+	Attack         int
+	Health         int
+	Armor          int // cached for retroactive hero identification
+	Zone           string
+	ZonePosition   int // ZONE_POSITION tag (>0 for initial board minions)
+	CreatorID      int
+	AttachedTo     int
+	ScriptData1    int
+	ScriptData2    int
+	Subsets        int  // count of BACON_SUBSET_* tags seen (for multi-tribe detection)
+	PlayerID       int  // PLAYER_ID tag value (for hero entities in duos)
+	SpellcraftHint bool // SPELLCRAFT_HINT=1: this SPELL entity is a spellcraft card
 }
 
 // maxPendingStatChanges caps the pending stat-change buffer to prevent unbounded
@@ -195,9 +196,6 @@ type Processor struct {
 	// on the local player entity. Used to compute the delta when the tag increments.
 	spellsPlayedTotal int
 
-	// prevSpellcraftValue is the last-seen value of tag 3809 on the local player entity.
-	// A 0→positive transition during PhaseCombat indicates a spellcraft trigger fired.
-	prevSpellcraftValue int
 }
 
 // NewProcessor returns a Processor that updates the given Machine.
@@ -586,13 +584,12 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 				}
 				if value == "PLAY" && p.machine.Phase() != PhaseGameOver {
 					if info != nil && info.CardType == "SPELL" {
-						// SPELLS_CAST (recruit phase) is now tracked via NUM_SPELLS_PLAYED_THIS_GAME
-						// player tag — BG tavern spells appear as CARDTYPE=MINION in the log, so
-						// the ZONE=PLAY / CardType==SPELL path only fires for system / combat spells.
-						// Keep the combat path for SPELLCRAFT_CAST (rally-triggered combat spells
-						// that do have CARDTYPE=SPELL in the log).
+						// SPELLS_CAST is tracked via NUM_SPELLS_PLAYED_THIS_GAME (all spell types,
+						// all phases). SPELLCRAFT_CAST uses SPELLCRAFT_HINT: spellcraft cards have
+						// this flag set while in HAND and it clears after play. System/anomaly spells
+						// (SETASIDE→PLAY) never carry the hint so they are silently ignored.
 						if prevZone == "HAND" && controllerID == p.localPlayerID &&
-							p.machine.Phase() == PhaseCombat {
+							info.SpellcraftHint {
 							_ = p.OnCombatTavernSpell(&action.CombatTavernSpellAction{
 								ActionBase: action.ActionBase{Entity: action.EntityID(e.EntityID)},
 							})
@@ -689,6 +686,13 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 						Tag:        tag,
 						Value:      parseInt(value),
 					})
+				}
+			}
+
+		case "SPELLCRAFT_HINT":
+			if e.EntityID > 0 {
+				if info := p.entityProps[e.EntityID]; info != nil {
+					info.SpellcraftHint = parseInt(value) > 0
 				}
 			}
 

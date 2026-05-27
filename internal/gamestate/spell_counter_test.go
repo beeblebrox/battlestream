@@ -2,20 +2,26 @@ package gamestate
 
 // spell_counter_test.go tests the SPELLS_CAST and SPELLCRAFT_CAST ability counters.
 //
-// SPELLS_CAST dispatch path (recruit phase):
+// SPELLS_CAST dispatch path (all phases):
 //   NUM_SPELLS_PLAYED_THIS_GAME TAG_CHANGE on local player entity
 //     → delta computed vs. last-seen absolute value
 //     → OnTavernSpellPlayed called once per increment
 //     → SPELLS_CAST += delta
 //
-//   BG tavern spells appear in the log as CARDTYPE=MINION, not SPELL, so the old
-//   ZONE=PLAY / CardType==SPELL path was fundamentally broken for actual player spells.
-//   NUM_SPELLS_PLAYED_THIS_GAME is the authoritative engine counter, same as PLAYER_TRIPLES.
+//   Counts ALL spell types: tavern spells, spellcraft cards, bloodgems, non-typed spells.
+//   BG tavern/bloodgem spells appear in the log as CARDTYPE=MINION, not SPELL, so the
+//   ZONE=PLAY / CardType==SPELL path is NOT used for SPELLS_CAST. NUM_SPELLS_PLAYED_THIS_GAME
+//   is the authoritative engine counter, same as PLAYER_TRIPLES.
 //
-// SPELLCRAFT_CAST dispatch path (combat phase):
-//   ZONE=PLAY on a SPELL entity (controllerID==localPlayerID, prevZone==HAND, phase==COMBAT)
+// SPELLCRAFT_CAST dispatch path (any phase):
+//   ZONE=PLAY on a SPELL entity with SpellcraftHint=true (controllerID==localPlayerID, prevZone==HAND)
 //     → OnCombatTavernSpell → SPELLCRAFT_CAST + 1
-//   (Rally-triggered combat spells do appear with CARDTYPE=SPELL in the log.)
+//   Spellcraft cards carry SPELLCRAFT_HINT=1 while in the player's HAND. The hint clears
+//   after play. System/anomaly spells never carry the hint and are silently ignored.
+//   Phase is irrelevant — spellcraft is a shop-phase mechanic in practice.
+//
+//   Tag 3809 (SpellsPlayedForNagas) is NOT used for SPELLCRAFT_CAST. It is a cumulative
+//   counter identical to NUM_SPELLS_PLAYED_THIS_GAME and drives only CatNagaSpells display.
 //
 // Non-local entities must be silently ignored and never route to OnMinionBought.
 
@@ -368,37 +374,114 @@ func TestSpellcraftCastResetOnNewGame(t *testing.T) {
 	}
 }
 
-// TestSpellcraftCastViaZonePlay verifies end-to-end dispatch: a SPELL entity
-// controlled by the local player transitioning ZONE=PLAY during combat phase
-// increments SPELLCRAFT_CAST (not SPELLS_CAST).
+// registerSpellcraftEntity registers entity entityID as a SPELL with SpellcraftHint=true.
+// Used to simulate a spellcraft card in the player's HAND.
+func registerSpellcraftEntity(p *Processor, entityID int, controllerID int) {
+	p.entityController[entityID] = controllerID
+	p.entityProps[entityID] = &entityInfo{
+		CardType:       "SPELL",
+		Zone:           "HAND",
+		SpellcraftHint: true,
+	}
+}
+
+// spellcraftHintChange fires a TAG_CHANGE SPELLCRAFT_HINT for the given entity.
+func spellcraftHintChange(p *Processor, entityID int, value int) {
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventTagChange,
+		EntityID: entityID,
+		Tags:     map[string]string{"SPELLCRAFT_HINT": fmt.Sprintf("%d", value)},
+	})
+}
+
+// TestSpellcraftCastViaZonePlay verifies end-to-end dispatch: a SPELL entity with
+// SPELLCRAFT_HINT=1 controlled by the local player transitioning ZONE=PLAY increments
+// SPELLCRAFT_CAST (not SPELLS_CAST). Phase is irrelevant — spellcraft cards are played
+// during shop phase in practice.
 func TestSpellcraftCastViaZonePlay(t *testing.T) {
 	m, p := setupRecruitPhase(t)
 
-	// Advance to combat phase (GameEntity TURN=2 is even = combat).
-	p.Handle(parser.GameEvent{
-		Type: parser.EventTurnStart,
-		Tags: map[string]string{"TURN": "2"},
-	})
-	if m.State().Phase != PhaseCombat {
-		t.Fatalf("expected COMBAT phase after GameEntity TURN=2, got %s", m.State().Phase)
-	}
-
-	// Register a SPELL entity for the local player (controller=7).
-	registerSpellEntity(p, 600, 7)
+	// Register a spellcraft SPELL entity for the local player (controller=7).
+	registerSpellcraftEntity(p, 600, 7)
 	spellZonePlay(p, 600, 7)
 
 	ac := findAbilityCounter(m, CatSpellcraftCast)
 	if ac == nil {
-		t.Fatal("expected SPELLCRAFT_CAST after ZONE=PLAY on local SPELL in combat phase, got nil")
+		t.Fatal("expected SPELLCRAFT_CAST after ZONE=PLAY on local spellcraft SPELL, got nil")
 	}
 	if ac.Value != 1 {
 		t.Errorf("expected SPELLCRAFT_CAST=1, got %d", ac.Value)
 	}
 
-	// SPELLS_CAST must remain absent — recruit spell and combat spell are independent.
+	// SPELLS_CAST must remain absent — SPELLS_CAST is driven by NUM_SPELLS_PLAYED_THIS_GAME,
+	// not by the ZONE=PLAY path.
 	recruitAC := findAbilityCounter(m, CatSpellsCast)
 	if recruitAC != nil {
-		t.Errorf("SPELLS_CAST should not be set for a combat SPELL, got value=%d", recruitAC.Value)
+		t.Errorf("SPELLS_CAST should not be set via ZONE=PLAY path, got value=%d", recruitAC.Value)
+	}
+}
+
+// TestSpellcraftCastViaZonePlay_NoHintIgnored verifies that a SPELL entity without
+// SPELLCRAFT_HINT (a system or non-spellcraft spell) does NOT increment SPELLCRAFT_CAST.
+func TestSpellcraftCastViaZonePlay_NoHintIgnored(t *testing.T) {
+	m, p := setupRecruitPhase(t)
+
+	// Register a SPELL without hint (e.g. an anomaly system spell).
+	registerSpellEntity(p, 600, 7)
+	spellZonePlay(p, 600, 7)
+
+	ac := findAbilityCounter(m, CatSpellcraftCast)
+	if ac != nil {
+		t.Errorf("SPELL without SpellcraftHint must not increment SPELLCRAFT_CAST, got value=%d", ac.Value)
+	}
+}
+
+// TestSpellcraftCastViaZonePlay_InCombatPhase verifies that a spellcraft card
+// played during combat phase also increments SPELLCRAFT_CAST (phase is irrelevant).
+func TestSpellcraftCastViaZonePlay_InCombatPhase(t *testing.T) {
+	m, p := setupRecruitPhase(t)
+
+	// Advance to combat phase.
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTurnStart,
+		Tags: map[string]string{"TURN": "2"},
+	})
+	if m.State().Phase != PhaseCombat {
+		t.Fatalf("expected COMBAT phase, got %s", m.State().Phase)
+	}
+
+	registerSpellcraftEntity(p, 601, 7)
+	spellZonePlay(p, 601, 7)
+
+	ac := findAbilityCounter(m, CatSpellcraftCast)
+	if ac == nil {
+		t.Fatal("expected SPELLCRAFT_CAST after spellcraft SPELL in combat phase, got nil")
+	}
+	if ac.Value != 1 {
+		t.Errorf("expected SPELLCRAFT_CAST=1, got %d", ac.Value)
+	}
+}
+
+// TestSpellcraftCastViaSpellcraftHintTag verifies end-to-end dispatch through the
+// SPELLCRAFT_HINT TAG_CHANGE path: hint set on entity via event, then ZONE=PLAY fires.
+func TestSpellcraftCastViaSpellcraftHintTag(t *testing.T) {
+	m, p := setupRecruitPhase(t)
+
+	// Register a plain SPELL entity (no hint yet).
+	registerSpellEntity(p, 602, 7)
+
+	// Game sets SPELLCRAFT_HINT=1 on the entity (it's a spellcraft card).
+	spellcraftHintChange(p, 602, 1)
+
+	// Player plays it.
+	spellZonePlay(p, 602, 7)
+
+	ac := findAbilityCounter(m, CatSpellcraftCast)
+	if ac == nil {
+		t.Fatal("expected SPELLCRAFT_CAST after SPELLCRAFT_HINT=1 + ZONE=PLAY, got nil")
+	}
+	if ac.Value != 1 {
+		t.Errorf("expected SPELLCRAFT_CAST=1, got %d", ac.Value)
 	}
 }
 
@@ -423,7 +506,13 @@ func TestSpellcraftCastNonLocalIgnored(t *testing.T) {
 	}
 }
 
-// ── SPELLCRAFT_CAST via tag 3809 (0→positive during combat) ─────────────────
+// ── Tag 3809 (SpellsPlayedForNagas) — Naga stacks only, NOT SPELLCRAFT_CAST ────
+//
+// Tag 3809 is a cumulative count of all spells played from hand this game. It is
+// co-incremented with NUM_SPELLS_PLAYED_THIS_GAME. The old implementation incorrectly
+// used 0→positive transitions during combat (actually the TagTransferPlayerEnchant
+// reset/restore cycle) as a SPELLCRAFT_CAST signal. Tag 3809 now drives ONLY the
+// CatNagaSpells display counter, not SPELLCRAFT_CAST.
 
 // tag3809Change fires a TAG_CHANGE for tag "3809" on the given entity.
 func tag3809Change(p *Processor, entityID int, value int) {
@@ -442,89 +531,40 @@ func enterCombat(p *Processor) {
 	})
 }
 
-// TestSpellcraftCastViaTag3809_FiresOnce verifies that a 0→positive transition on
-// the local player entity during combat increments SPELLCRAFT_CAST by 1.
-func TestSpellcraftCastViaTag3809_FiresOnce(t *testing.T) {
+// TestTag3809_DoesNotIncrementSpellcraftCast verifies that tag 3809 changes —
+// regardless of phase or transition direction — never increment SPELLCRAFT_CAST.
+// SPELLCRAFT_CAST is now driven by SPELLCRAFT_HINT + ZONE=PLAY.
+func TestTag3809_DoesNotIncrementSpellcraftCast(t *testing.T) {
 	m, p := setupRecruitPhase(t)
-	enterCombat(p)
 
-	// Simulate TagTransferPlayerEnchant reset+restore: 0 is the initial value,
-	// then N>0 means a spellcraft trigger fired.
-	tag3809Change(p, 20, 3) // 0→3 during combat
-
-	ac := findAbilityCounter(m, CatSpellcraftCast)
-	if ac == nil {
-		t.Fatal("expected SPELLCRAFT_CAST after 0→3 transition in combat, got nil")
-	}
-	if ac.Value != 1 {
-		t.Errorf("expected SPELLCRAFT_CAST=1, got %d", ac.Value)
-	}
-}
-
-// TestSpellcraftCastViaTag3809_ZeroToZeroIgnored verifies that 0→0 (no spells
-// accumulated) does not increment SPELLCRAFT_CAST.
-func TestSpellcraftCastViaTag3809_ZeroToZeroIgnored(t *testing.T) {
-	m, p := setupRecruitPhase(t)
-	enterCombat(p)
-
-	tag3809Change(p, 20, 0) // 0→0, no spellcraft charges
-
-	ac := findAbilityCounter(m, CatSpellcraftCast)
-	if ac != nil {
-		t.Errorf("SPELLCRAFT_CAST should not increment on 0→0 transition, got value=%d", ac.Value)
-	}
-}
-
-// TestSpellcraftCastViaTag3809_RecruitPhaseIgnored verifies that tag 3809 changes
-// during recruit phase (accumulating charges, not triggering) are not counted.
-func TestSpellcraftCastViaTag3809_RecruitPhaseIgnored(t *testing.T) {
-	m, p := setupRecruitPhase(t)
-	// Still in recruit phase — tag 3809 increments as spells are played.
+	// Recruit phase accumulation.
 	tag3809Change(p, 20, 1)
-	tag3809Change(p, 20, 2)
 	tag3809Change(p, 20, 3)
 
-	ac := findAbilityCounter(m, CatSpellcraftCast)
-	if ac != nil {
-		t.Errorf("SPELLCRAFT_CAST must not fire during recruit phase, got value=%d", ac.Value)
-	}
-}
-
-// TestSpellcraftCastViaTag3809_NonLocalIgnored verifies that tag 3809 on a
-// non-local entity (opponent) does not increment SPELLCRAFT_CAST.
-func TestSpellcraftCastViaTag3809_NonLocalIgnored(t *testing.T) {
-	m, p := setupRecruitPhase(t)
+	// Combat phase — TagTransferPlayerEnchant reset+restore pattern.
 	enterCombat(p)
-
-	// entityID=99 is not the local player entity (EntityID=20).
-	tag3809Change(p, 99, 5) // non-local player entity
-
-	ac := findAbilityCounter(m, CatSpellcraftCast)
-	if ac != nil {
-		t.Errorf("non-local tag 3809 should not increment SPELLCRAFT_CAST, got value=%d", ac.Value)
-	}
-}
-
-// TestSpellcraftCastViaTag3809_DuosMultipleFights verifies that each combat fight
-// in a Duos turn (0→N→0→M pattern) counts as a separate trigger.
-func TestSpellcraftCastViaTag3809_DuosMultipleFights(t *testing.T) {
-	m, p := setupRecruitPhase(t)
-	enterCombat(p)
-
-	// Fight 1: TagTransferPlayerEnchant resets to 0, then restores to 2.
-	tag3809Change(p, 20, 0) // reset (prevSpellcraftValue was 0 in recruit → same, no trigger)
-	tag3809Change(p, 20, 2) // 0→2: trigger fires
-
-	// Fight 2: same pattern with 3 charges.
 	tag3809Change(p, 20, 0) // reset
-	tag3809Change(p, 20, 3) // 0→3: trigger fires
+	tag3809Change(p, 20, 3) // restore
+
+	// Further accumulation.
+	tag3809Change(p, 20, 5)
 
 	ac := findAbilityCounter(m, CatSpellcraftCast)
-	if ac == nil {
-		t.Fatal("expected SPELLCRAFT_CAST after two Duos combat fights, got nil")
+	if ac != nil {
+		t.Errorf("tag 3809 must never increment SPELLCRAFT_CAST, got value=%d", ac.Value)
 	}
-	if ac.Value != 2 {
-		t.Errorf("expected SPELLCRAFT_CAST=2 for two Duos fights, got %d", ac.Value)
+}
+
+// TestTag3809_NonLocalIgnored verifies tag 3809 on a non-local entity is ignored.
+func TestTag3809_NonLocalIgnored(t *testing.T) {
+	m, p := setupRecruitPhase(t)
+	enterCombat(p)
+
+	tag3809Change(p, 99, 5) // non-local entity
+
+	ac := findAbilityCounter(m, CatSpellcraftCast)
+	if ac != nil {
+		t.Errorf("non-local tag 3809 should not affect SPELLCRAFT_CAST, got value=%d", ac.Value)
 	}
 }
 
@@ -536,11 +576,11 @@ func TestSpellcraftCastViaTag3809_DuosMultipleFights(t *testing.T) {
 func TestSpellCountersAreIndependent(t *testing.T) {
 	m, p := setupRecruitPhase(t)
 
-	// Two recruit spells via direct visitor calls.
+	// Two shop-phase spells via NUM_SPELLS_PLAYED_THIS_GAME (direct visitor).
 	tavernSpellPlayed(p, 700)
 	tavernSpellPlayed(p, 701)
 
-	// Three combat spells.
+	// Three spellcraft plays via direct visitor (simulates SPELLCRAFT_HINT + ZONE=PLAY).
 	combatTavernSpell(p, 800)
 	combatTavernSpell(p, 801)
 	combatTavernSpell(p, 802)
@@ -550,8 +590,8 @@ func TestSpellCountersAreIndependent(t *testing.T) {
 		t.Errorf("expected SPELLS_CAST=2, got %v", recruit)
 	}
 
-	combat := findAbilityCounter(m, CatSpellcraftCast)
-	if combat == nil || combat.Value != 3 {
-		t.Errorf("expected SPELLCRAFT_CAST=3, got %v", combat)
+	craft := findAbilityCounter(m, CatSpellcraftCast)
+	if craft == nil || craft.Value != 3 {
+		t.Errorf("expected SPELLCRAFT_CAST=3, got %v", craft)
 	}
 }

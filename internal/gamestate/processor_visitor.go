@@ -330,29 +330,23 @@ func (p *Processor) OnPlacementChanged(a *action.PlacementChangedAction) error {
 	return nil
 }
 
-// OnSpellcraftChanged handles numeric tag 3809 changes on the local player entity.
+// OnSpellcraftChanged handles numeric tag 3809 (SpellsPlayedForNagas) changes on the
+// local player entity. Tag 3809 is a cumulative counter incremented for every spell
+// played from hand — identical in scope to NUM_SPELLS_PLAYED_THIS_GAME. It is NOT a
+// spellcraft-trigger signal; the old 0→positive-in-combat detection was reading the
+// TagTransferPlayerEnchant reset/restore cycle, not an actual trigger event.
 //
-// Two responsibilities:
-//  1. Naga synergy display counter (CatNagaSpells) — always updated when board has Naga minions.
-//  2. SPELLCRAFT_CAST — each 0→positive transition during PhaseCombat means a spellcraft
-//     trigger fired. This pattern is produced by the TagTransferPlayerEnchant reset/restore
-//     cycle at the start of each combat fight: the tag resets to 0, then immediately restores
-//     to the accumulated spell count. If the restored value is >0, spellcraft fires.
+// Responsibility: Naga synergy display counter (CatNagaSpells) — shown when a Naga
+// synergy minion (Thaumaturgist, Arcane Cannoneer, Showy Cyclist, Groundbreaker) is on
+// the board. The tier/progress display (Tier N · M/4) shows charge accumulation toward
+// those minions' per-spell effects.
 func (p *Processor) OnSpellcraftChanged(a *action.SpellcraftChangedAction) error {
 	entityID := int(a.Entity)
 	isLocal := p.actionIsLocalPlayerEntity(entityID, a.EntityName) ||
 		(p.localPlayerID > 0 && a.ControllerID == p.localPlayerID && p.heroEntities[entityID])
 	if !isLocal {
-		p.prevSpellcraftValue = a.Value
 		return nil
 	}
-
-	// SPELLCRAFT_CAST: count each 0→positive transition during combat.
-	if p.machine.Phase() == PhaseCombat && p.prevSpellcraftValue == 0 && a.Value > 0 {
-		count := p.machine.GetAbilityCounter(CatSpellcraftCast) + 1
-		p.machine.SetAbilityCounter(CatSpellcraftCast, count, fmt.Sprintf("%d", count))
-	}
-	p.prevSpellcraftValue = a.Value
 
 	snap := p.machine.State()
 	if HasNagaSynergyMinion(snap.Board) {
@@ -896,6 +890,10 @@ func (p *Processor) OnMinionTempStatChanged(a *action.MinionTempStatChangedActio
 func (p *Processor) OnHeroDamaged(_ *action.HeroDamagedAction) error                   { return nil }
 func (p *Processor) OnMinionAttacked(_ *action.MinionAttackedAction) error             { return nil }
 func (p *Processor) OnDeathrattleTriggered(_ *action.DeathrattleTriggeredAction) error { return nil }
+// OnCombatTavernSpell fires when a SPELL entity with SPELLCRAFT_HINT=1 transitions
+// ZONE=PLAY from a local player's HAND — i.e., a spellcraft card was played.
+// Spellcraft cards are identified by the SPELLCRAFT_HINT tag set while in HAND.
+// This fires in any phase (typically recruit; spellcraft is a shop-phase mechanic).
 func (p *Processor) OnCombatTavernSpell(_ *action.CombatTavernSpellAction) error {
 	count := p.machine.GetAbilityCounter(CatSpellcraftCast) + 1
 	p.machine.SetAbilityCounter(CatSpellcraftCast, count, fmt.Sprintf("%d", count))
@@ -1094,5 +1092,4 @@ func (p *Processor) resetProcessorState() {
 	p.playerEntityIDs = make(map[int]int)
 	p.realPlayerIDs = make(map[int]int)
 	p.spellsPlayedTotal = 0
-	p.prevSpellcraftValue = 0
 }
