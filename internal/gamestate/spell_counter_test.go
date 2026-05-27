@@ -506,6 +506,23 @@ func TestSpellcraftCastNonLocalIgnored(t *testing.T) {
 	}
 }
 
+// TestSpellcraftCastNonLocalWithHintIgnored verifies that a SPELL entity with
+// SpellcraftHint=true controlled by a non-local player (partner, opponent) does
+// NOT increment SPELLCRAFT_CAST. The controllerID guard must filter it out even
+// when the entity carries the spellcraft hint.
+func TestSpellcraftCastNonLocalWithHintIgnored(t *testing.T) {
+	m, p := setupRecruitPhase(t)
+
+	// Register a spellcraft SPELL for opponent controller=15 (not localPlayerID=7).
+	registerSpellcraftEntity(p, 603, 15)
+	spellZonePlay(p, 603, 15)
+
+	ac := findAbilityCounter(m, CatSpellcraftCast)
+	if ac != nil {
+		t.Errorf("non-local spellcraft SPELL must not increment SPELLCRAFT_CAST, got value=%d", ac.Value)
+	}
+}
+
 // ── Tag 3809 (SpellsPlayedForNagas) — Naga stacks only, NOT SPELLCRAFT_CAST ────
 //
 // Tag 3809 is a cumulative count of all spells played from hand this game. It is
