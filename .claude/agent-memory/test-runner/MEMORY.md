@@ -91,6 +91,14 @@ See `patterns.md` for more architectural details.
 - After fix: `last-turn.txt` golden file shows `streak: 4` (was `streak: 3` pre-fix)
 - Whenever this fix or its revert changes, regenerate golden files AND update the WinStreak assertion
 
+## MinionsSold Counter (added 2026-05-24)
+- Category string: `"MINIONS_SOLD"` (no exported constant yet — used raw in `processor_visitor.go`)
+- `OnMinionSold` increments via `GetAbilityCounter("MINIONS_SOLD") + 1`, then `SetAbilityCounter`
+- Display format: `fmt.Sprintf("%d", count)` — the count as a decimal string, NOT the literal `"sold"`
+- Counter resets on new game because `BGGameState` is zeroed in `GameStart()`
+- Tests: `TestMinionsSoldBasicIncrement`, `TestMinionsSoldMultipleSells`, `TestMinionsSoldResetOnNewGame`
+- Helper: `setupRecruitPhase(t)` advances to recruit phase (GameEntity TURN=1); `minionSold(p, entityID)` fires `OnMinionSold` directly
+
 ## GoldNextTurn Display Format
 - Production format (processor.go `updateGoldNextTurnCounter`): `"%d (+%d if win)"` when bonus > 0
 - Example: 2 sure + 3 overconfidence bonus → `"2 (+3 if win)"` (NOT `"2 (5)"`)
@@ -109,6 +117,23 @@ See `patterns.md` for more architectural details.
 - `internal/gamestate` now takes ~96s under `-race` (two large log parses share sync.Once each)
 - `internal/debugtui` takes ~36s under `-race`
 - Total suite time under `-race -timeout 300s`: ~140s (well within 300s)
+
+## SpellsCast / SpellcraftCast Counter Pattern (added 2026-05-24)
+- `CatSpellsCast` = `"SPELLS_CAST"` — recruit-phase SPELL ZONE=PLAY for local player
+- `CatSpellcraftCast` = `"SPELLCRAFT_CAST"` — combat-phase SPELL ZONE=PLAY for local player
+- Both are exported constants in `internal/gamestate/categories.go`
+- Dispatch path: ZONE=PLAY on SPELL entity where `controllerID == localPlayerID`
+  - PhaseRecruit → `OnTavernSpellPlayed` → `SPELLS_CAST + 1`
+  - PhaseCombat  → `OnCombatTavernSpell` → `SPELLCRAFT_CAST + 1`
+- Non-local SPELLs (partner, opponent, bot) are silently ignored — NOT routed to OnMinionBought
+- Display format: `fmt.Sprintf("%d", count)` — plain integer string
+- Counter absent (not set to 0) before first spell of each category
+- Tests in `internal/gamestate/spell_counter_test.go` — package `gamestate` (white-box)
+- Key test helpers: `registerSpellEntity(p, entityID, controllerID)` + `spellZonePlay(p, entityID, controllerID)`
+- Direct visitor tests use `tavernSpellPlayed(p, entityID)` and `combatTavernSpell(p, entityID)`
+- Non-local filtering tested via `TestSpellsCastNonLocalIgnored`, `TestSpellcraftCastNonLocalIgnored`
+- Board non-contamination tested via `TestSpellsCastNonLocalDoesNotRouteToBought`
+- `TestSpellcraftCastViaZonePlay` advances to PhaseCombat via GameEntity TURN=2 (even = combat)
 
 ## Naga Synergy Counter Pattern (tag 3809)
 - `HasNagaSynergyMinion(board)` gates whether tag=3809 emits or removes `CatNagaSpells`

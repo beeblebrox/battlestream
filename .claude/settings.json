@@ -6,7 +6,16 @@
       "WebFetch(domain:api.hearthstonejson.com)",
       "WebFetch(domain:develop.battle.net)",
       "WebFetch(domain:community.developer.battle.net)",
-      "WebFetch(domain:docs.anthropic.com)"
+      "WebFetch(domain:docs.anthropic.com)",
+      "Bash(go build *)",
+      "Bash(go test *)",
+      "Bash(go vet *)",
+      "Bash(gofmt *)",
+      "Bash(golangci-lint *)",
+      "Bash(grpcurl *)",
+      "Bash(curl -s http://127.0.0.1*)",
+      "Bash(npm ls *)",
+      "Bash(npm audit *)"
     ]
   }
 }

@@ -1,0 +1,2 @@
+- [BG35 set status](bg35_status.md) — BG35 (Beasts of the Deep) not yet in HearthDb or HDT as of 2026-05-08
+- [Pending counters](pending_counters.md) — Cards we want to track but lack reference data for
