@@ -4,7 +4,7 @@ import type { GameState } from '../types.js';
 
 @action({ UUID: 'com.battlestream.streamdeck.spellcraft' })
 export class SpellcraftAction extends BaseStat {
-  label = 'SPELLCRAFT';
+  label = 'STACKS';
   gradient = ['#2a0030', '#9b59b6'] as const;
   extract(s: GameState) {
     const ac = (s.ability_counters ?? []).find(a => a.category === 'NAGA_SPELLS');
