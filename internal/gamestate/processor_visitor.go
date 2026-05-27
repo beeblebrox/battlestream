@@ -835,7 +835,13 @@ func (p *Processor) OnDntEnchantment(a *action.DntEnchantmentAction) error {
 // OnPlayerTagChanged handles buff-source player tags: Bloodgem, Elemental, TavernSpell.
 // Guards against enchantment entities (e.g. Bacon_TagTransferPlayerE) that mirror
 // player tags with stale values.
+// Skips combat phase: combat save/restore enchantments (e.g. BG29_813e) zero these
+// tags at combat start and restore via PowerTaskList (filtered), which would otherwise
+// leave a spurious ComputeBloodgemValue(0)=1 in the display.
 func (p *Processor) OnPlayerTagChanged(a *action.PlayerTagChangedAction) error {
+	if p.machine.Phase() == PhaseCombat {
+		return nil
+	}
 	entityID := int(a.Entity)
 	if entityID > 0 {
 		if info := p.entityProps[entityID]; info != nil && info.CardType == "ENCHANTMENT" {
