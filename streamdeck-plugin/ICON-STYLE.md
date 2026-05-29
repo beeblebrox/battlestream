@@ -74,3 +74,4 @@ so icons must never contain text or numbers of their own.
 | `spellcraft-cast.png` | arcane rune circle with energy rays |
 | `total-buffs.png` | up arrow flanked by sword and heart |
 | `tribes.png` | dragon + wolf + mech robot heads |
+| `minions-sold.png` | red price tag with gold coin |
