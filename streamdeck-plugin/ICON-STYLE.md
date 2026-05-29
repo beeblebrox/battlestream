@@ -46,9 +46,9 @@ so icons must never contain text or numbers of their own.
 | `buff-hp.png` | heart |
 | `consumed-buff.png` | flame |
 | `elemental-buff.png` | fire / lightning |
-| `free-refresh.png` | recycle / refresh arrows |
+| `free-refresh.png` | circular refresh/recycle arrows |
 | `gold.png` | coin stack |
-| `gold-next-turn.png` | coin + arrow |
+| `gold-next-turn.png` | gold coin + right arrow |
 | `health.png` | heart / health cross |
 | `lightfang-buff.png` | fang / tooth |
 | `loss-streak.png` | downward trend / skull |
@@ -68,3 +68,9 @@ so icons must never contain text or numbers of their own.
 | `volumizer-buff.png` | speaker / volume wave |
 | `whelp-buff.png` | dragon whelp |
 | `win-streak.png` | upward trend / flame |
+| `opponent-health.png` | red heart with sword slash |
+| `opponent-tavern-tier.png` | castle + crossed swords |
+| `spells-cast.png` | magic wand with starburst sparks |
+| `spellcraft-cast.png` | arcane rune circle with energy rays |
+| `total-buffs.png` | up arrow flanked by sword and heart |
+| `tribes.png` | dragon + wolf + mech robot heads |

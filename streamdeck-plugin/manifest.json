@@ -41,8 +41,8 @@
     { "UUID": "com.battlestream.streamdeck.elemental-buff",   "Name": "Elemental Buff",   "Icon": "imgs/actions/elemental-buff",   "Controllers": ["Keypad"], "States": [{"Image": "imgs/actions/elemental-buff"}] },
     { "UUID": "com.battlestream.streamdeck.spellcraft",       "Name": "Spellcraft",       "Icon": "imgs/actions/spellcraft",       "Controllers": ["Keypad"], "States": [{"Image": "imgs/actions/spellcraft"}] },
     { "UUID": "com.battlestream.streamdeck.minions-sold",    "Name": "Minions Sold",    "Icon": "imgs/actions/minions-sold",    "Controllers": ["Keypad"], "States": [{"Image": "imgs/actions/minions-sold"}] },
-    { "UUID": "com.battlestream.streamdeck.spells-cast",     "Name": "Spells Cast",     "Icon": "imgs/category",                "Controllers": ["Keypad"], "States": [{"Image": "imgs/category"}] },
-    { "UUID": "com.battlestream.streamdeck.spellcraft-cast", "Name": "Spellcraft Cast", "Icon": "imgs/category",                "Controllers": ["Keypad"], "States": [{"Image": "imgs/category"}] },
+    { "UUID": "com.battlestream.streamdeck.spells-cast",     "Name": "Spells Cast",     "Icon": "imgs/actions/spells-cast",     "Controllers": ["Keypad"], "States": [{"Image": "imgs/actions/spells-cast"}] },
+    { "UUID": "com.battlestream.streamdeck.spellcraft-cast", "Name": "Spellcraft Cast", "Icon": "imgs/actions/spellcraft-cast", "Controllers": ["Keypad"], "States": [{"Image": "imgs/actions/spellcraft-cast"}] },
     {
       "UUID": "com.battlestream.streamdeck.tavern-wide-buff",
       "Name": "Tavern-Wide Buff",
@@ -53,65 +53,65 @@
     {
       "UUID": "com.battlestream.streamdeck.bg-barrage-buff",
       "Name": "BG Barrage Buff",
-      "Icon": "imgs/category",
+      "Icon": "imgs/actions/bg-barrage-buff",
       "Controllers": ["Keypad"],
-      "States": [{ "Image": "imgs/category" }]
+      "States": [{ "Image": "imgs/actions/bg-barrage-buff" }]
     },
     {
       "UUID": "com.battlestream.streamdeck.rightmost-buff",
       "Name": "Rightmost Buff",
-      "Icon": "imgs/category",
+      "Icon": "imgs/actions/rightmost-buff",
       "Controllers": ["Keypad"],
-      "States": [{ "Image": "imgs/category" }]
+      "States": [{ "Image": "imgs/actions/rightmost-buff" }]
     },
     {
       "UUID": "com.battlestream.streamdeck.nomi-buff",
       "Name": "Nomi Buff",
-      "Icon": "imgs/category",
+      "Icon": "imgs/actions/nomi-buff",
       "Controllers": ["Keypad"],
-      "States": [{ "Image": "imgs/category" }]
+      "States": [{ "Image": "imgs/actions/nomi-buff" }]
     },
     {
       "UUID": "com.battlestream.streamdeck.undead-buff",
       "Name": "Undead Buff",
-      "Icon": "imgs/category",
+      "Icon": "imgs/actions/undead-buff",
       "Controllers": ["Keypad"],
-      "States": [{ "Image": "imgs/category" }]
+      "States": [{ "Image": "imgs/actions/undead-buff" }]
     },
     {
       "UUID": "com.battlestream.streamdeck.lightfang-buff",
       "Name": "Lightfang Buff",
-      "Icon": "imgs/category",
+      "Icon": "imgs/actions/lightfang-buff",
       "Controllers": ["Keypad"],
-      "States": [{ "Image": "imgs/category" }]
+      "States": [{ "Image": "imgs/actions/lightfang-buff" }]
     },
     {
       "UUID": "com.battlestream.streamdeck.whelp-buff",
       "Name": "Whelp Buff",
-      "Icon": "imgs/category",
+      "Icon": "imgs/actions/whelp-buff",
       "Controllers": ["Keypad"],
-      "States": [{ "Image": "imgs/category" }]
+      "States": [{ "Image": "imgs/actions/whelp-buff" }]
     },
     {
       "UUID": "com.battlestream.streamdeck.beetle-buff",
       "Name": "Beetle Buff",
-      "Icon": "imgs/category",
+      "Icon": "imgs/actions/beetle-buff",
       "Controllers": ["Keypad"],
-      "States": [{ "Image": "imgs/category" }]
+      "States": [{ "Image": "imgs/actions/beetle-buff" }]
     },
     {
       "UUID": "com.battlestream.streamdeck.volumizer-buff",
       "Name": "Volumizer Buff",
-      "Icon": "imgs/category",
+      "Icon": "imgs/actions/volumizer-buff",
       "Controllers": ["Keypad"],
-      "States": [{ "Image": "imgs/category" }]
+      "States": [{ "Image": "imgs/actions/volumizer-buff" }]
     },
     {
       "UUID": "com.battlestream.streamdeck.consumed-buff",
       "Name": "Consumed Buff",
-      "Icon": "imgs/category",
+      "Icon": "imgs/actions/consumed-buff",
       "Controllers": ["Keypad"],
-      "States": [{ "Image": "imgs/category" }]
+      "States": [{ "Image": "imgs/actions/consumed-buff" }]
     },
     {
       "UUID": "com.battlestream.streamdeck.buff-slot",
@@ -123,30 +123,30 @@
     {
       "UUID": "com.battlestream.streamdeck.opponent-health",
       "Name": "Opponent Health",
-      "Icon": "imgs/category",
+      "Icon": "imgs/actions/opponent-health",
       "Controllers": ["Keypad"],
-      "States": [{ "Image": "imgs/category" }]
+      "States": [{ "Image": "imgs/actions/opponent-health" }]
     },
     {
       "UUID": "com.battlestream.streamdeck.opponent-tavern-tier",
       "Name": "Opponent Tavern Tier",
-      "Icon": "imgs/category",
+      "Icon": "imgs/actions/opponent-tavern-tier",
       "Controllers": ["Keypad"],
-      "States": [{ "Image": "imgs/category" }]
+      "States": [{ "Image": "imgs/actions/opponent-tavern-tier" }]
     },
     {
       "UUID": "com.battlestream.streamdeck.tribes",
       "Name": "Available Tribes",
-      "Icon": "imgs/category",
+      "Icon": "imgs/actions/tribes",
       "Controllers": ["Keypad"],
-      "States": [{ "Image": "imgs/category" }]
+      "States": [{ "Image": "imgs/actions/tribes" }]
     },
     {
       "UUID": "com.battlestream.streamdeck.total-buffs",
       "Name": "Total Buffs",
-      "Icon": "imgs/category",
+      "Icon": "imgs/actions/total-buffs",
       "Controllers": ["Keypad"],
-      "States": [{ "Image": "imgs/category" }]
+      "States": [{ "Image": "imgs/actions/total-buffs" }]
     }
   ]
 }
