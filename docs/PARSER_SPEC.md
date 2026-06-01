@@ -278,7 +278,7 @@ entry is copied into `e.BlockSource` / `e.BlockCardID`.
 | `BACON_FREE_REFRESH_COUNT` | local player | `SetAbilityCounter(CatFreeRefresh)` |
 | `BACON_PLAYER_EXTRA_GOLD_NEXT_TURN` | local player | `goldNextTurnSure` + `updateGoldNextTurnCounter` |
 | `TAG_SCRIPT_DATA_NUM_1/2` | enchantment entity | `handleDntTagChange` → Dnt counter dispatch |
-| `3809` (SpellsPlayedForNagasCounter) | local player | `SetAbilityCounter(CatNagaSpells, stacks formula)` |
+| `3809` (SpellsPlayedForNagasCounter) | local player | `OnSpellcraftChanged`: `SetAbilityCounter(CatSpellsCast, abs value)` (Spells Played, all-phases incl. combat Naga casts) **and** `SetAbilityCounter(CatNagaSpells, stacks formula)` (Naga Stacks, only when a Naga synergy minion is on board) |
 
 ---
 
@@ -311,5 +311,7 @@ Absolute: `value = base + SD`.
 | `BLOODGEM` | `BACON_BLOODGEMBUFFHEALTHVALUE` | `raw + 1` | Same offset |
 | `ELEMENTAL` | `BACON_ELEMENTAL_BUFF*` | `max(0, raw)` | Clamp at zero |
 | `TAVERN_SPELL` | `TAVERN_SPELL_*` | `raw` | Direct |
-| `NAGA_SPELLS` | tag `3809` (SpellsPlayedForNagasCounter — NOT Spellcraft keyword) | stacks=`1 + raw/4`, progress=`raw%4` | Display: `"Tier N · M/4"` |
+| `SPELLS_CAST` | tag `3809` (SpellsPlayedForNagasCounter) | `raw` (absolute, set not incremented) | Display: "Spells Played". All-phases local-side total, **including combat Naga casts**. Single writer (`OnSpellcraftChanged`); monotonic guard ignores transient decreases. Replaces the old hand-only `NUM_SPELLS_PLAYED_THIS_GAME` source. |
+| `SPELLCRAFT_CAST` | `SPELLCRAFT_HINT` on `HAND→PLAY` (local controller), via `OnCombatTavernSpell` | `+1` per hand-played spellcraft card | Display: "Spellcraft". **Hand-only by design:** combat-triggered spellcraft cannot be separated from 3809's undifferentiated total (combat casts arrive `SETASIDE→PLAY` with no hint). See [`combat-spell-cast-fix.md`](combat-spell-cast-fix.md). |
+| `NAGA_SPELLS` | tag `3809` (SpellsPlayedForNagasCounter — NOT Spellcraft keyword) | stacks=`1 + raw/4`, progress=`raw%4` | Display: `"Tier N · M/4"`. Only shown when a Naga synergy minion is on board. |
 | `GOLD_NEXT_TURN` | player tag + Overconfidence | `sure + overconfidenceCount * 3` | Display: `"N (N+bonus)"` if bonus > 0 |

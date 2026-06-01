@@ -249,7 +249,10 @@ The processor implements all 13 HDT BG counter types:
 - `TAVERN_SPELL_ATTACK_INCREASE` / `HEALTH_INCREASE` → `CatTavernSpell`
 - `BACON_FREE_REFRESH_COUNT` → `CatFreeRefresh` (AbilityCounter)
 - `BACON_PLAYER_EXTRA_GOLD_NEXT_TURN` → `CatGoldNextTurn` (AbilityCounter)
-- Tag `3809` (SpellsPlayedForNagasCounter — NOT the Spellcraft keyword) → `CatNagaSpells` (AbilityCounter, stacks formula: `1 + raw/4`)
+- Tag `3809` (SpellsPlayedForNagasCounter — NOT the Spellcraft keyword), via `OnSpellcraftChanged`, drives **two** AbilityCounters:
+  - `CatSpellsCast` ("Spells Played") — set to the absolute 3809 value. This is the **all-phases local-side total, including spells cast by your own Nagas during combat**. It replaces the former `NUM_SPELLS_PLAYED_THIS_GAME` source, which counted only hand-played (recruit) spells and froze during combat. `CatSpellsCast` now has a single writer.
+  - `CatNagaSpells` ("Naga Stacks") — stacks formula `1 + raw/4`, displayed only when a Naga synergy minion is on the board.
+  - **Spellcraft limitation:** `CatSpellcraftCast` ("Spellcraft") still counts only **hand-played** spellcraft cards (`HAND→PLAY` + `SPELLCRAFT_HINT`, local controller). Combat-triggered spellcraft cannot be split out of 3809's undifferentiated total, so it is not counted. See [`combat-spell-cast-fix.md`](combat-spell-cast-fix.md).
 
 **Dnt enchantment counters** (SD1/SD2 on player-level enchantment entities):
 - `BG_ShopBuff_Elemental` → `CatNomi` (differential accumulation)

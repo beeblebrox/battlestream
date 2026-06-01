@@ -331,21 +331,59 @@ func (p *Processor) OnPlacementChanged(a *action.PlacementChangedAction) error {
 }
 
 // OnSpellcraftChanged handles numeric tag 3809 (SpellsPlayedForNagas) changes on the
-// local player entity. Tag 3809 is a cumulative counter incremented for every spell
-// played from hand — identical in scope to NUM_SPELLS_PLAYED_THIS_GAME. It is NOT a
-// spellcraft-trigger signal; the old 0→positive-in-combat detection was reading the
-// TagTransferPlayerEnchant reset/restore cycle, not an actual trigger event.
+// local player entity.
 //
-// Responsibility: Naga synergy display counter (CatNagaSpells) — shown when a Naga
-// synergy minion (Thaumaturgist, Arcane Cannoneer, Showy Cyclist, Groundbreaker) is on
-// the board. The tier/progress display (Tier N · M/4) shows charge accumulation toward
-// those minions' per-spell effects.
+// Tag 3809 is a cumulative, all-phases count of every spell the LOCAL side casts this
+// game. This is NOT identical in scope to NUM_SPELLS_PLAYED_THIS_GAME: the latter only
+// counts spells played from hand during the recruit phase and stays frozen during
+// combat, whereas 3809 ALSO increments for combat-triggered casts (e.g. Naga minions
+// casting spells during the local player's own combat). In the repro duos game,
+// NUM_SPELLS_PLAYED_THIS_GAME topped out at 85 (hand-played) while 3809 reached 136
+// (85 hand + 51 combat-triggered). 3809 is therefore the authoritative spell total.
+//
+// 3809 lives on each player entity and only ticks for that player's own casts, so the
+// actionIsLocalPlayerEntity filter restricts us to the local side — including during the
+// local player's combat window. Partner/opponent player entities carry their own 3809
+// (e.g. "Phoenix", "Musicisbreth" in the repro log) and are filtered out here. The DNT
+// TagTransferPlayerEnchant mirror entity is also filtered (it is neither a player-entity
+// ID nor the local player name).
+//
+// Responsibilities:
+//   - Spells Played (CatSpellsCast): the absolute 3809 value (HDT mirrors this exactly —
+//     SpellsPlayedForNagasCounter sets Counter = value). Setting the absolute value makes
+//     this idempotent and immune to the reset/restore (3809→0→N) cycle some enchantments
+//     produce. This supersedes the old NUM_SPELLS_PLAYED_THIS_GAME-driven increment, which
+//     undercounted by ignoring combat casts.
+//   - Naga synergy display (CatNagaSpells): the "Tier N · M/4" charge display, shown only
+//     when a Naga synergy minion (Thaumaturgist, Arcane Cannoneer, Showy Cyclist,
+//     Groundbreaker) is on the board.
+//
+// LIMITATION (Spellcraft, CatSpellcraftCast): combat-triggered casts cannot be split into
+// spellcraft vs regular spells from 3809 alone — it is a single undifferentiated total and
+// combat casts arrive SETASIDE→PLAY without the SPELLCRAFT_HINT flag. Spellcraft therefore
+// still counts only hand-played spellcraft cards (see OnCombatTavernSpell). See
+// docs/combat-spell-cast-fix.md.
 func (p *Processor) OnSpellcraftChanged(a *action.SpellcraftChangedAction) error {
 	entityID := int(a.Entity)
 	isLocal := p.actionIsLocalPlayerEntity(entityID, a.EntityName) ||
 		(p.localPlayerID > 0 && a.ControllerID == p.localPlayerID && p.heroEntities[entityID])
 	if !isLocal {
 		return nil
+	}
+
+	// Spells Played: authoritative all-phases total, set to the absolute 3809 value.
+	//
+	// Monotonic guard (`a.Value > current`) vs. HDT's plain `Counter = value`: on the
+	// LOCAL player entity, 3809 is strictly monotonic — it only ever increments. The
+	// transient reset/restore dips (3809→0→N) live on NON-local entities (the DNT
+	// Bacon_TagTransferPlayerE enchantment mirror, combat copies), which the isLocal gate
+	// above already excludes, so HDT's plain assignment would behave identically here.
+	// The guard is therefore belt-and-suspenders against any unforeseen local dip and is
+	// fully reconnect-safe: absolute assignment is idempotent, so a reconnect that restores
+	// the counter to N and then re-emits 3809=N (or N+k) lands at N (or N+k), never 2N —
+	// unlike the old NUM_SPELLS_PLAYED_THIS_GAME delta path, which could double-count.
+	if a.Value > p.machine.GetAbilityCounter(CatSpellsCast) {
+		p.machine.SetAbilityCounter(CatSpellsCast, a.Value, fmt.Sprintf("%d", a.Value))
 	}
 
 	snap := p.machine.State()
@@ -813,9 +851,13 @@ func (p *Processor) OnMinionSold(a *action.MinionSoldAction) error {
 
 func (p *Processor) OnTavernUpgraded(_ *action.TavernUpgradedAction) error { return nil }
 
+// OnTavernSpellPlayed is a no-op. It exists only to satisfy the RecruitVisitor interface.
+// The Spells Played counter (CatSpellsCast) is driven exclusively from tag 3809 (see
+// OnSpellcraftChanged), which is the all-phases total and supersedes the hand-only
+// NUM_SPELLS_PLAYED_THIS_GAME signal. That tag is no longer dispatched at all (the
+// processor.go case was removed), so this method has no live caller — it is retained as
+// the recruit-phase visitor hook in case future logic needs a per-hand-spell event.
 func (p *Processor) OnTavernSpellPlayed(_ *action.TavernSpellPlayedAction) error {
-	count := p.machine.GetAbilityCounter(CatSpellsCast) + 1
-	p.machine.SetAbilityCounter(CatSpellsCast, count, fmt.Sprintf("%d", count))
 	return nil
 }
 
@@ -1097,5 +1139,4 @@ func (p *Processor) resetProcessorState() {
 	p.tribeConfirmCount = make(map[string]int)
 	p.playerEntityIDs = make(map[int]int)
 	p.realPlayerIDs = make(map[int]int)
-	p.spellsPlayedTotal = 0
 }
