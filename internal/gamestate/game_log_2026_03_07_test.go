@@ -88,6 +88,29 @@ func TestGameLog2026_03_07_NagaSpellsFinal(t *testing.T) {
 	}
 }
 
+// TestGameLog2026_03_07_SpellsPlayedFinal verifies the regression-critical invariant:
+// CatSpellsCast (Spells Played) is driven UNCONDITIONALLY from tag 3809 and is NOT gated
+// behind HasNagaSynergyMinion. In this game tag=3809 reached 72 for Moch#1358 but no Naga
+// synergy minion was ever on the board, so CatNagaSpells is absent (see above) while
+// CatSpellsCast must still equal 72.
+func TestGameLog2026_03_07_SpellsPlayedFinal(t *testing.T) {
+	s := sharedLog2026State(t)
+
+	var found *gamestate.AbilityCounter
+	for i := range s.AbilityCounters {
+		if s.AbilityCounters[i].Category == gamestate.CatSpellsCast {
+			found = &s.AbilityCounters[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("AbilityCounters: expected CatSpellsCast (Spells Played) present even with no Naga synergy minion on board, got nil")
+	}
+	if found.Value != 72 {
+		t.Errorf("CatSpellsCast: expected 72 (final tag=3809 value), got %d", found.Value)
+	}
+}
+
 // TestGameLog2026_03_07_TavernTierFinal verifies the player reached tier 6.
 // Raw log: PLAYER_TECH_LEVEL value=6 at 13:53:48 (during BG turn 8).
 func TestGameLog2026_03_07_TavernTierFinal(t *testing.T) {

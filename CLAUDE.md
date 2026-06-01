@@ -100,7 +100,11 @@ Covers all 13 HDT BgCounters. Four tracking mechanisms:
 2. **Player tags (economy)** — `BACON_FREE_REFRESH_COUNT`, `BACON_PLAYER_EXTRA_GOLD_NEXT_TURN` -> AbilityCounter
 3. **Dnt enchantment SD** — `BG_ShopBuff_Elemental`, `BG31_808pe`, `BG34_854pe`, etc. -> BuffSource
 4. **Zone-tracked enchantments** — `BG28_884e` (Overconfidence) PLAY transitions -> GoldNextTurn counter
-5. **Numeric tag 3809** — Spellcraft stacks -> AbilityCounter
+5. **Numeric tag 3809** (`SpellsPlayedForNagas`, local player entity) -> two AbilityCounters via `OnSpellcraftChanged`:
+   - **Spells Played** (`CatSpellsCast`) — the absolute 3809 value (set, not incremented). This is the all-phases local-side total, **including spells your own Nagas cast during combat**. It supersedes the old `NUM_SPELLS_PLAYED_THIS_GAME` source, which counted only hand-played (recruit) spells and froze during combat (it undercounted, e.g. 85 vs the true 136). `CatSpellsCast` now has a single writer (`OnSpellcraftChanged`).
+   - **Naga stacks** (`CatNagaSpells`) — the "Tier N · M/4" synergy display, gated on a Naga synergy minion being on the board.
+
+**Spellcraft limitation:** **Spellcraft** (`CatSpellcraftCast`) counts only **hand-played** spellcraft cards (`HAND→PLAY` + `SPELLCRAFT_HINT` + local controller, via `OnCombatTavernSpell`). Combat-triggered spellcraft cannot be separated from other combat spell casts — tag 3809 is a single undifferentiated total and combat casts arrive `SETASIDE→PLAY` without the hint. This is a documented limitation, not an oversight. See [`docs/combat-spell-cast-fix.md`](docs/combat-spell-cast-fix.md).
 
 Mappings live in `internal/gamestate/categories.go`. Reference implementations in `reference/Hearthstone-Deck-Tracker/` and `reference/HearthDb/`.
 

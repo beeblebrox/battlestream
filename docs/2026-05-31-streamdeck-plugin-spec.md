@@ -320,9 +320,11 @@ BG exposes three distinct spell-related quantities; the plugin surfaces all thre
 
 | Button (UUID suffix) | Counter category | What it measures |
 |---|---|---|
-| Spells Cast (`spells-cast`, label `SPELLS`) | `SPELLS_CAST` | All Tavern spells played this game (daemon: "Spells Played"). |
-| Spellcraft Cast (`spellcraft-cast`, label `CRAFT`) | `SPELLCRAFT_CAST` | Spellcraft spells specifically. |
+| Spells Cast (`spells-cast`, label `SPELLS`) | `SPELLS_CAST` | Every spell the local player casts this game (daemon: "Spells Played"). Sourced from engine tag **3809** — the **all-phases local-side total, including spells your own Nagas cast during combat** (not just hand-played recruit spells). |
+| Spellcraft Cast (`spellcraft-cast`, label `CRAFT`) | `SPELLCRAFT_CAST` | **Hand-played** spellcraft cards only. Combat-triggered spellcraft is **not** counted — it cannot be separated from other combat casts in tag 3809 (a single undifferentiated total). This is a documented limitation, not a bug. |
 | Spellcraft (`spellcraft`, label `STACKS`) | `NAGA_SPELLS` | The running Naga spell-stack count (tag 3809; daemon: "Naga Stacks") that Naga payoffs scale off of. **Not** in `CATEGORY_META`, hence no Dyn counterpart. |
+
+> **Spells Cast value source (tag 3809).** As of the combat-spell-cast fix, `SPELLS_CAST` reflects the engine's all-phases spell total (tag 3809) for the local side, so a Naga build's combat spell casts now count toward "Spells Cast" (e.g. a game that previously showed 85 now shows 136). `SPELLCRAFT_CAST` remains hand-only by design. See the daemon design note `docs/combat-spell-cast-fix.md`.
 
 ---
 

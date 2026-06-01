@@ -191,11 +191,6 @@ type Processor struct {
 	// suppressed so that triple-consumed board minions are not counted as sells regardless
 	// of whether they came from the board or hand.
 	tripleFormationActive bool
-
-	// spellsPlayedTotal is the last-seen absolute value of NUM_SPELLS_PLAYED_THIS_GAME
-	// on the local player entity. Used to compute the delta when the tag increments.
-	spellsPlayedTotal int
-
 }
 
 // NewProcessor returns a Processor that updates the given Machine.
@@ -538,20 +533,12 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 				EntityName:   e.EntityName,
 			})
 
-		case "NUM_SPELLS_PLAYED_THIS_GAME":
-			// Authoritative spell-play counter from the game engine — treats BG tavern
-			// spells as MINIONs in the log, so the old ZONE=PLAY/CardType==SPELL path
-			// was fundamentally unreliable.  Use the absolute value and compute deltas.
-			val, _ := strconv.Atoi(value)
-			if p.actionIsLocalPlayerEntity(e.EntityID, e.EntityName) && val > p.spellsPlayedTotal {
-				delta := val - p.spellsPlayedTotal
-				p.spellsPlayedTotal = val
-				for i := 0; i < delta; i++ {
-					_ = p.OnTavernSpellPlayed(&action.TavernSpellPlayedAction{
-						ActionBase: action.ActionBase{Entity: action.EntityID(e.EntityID)},
-					})
-				}
-			}
+		// NUM_SPELLS_PLAYED_THIS_GAME is intentionally NOT handled. It counts only
+		// hand-played spells (recruit phase) and freezes during combat, so it
+		// undercounted the Spells Played total. The counter (CatSpellsCast) is now
+		// sourced exclusively from tag 3809 (all-phases total) in OnSpellcraftChanged.
+		// Removing the case ensures there is no second path that could drive or
+		// double-count CatSpellsCast.
 
 		case "RESOURCES", "RESOURCES_USED":
 			val, _ := strconv.Atoi(value)
@@ -584,10 +571,12 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 				}
 				if value == "PLAY" && p.machine.Phase() != PhaseGameOver {
 					if info != nil && info.CardType == "SPELL" {
-						// SPELLS_CAST is tracked via NUM_SPELLS_PLAYED_THIS_GAME (all spell types,
-						// all phases). SPELLCRAFT_CAST uses SPELLCRAFT_HINT: spellcraft cards have
-						// this flag set while in HAND and it clears after play. System/anomaly spells
-						// (SETASIDE→PLAY) never carry the hint so they are silently ignored.
+						// SPELLS_CAST (Spells Played) is tracked via tag 3809 (all spell types,
+						// all phases, including combat-triggered casts) in OnSpellcraftChanged.
+						// SPELLCRAFT_CAST uses SPELLCRAFT_HINT: spellcraft cards have this flag set
+						// while in HAND and it clears after play. Combat-triggered spell casts arrive
+						// SETASIDE→PLAY without the hint, so they cannot be attributed to spellcraft
+						// here and are not counted toward SPELLCRAFT_CAST (see docs/combat-spell-cast-fix.md).
 						if prevZone == "HAND" && controllerID == p.localPlayerID &&
 							info.SpellcraftHint {
 							_ = p.OnCombatTavernSpell(&action.CombatTavernSpellAction{

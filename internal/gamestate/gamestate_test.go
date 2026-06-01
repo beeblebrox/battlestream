@@ -1395,19 +1395,23 @@ func TestProcessorSpellcraftCounter(t *testing.T) {
 		Tags:       map[string]string{"3809": "9"},
 	})
 
-	s := m.State()
-	if len(s.AbilityCounters) != 1 {
-		t.Fatalf("expected 1 ability counter, got %d", len(s.AbilityCounters))
-	}
-	ac := s.AbilityCounters[0]
-	if ac.Category != CatNagaSpells {
-		t.Errorf("expected NAGA_SPELLS category, got %q", ac.Category)
+	// Tag 3809 now drives BOTH the Naga synergy display (CatNagaSpells) and the
+	// Spells Played counter (CatSpellsCast).
+	ac := findAbilityCounter(m, CatNagaSpells)
+	if ac == nil {
+		t.Fatalf("expected NAGA_SPELLS counter, got nil")
 	}
 	if ac.Value != 9 {
 		t.Errorf("expected raw value 9, got %d", ac.Value)
 	}
 	if ac.Display != "Tier 3 · 1/4" {
 		t.Errorf("expected display \"Tier 3 · 1/4\", got %q", ac.Display)
+	}
+
+	// SPELLS_CAST must also be set to the absolute 3809 value.
+	sc := findAbilityCounter(m, CatSpellsCast)
+	if sc == nil || sc.Value != 9 {
+		t.Errorf("expected SPELLS_CAST=9 from tag 3809, got %v", sc)
 	}
 }
 
@@ -1456,14 +1460,20 @@ func TestProcessorSpellcraftCounterUpdate(t *testing.T) {
 		Tags:       map[string]string{"3809": "29"},
 	})
 
-	s := m.State()
-	if len(s.AbilityCounters) != 1 {
-		t.Fatalf("expected 1 ability counter after updates, got %d", len(s.AbilityCounters))
+	// CatNagaSpells must be updated in place (not appended).
+	ac := findAbilityCounter(m, CatNagaSpells)
+	if ac == nil {
+		t.Fatalf("expected NAGA_SPELLS counter after updates, got nil")
 	}
-	ac := s.AbilityCounters[0]
 	// 29 → stacks=1+(29/4)=8, progress=29%4=1 → "Tier 8 · 1/4"
 	if ac.Display != "Tier 8 · 1/4" {
 		t.Errorf("expected display \"Tier 8 · 1/4\", got %q", ac.Display)
+	}
+
+	// SPELLS_CAST tracks the latest absolute value (29).
+	sc := findAbilityCounter(m, CatSpellsCast)
+	if sc == nil || sc.Value != 29 {
+		t.Errorf("expected SPELLS_CAST=29, got %v", sc)
 	}
 }
 

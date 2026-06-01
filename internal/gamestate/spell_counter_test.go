@@ -3,31 +3,33 @@ package gamestate
 // spell_counter_test.go tests the SPELLS_CAST and SPELLCRAFT_CAST ability counters.
 //
 // SPELLS_CAST dispatch path (all phases):
-//   NUM_SPELLS_PLAYED_THIS_GAME TAG_CHANGE on local player entity
-//     → delta computed vs. last-seen absolute value
-//     → OnTavernSpellPlayed called once per increment
-//     → SPELLS_CAST += delta
+//   Tag 3809 (SpellsPlayedForNagas) TAG_CHANGE on the local player entity
+//     → OnSpellcraftChanged sets SPELLS_CAST to the absolute 3809 value (HDT-style;
+//       see SpellsPlayedForNagasCounter.cs which does Counter = value).
 //
-//   Counts ALL spell types: tavern spells, spellcraft cards, bloodgems, non-typed spells.
-//   BG tavern/bloodgem spells appear in the log as CARDTYPE=MINION, not SPELL, so the
-//   ZONE=PLAY / CardType==SPELL path is NOT used for SPELLS_CAST. NUM_SPELLS_PLAYED_THIS_GAME
-//   is the authoritative engine counter, same as PLAYER_TRIPLES.
+//   3809 is the all-phases total: it counts hand-played recruit spells AND combat-triggered
+//   casts (e.g. Naga minions casting during the local player's own combat). It supersedes
+//   NUM_SPELLS_PLAYED_THIS_GAME, which only counts hand-played spells and freezes during
+//   combat (the old, undercounting source). OnTavernSpellPlayed (driven by
+//   NUM_SPELLS_PLAYED_THIS_GAME) is now a no-op for the counter.
 //
 // SPELLCRAFT_CAST dispatch path (any phase):
 //   ZONE=PLAY on a SPELL entity with SpellcraftHint=true (controllerID==localPlayerID, prevZone==HAND)
 //     → OnCombatTavernSpell → SPELLCRAFT_CAST + 1
 //   Spellcraft cards carry SPELLCRAFT_HINT=1 while in the player's HAND. The hint clears
 //   after play. System/anomaly spells never carry the hint and are silently ignored.
-//   Phase is irrelevant — spellcraft is a shop-phase mechanic in practice.
+//   LIMITATION: combat-triggered spellcraft casts cannot be separated from regular combat
+//   casts in 3809 alone, so SPELLCRAFT_CAST counts only hand-played spellcraft (see
+//   docs/combat-spell-cast-fix.md).
 //
-//   Tag 3809 (SpellsPlayedForNagas) is NOT used for SPELLCRAFT_CAST. It is a cumulative
-//   counter identical to NUM_SPELLS_PLAYED_THIS_GAME and drives only CatNagaSpells display.
+//   Tag 3809 is NOT used for SPELLCRAFT_CAST — only for SPELLS_CAST and the CatNagaSpells display.
 //
 // Non-local entities must be silently ignored and never route to OnMinionBought.
 
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"battlestream.fixates.io/internal/gamestate/action"
 	"battlestream.fixates.io/internal/parser"
@@ -66,11 +68,12 @@ func numSpellsPlayedTagChange(p *Processor, entityID int, newValue int) {
 	})
 }
 
-// tavernSpellPlayed fires OnTavernSpellPlayed directly without going through
-// any tag-change path. Used to test the visitor method in isolation.
-func tavernSpellPlayed(p *Processor, entityID int) {
-	_ = p.OnTavernSpellPlayed(&action.TavernSpellPlayedAction{
+// spellsCast3809 fires OnSpellcraftChanged directly with an absolute 3809 value on
+// the given local player entity. This is the source of truth for SPELLS_CAST.
+func spellsCast3809(p *Processor, entityID int, value int) {
+	_ = p.OnSpellcraftChanged(&action.SpellcraftChangedAction{
 		ActionBase: action.ActionBase{Entity: action.EntityID(entityID)},
+		Value:      value,
 	})
 }
 
@@ -96,12 +99,11 @@ func TestSpellsCastStartsAtZero(t *testing.T) {
 	}
 }
 
-// TestSpellsCastSingleSpell verifies that playing one recruit-phase spell
-// increments SPELLS_CAST to 1 (via direct visitor call).
+// TestSpellsCastSingleSpell verifies that one 3809 increment sets SPELLS_CAST to 1.
 func TestSpellsCastSingleSpell(t *testing.T) {
 	m, p := setupRecruitPhase(t)
 
-	tavernSpellPlayed(p, 300)
+	spellsCast3809(p, 20, 1)
 
 	ac := findAbilityCounter(m, CatSpellsCast)
 	if ac == nil {
@@ -115,14 +117,13 @@ func TestSpellsCastSingleSpell(t *testing.T) {
 	}
 }
 
-// TestSpellsCastMultipleSpells verifies that playing three recruit-phase spells
-// accumulates to 3 (via direct visitor calls).
+// TestSpellsCastMultipleSpells verifies that 3809 climbing to 3 yields SPELLS_CAST=3.
 func TestSpellsCastMultipleSpells(t *testing.T) {
 	m, p := setupRecruitPhase(t)
 
-	tavernSpellPlayed(p, 301)
-	tavernSpellPlayed(p, 302)
-	tavernSpellPlayed(p, 303)
+	spellsCast3809(p, 20, 1)
+	spellsCast3809(p, 20, 2)
+	spellsCast3809(p, 20, 3)
 
 	ac := findAbilityCounter(m, CatSpellsCast)
 	if ac == nil {
@@ -141,8 +142,8 @@ func TestSpellsCastMultipleSpells(t *testing.T) {
 func TestSpellsCastResetOnNewGame(t *testing.T) {
 	m, p := setupRecruitPhase(t)
 
-	tavernSpellPlayed(p, 300)
-	tavernSpellPlayed(p, 301)
+	spellsCast3809(p, 20, 1)
+	spellsCast3809(p, 20, 2)
 
 	ac := findAbilityCounter(m, CatSpellsCast)
 	if ac == nil || ac.Value != 2 {
@@ -158,26 +159,24 @@ func TestSpellsCastResetOnNewGame(t *testing.T) {
 	}
 }
 
-// TestSpellsCastViaNumSpellsTag verifies end-to-end dispatch: sequential
-// NUM_SPELLS_PLAYED_THIS_GAME increments on the local player entity accumulate
-// the correct SPELLS_CAST total.
+// TestSpellsCastViaTag3809 verifies end-to-end dispatch: sequential tag 3809
+// TAG_CHANGE events on the local player entity set SPELLS_CAST to the absolute value.
 //
-// In the test setup (setupRecruitPhase) the local player entity has entityID=2
-// and is registered in playerEntityIDs[2]=localPlayerID.
-func TestSpellsCastViaNumSpellsTag(t *testing.T) {
+// In the test setup (setupGame) the local player entity has entityID=20 and is
+// registered in playerEntityIDs[20]=localPlayerID (7).
+func TestSpellsCastViaTag3809(t *testing.T) {
 	m, p := setupRecruitPhase(t)
 
-	// Local player entity ID in the test harness is 20 (see setupGame / EventPlayerDef).
 	localPlayerEntityID := 20
 
-	// Simulate 3 sequential spell plays: tag goes 0→1→2→3.
-	numSpellsPlayedTagChange(p, localPlayerEntityID, 1)
-	numSpellsPlayedTagChange(p, localPlayerEntityID, 2)
-	numSpellsPlayedTagChange(p, localPlayerEntityID, 3)
+	// Simulate 3 sequential spell plays: tag goes 1→2→3.
+	tag3809Change(p, localPlayerEntityID, 1)
+	tag3809Change(p, localPlayerEntityID, 2)
+	tag3809Change(p, localPlayerEntityID, 3)
 
 	ac := findAbilityCounter(m, CatSpellsCast)
 	if ac == nil {
-		t.Fatal("expected SPELLS_CAST after NUM_SPELLS_PLAYED_THIS_GAME 0→1→2→3, got nil")
+		t.Fatal("expected SPELLS_CAST after tag 3809 1→2→3, got nil")
 	}
 	if ac.Value != 3 {
 		t.Errorf("expected SPELLS_CAST=3, got %d", ac.Value)
@@ -187,62 +186,74 @@ func TestSpellsCastViaNumSpellsTag(t *testing.T) {
 	}
 }
 
-// TestSpellsCastNumSpellsTagNonLocalIgnored verifies that NUM_SPELLS_PLAYED_THIS_GAME
-// changes on a non-local player entity (partner, opponent) do NOT increment SPELLS_CAST.
-func TestSpellsCastNumSpellsTagNonLocalIgnored(t *testing.T) {
-	m, p := setupRecruitPhase(t)
-
-	// entityID=99 is not registered as any player entity.
-	numSpellsPlayedTagChange(p, 99, 5)
-
-	ac := findAbilityCounter(m, CatSpellsCast)
-	if ac != nil {
-		t.Errorf("non-local NUM_SPELLS_PLAYED_THIS_GAME must not increment SPELLS_CAST, got value=%d", ac.Value)
-	}
-}
-
-// TestSpellsCastNumSpellsTagJump verifies that a single jump in
-// NUM_SPELLS_PLAYED_THIS_GAME (e.g. 0→3 in one event) produces SPELLS_CAST=3.
-// This handles reconnect replays where the tag may jump by more than 1.
-func TestSpellsCastNumSpellsTagJump(t *testing.T) {
+// TestSpellsCastNumSpellsDoesNotDrive verifies that NUM_SPELLS_PLAYED_THIS_GAME no
+// longer drives SPELLS_CAST: SPELLS_CAST is sourced exclusively from tag 3809.
+func TestSpellsCastNumSpellsDoesNotDrive(t *testing.T) {
 	m, p := setupRecruitPhase(t)
 
 	localPlayerEntityID := 20
+	numSpellsPlayedTagChange(p, localPlayerEntityID, 1)
+	numSpellsPlayedTagChange(p, localPlayerEntityID, 2)
 	numSpellsPlayedTagChange(p, localPlayerEntityID, 3)
 
 	ac := findAbilityCounter(m, CatSpellsCast)
+	if ac != nil {
+		t.Errorf("NUM_SPELLS_PLAYED_THIS_GAME must not drive SPELLS_CAST (now 3809-driven), got value=%d", ac.Value)
+	}
+}
+
+// TestSpellsCastTag3809NonLocalIgnored verifies that tag 3809 changes on a non-local
+// player entity (partner, opponent) do NOT set SPELLS_CAST.
+func TestSpellsCastTag3809NonLocalIgnored(t *testing.T) {
+	m, p := setupRecruitPhase(t)
+
+	// entityID=99 is not registered as any player entity.
+	tag3809Change(p, 99, 5)
+
+	ac := findAbilityCounter(m, CatSpellsCast)
+	if ac != nil {
+		t.Errorf("non-local tag 3809 must not set SPELLS_CAST, got value=%d", ac.Value)
+	}
+}
+
+// TestSpellsCastTag3809Jump verifies that a single jump in tag 3809 (e.g. 0→3 in one
+// event, as on a reconnect replay) produces SPELLS_CAST=3.
+func TestSpellsCastTag3809Jump(t *testing.T) {
+	m, p := setupRecruitPhase(t)
+
+	tag3809Change(p, 20, 3)
+
+	ac := findAbilityCounter(m, CatSpellsCast)
 	if ac == nil {
-		t.Fatal("expected SPELLS_CAST after NUM_SPELLS_PLAYED_THIS_GAME jump 0→3, got nil")
+		t.Fatal("expected SPELLS_CAST after tag 3809 jump 0→3, got nil")
 	}
 	if ac.Value != 3 {
 		t.Errorf("expected SPELLS_CAST=3 for tag jump 0→3, got %d", ac.Value)
 	}
 }
 
-// TestSpellsCastNumSpellsTagNoDecrement verifies that a decrease in
-// NUM_SPELLS_PLAYED_THIS_GAME (which should not happen in practice) does NOT
-// subtract from SPELLS_CAST.
-func TestSpellsCastNumSpellsTagNoDecrement(t *testing.T) {
+// TestSpellsCastTag3809NoDecrement verifies that a transient decrease in tag 3809
+// (e.g. the TagTransferPlayerEnchant reset/restore cycle) does NOT pull SPELLS_CAST
+// backwards. The absolute value is monotonic in practice; we guard against dips.
+func TestSpellsCastTag3809NoDecrement(t *testing.T) {
 	m, p := setupRecruitPhase(t)
 
-	localPlayerEntityID := 20
-	numSpellsPlayedTagChange(p, localPlayerEntityID, 2) // → SPELLS_CAST=2
-	numSpellsPlayedTagChange(p, localPlayerEntityID, 1) // decrease — must be ignored
+	tag3809Change(p, 20, 2) // → SPELLS_CAST=2
+	tag3809Change(p, 20, 0) // transient reset — must be ignored
+	tag3809Change(p, 20, 1) // partial restore, still below 2 — must be ignored
 
 	ac := findAbilityCounter(m, CatSpellsCast)
 	if ac == nil || ac.Value != 2 {
-		t.Errorf("decrease in NUM_SPELLS_PLAYED_THIS_GAME must not change SPELLS_CAST, got %v", ac)
+		t.Errorf("transient 3809 dip must not lower SPELLS_CAST, got %v", ac)
 	}
 }
 
-// TestSpellsCastNumSpellsResetOnNewGame verifies that SPELLS_CAST and the internal
-// spellsPlayedTotal tracker are both zeroed on game start, so a new game's
-// NUM_SPELLS_PLAYED_THIS_GAME=1 correctly increments SPELLS_CAST to 1.
-func TestSpellsCastNumSpellsResetOnNewGame(t *testing.T) {
+// TestSpellsCastTag3809ResetOnNewGame verifies that SPELLS_CAST is zeroed on game
+// start, so a new game starts fresh.
+func TestSpellsCastTag3809ResetOnNewGame(t *testing.T) {
 	m, p := setupRecruitPhase(t)
 
-	localPlayerEntityID := 20
-	numSpellsPlayedTagChange(p, localPlayerEntityID, 8) // game 1: 8 spells
+	tag3809Change(p, 20, 8) // game 1: 8 spells
 
 	ac := findAbilityCounter(m, CatSpellsCast)
 	if ac == nil || ac.Value != 8 {
@@ -252,8 +263,6 @@ func TestSpellsCastNumSpellsResetOnNewGame(t *testing.T) {
 	// New game — all state resets.
 	p.Handle(parser.GameEvent{Type: parser.EventGameStart})
 
-	// In the new game the local player entity ID changes; re-register it.
-	// For simplicity just call OnTavernSpellPlayed directly to verify counter is zero.
 	ac = findAbilityCounter(m, CatSpellsCast)
 	if ac != nil {
 		t.Errorf("SPELLS_CAST should be absent at new game start, got value=%d", ac.Value)
@@ -413,7 +422,7 @@ func TestSpellcraftCastViaZonePlay(t *testing.T) {
 		t.Errorf("expected SPELLCRAFT_CAST=1, got %d", ac.Value)
 	}
 
-	// SPELLS_CAST must remain absent — SPELLS_CAST is driven by NUM_SPELLS_PLAYED_THIS_GAME,
+	// SPELLS_CAST must remain absent — SPELLS_CAST is driven by tag 3809,
 	// not by the ZONE=PLAY path.
 	recruitAC := findAbilityCounter(m, CatSpellsCast)
 	if recruitAC != nil {
@@ -588,14 +597,14 @@ func TestTag3809_NonLocalIgnored(t *testing.T) {
 // ── Cross-phase independence ──────────────────────────────────────────────────
 
 // TestSpellCountersAreIndependent verifies that SPELLS_CAST and SPELLCRAFT_CAST
-// accumulate independently: recruit spells only touch SPELLS_CAST and combat
-// spells only touch SPELLCRAFT_CAST.
+// accumulate independently: 3809 only touches SPELLS_CAST and spellcraft hand-plays
+// only touch SPELLCRAFT_CAST.
 func TestSpellCountersAreIndependent(t *testing.T) {
 	m, p := setupRecruitPhase(t)
 
-	// Two shop-phase spells via NUM_SPELLS_PLAYED_THIS_GAME (direct visitor).
-	tavernSpellPlayed(p, 700)
-	tavernSpellPlayed(p, 701)
+	// Two spells via tag 3809 (the SPELLS_CAST source of truth).
+	spellsCast3809(p, 20, 1)
+	spellsCast3809(p, 20, 2)
 
 	// Three spellcraft plays via direct visitor (simulates SPELLCRAFT_HINT + ZONE=PLAY).
 	combatTavernSpell(p, 800)
@@ -610,5 +619,147 @@ func TestSpellCountersAreIndependent(t *testing.T) {
 	craft := findAbilityCounter(m, CatSpellcraftCast)
 	if craft == nil || craft.Value != 3 {
 		t.Errorf("expected SPELLCRAFT_CAST=3, got %v", craft)
+	}
+}
+
+// ── Regression: combat-triggered spell undercount (repro game) ────────────────
+
+// TestSpellsCastIncludesCombatCasts reproduces the original undercount bug and locks
+// in the fix. In the repro duos game (local=Moch#1358), spells were played in recruit
+// (NUM_SPELLS_PLAYED_THIS_GAME and tag 3809 climbing in lockstep), then the local
+// player's Nagas cast spells DURING COMBAT: tag 3809 kept climbing while
+// NUM_SPELLS_PLAYED_THIS_GAME stayed frozen.
+//
+// Before the fix (SPELLS_CAST driven by NUM_SPELLS_PLAYED_THIS_GAME) the counter froze
+// at the hand-only total and undercounted. After the fix (SPELLS_CAST driven by tag
+// 3809) it reflects the all-phases total including combat casts.
+//
+// This uses a scaled-down version of the repro progression (recruit 3→5, combat 5→8;
+// the real game was 124→130 recruit, 130→136 combat ending at the true total).
+func TestSpellsCastIncludesCombatCasts(t *testing.T) {
+	m, p := setupRecruitPhase(t)
+
+	localPlayerEntityID := 20
+
+	// Recruit phase: hand-played spells. NUM and 3809 move in lockstep.
+	for i := 1; i <= 5; i++ {
+		numSpellsPlayedTagChange(p, localPlayerEntityID, i)
+		tag3809Change(p, localPlayerEntityID, i)
+	}
+
+	ac := findAbilityCounter(m, CatSpellsCast)
+	if ac == nil || ac.Value != 5 {
+		t.Fatalf("after recruit phase expected SPELLS_CAST=5, got %v", ac)
+	}
+
+	// Enter combat. NUM_SPELLS_PLAYED_THIS_GAME freezes (the engine stops emitting it),
+	// but the local Nagas cast spells so tag 3809 keeps climbing 5→8.
+	enterCombat(p)
+	tag3809Change(p, localPlayerEntityID, 6)
+	tag3809Change(p, localPlayerEntityID, 7)
+	tag3809Change(p, localPlayerEntityID, 8)
+
+	ac = findAbilityCounter(m, CatSpellsCast)
+	if ac == nil {
+		t.Fatal("expected SPELLS_CAST after combat casts, got nil")
+	}
+	if ac.Value != 8 {
+		t.Errorf("SPELLS_CAST must include combat-triggered casts: expected 8 (5 hand + 3 combat), got %d", ac.Value)
+	}
+	if ac.Display != "8" {
+		t.Errorf("expected display=%q, got %q", "8", ac.Display)
+	}
+}
+
+// TestSpellsCastCombatIgnoresNonLocalSide verifies duos-safety: during combat, tag 3809
+// on a NON-local player entity (partner or opponent) must not affect the local
+// SPELLS_CAST counter. In the repro log the partner "Phoenix" / opponent "Musicisbreth"
+// entities carry their own 3809; only Moch#1358's must count.
+func TestSpellsCastCombatIgnoresNonLocalSide(t *testing.T) {
+	m, p := setupRecruitPhase(t)
+
+	tag3809Change(p, 20, 5) // local → SPELLS_CAST=5
+	enterCombat(p)
+
+	// Non-local player entities tick their own 3809 during combat. Must be ignored.
+	tag3809Change(p, 99, 40)  // opponent-style entity, not registered as local
+	tag3809Change(p, 21, 30)  // the dummy/bot player entity (PLAYER_ID 15, not local)
+
+	ac := findAbilityCounter(m, CatSpellsCast)
+	if ac == nil || ac.Value != 5 {
+		t.Errorf("non-local 3809 must not change local SPELLS_CAST, expected 5, got %v", ac)
+	}
+}
+
+// TestSpellsCastSetWithoutNagaMinion locks the regression-critical invariant that
+// CatSpellsCast is set on EVERY local 3809 tick regardless of board contents — it is NOT
+// gated behind HasNagaSynergyMinion (only CatNagaSpells is). With no Naga synergy minion
+// on the board, Spells Played must still reflect the 3809 value while CatNagaSpells stays
+// absent. (Mirrors the real-log case in TestGameLog2026_03_07_SpellsPlayedFinal.)
+func TestSpellsCastSetWithoutNagaMinion(t *testing.T) {
+	m, p := setupRecruitPhase(t)
+
+	// Board is empty — no Thaumaturgist / Arcane Cannoneer / Showy Cyclist / Groundbreaker.
+	tag3809Change(p, 20, 7)
+
+	sc := findAbilityCounter(m, CatSpellsCast)
+	if sc == nil || sc.Value != 7 {
+		t.Errorf("SPELLS_CAST must be set to 7 with no Naga minion on board, got %v", sc)
+	}
+	if naga := findAbilityCounter(m, CatNagaSpells); naga != nil {
+		t.Errorf("CatNagaSpells must be absent with no synergy minion, got value=%d", naga.Value)
+	}
+}
+
+// TestSpellsCastReconnectIdempotent locks the adversary's main latent-risk callout:
+// absolute assignment makes CatSpellsCast immune to double-counting across a mid-game
+// reconnect. We drive a real reconnect (CREATE_GAME mid-game → STATE=RUNNING/TURN>1),
+// which restores the stashed CatSpellsCast=N, then re-emit 3809=N and 3809=N+k. With
+// absolute assignment the counter lands at N then N+k — never 2N (which the old
+// NUM_SPELLS_PLAYED_THIS_GAME delta path could produce).
+func TestSpellsCastReconnectIdempotent(t *testing.T) {
+	m, p := setupRecruitPhase(t)
+
+	// Pre-reconnect: local player casts spells; 3809 reaches 40.
+	tag3809Change(p, 20, 40)
+	if ac := findAbilityCounter(m, CatSpellsCast); ac == nil || ac.Value != 40 {
+		t.Fatalf("precondition: expected SPELLS_CAST=40 before reconnect, got %v", ac)
+	}
+	m.SetTurn(8) // mid-game turn, so reconnect is detected (TURN>1)
+
+	// Mid-game reconnect: a fresh CREATE_GAME arrives, then GameEntity STATE=RUNNING TURN>1.
+	// The processor stashes the live state (including CatSpellsCast=40) and restores it.
+	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+	// Re-register the local player WITHOUT another EventGameStart (a second GameStart would
+	// re-stash and clobber the captured state). The real log re-emits PlayerDef/name here.
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventPlayerDef,
+		EntityID: 20,
+		PlayerID: 7,
+		Tags:     map[string]string{"hi": "144115193835963207", "lo": "30722021", "PLAYER_ID": "7"},
+	})
+	p.Handle(parser.GameEvent{Type: parser.EventPlayerName, PlayerID: 7, EntityName: "Moch#1358"})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventGameEntityTags,
+		Tags: map[string]string{"STATE": "RUNNING", "TURN": "16"},
+	})
+	if !p.isReconnect {
+		t.Fatal("expected reconnect to be detected")
+	}
+
+	// After restore, SPELLS_CAST must still be 40 (not reset, not doubled).
+	if ac := findAbilityCounter(m, CatSpellsCast); ac == nil || ac.Value != 40 {
+		t.Fatalf("after reconnect restore expected SPELLS_CAST=40, got %v", ac)
+	}
+
+	// The engine re-emits 3809 at the same absolute value (40), then continues (43).
+	// Absolute assignment is idempotent: 40 stays 40, then climbs to 43 — never 80.
+	tag3809Change(p, 20, 40)
+	if ac := findAbilityCounter(m, CatSpellsCast); ac == nil || ac.Value != 40 {
+		t.Errorf("re-emitted 3809=40 after reconnect must keep SPELLS_CAST=40 (no double-count), got %v", ac)
+	}
+	tag3809Change(p, 20, 43)
+	if ac := findAbilityCounter(m, CatSpellsCast); ac == nil || ac.Value != 43 {
+		t.Errorf("post-reconnect 3809=43 must set SPELLS_CAST=43, got %v", ac)
 	}
 }
