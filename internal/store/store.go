@@ -25,6 +25,11 @@ const (
 // which would otherwise write records under bare prefix keys.
 var ErrEmptyGameID = errors.New("store: empty GameID")
 
+// ErrGameNotFound is returned (wrapped) by GetGame when no record exists for
+// the requested GameID. Callers must use errors.Is to distinguish a missing
+// game from a real database failure (e.g. corruption, closed DB).
+var ErrGameNotFound = errors.New("store: game not found")
+
 // Store wraps a BadgerDB instance.
 type Store struct {
 	db *badger.DB
@@ -200,6 +205,19 @@ func (s *Store) ListGames(limit, offset int) ([]GameMeta, error) {
 	return all, nil
 }
 
+// FilterCompleteGames returns only games with a recorded placement
+// (placement > 0), excluding stale/incomplete games. Shared by the REST and
+// gRPC list handlers so both APIs return the same game set.
+func FilterCompleteGames(metas []GameMeta) []GameMeta {
+	out := make([]GameMeta, 0, len(metas))
+	for _, m := range metas {
+		if m.Placement > 0 {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 // HasGame reports whether a game with the given ID already exists in the
 // store. The error is non-nil only for real database failures (not for a
 // missing key); callers may treat (false, non-nil) as "unknown" — duplicate
@@ -265,8 +283,8 @@ func (s *Store) GetGame(id string) (*gamestate.BGGameState, error) {
 	var gs gamestate.BGGameState
 	err := s.db.View(func(txn *badger.Txn) error {
 		item, err := txn.Get([]byte(prefixGameState + id))
-		if err == badger.ErrKeyNotFound {
-			return fmt.Errorf("game %q not found", id)
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return fmt.Errorf("game %q: %w", id, ErrGameNotFound)
 		}
 		if err != nil {
 			return err

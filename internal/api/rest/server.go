@@ -4,6 +4,7 @@ package rest
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -211,15 +212,10 @@ func (s *Server) handleGetTurnSnapshots(w http.ResponseWriter, r *http.Request) 
 	s.writeJSON(w, snapshots)
 }
 
-// filterCompleteGames excludes stale/incomplete games (placement=0) from results.
+// filterCompleteGames excludes stale/incomplete games (placement=0) from
+// results. Delegates to the shared store helper so REST and gRPC stay in sync.
 func filterCompleteGames(metas []store.GameMeta) []store.GameMeta {
-	out := make([]store.GameMeta, 0, len(metas))
-	for _, m := range metas {
-		if m.Placement > 0 {
-			out = append(out, m)
-		}
-	}
-	return out
+	return store.FilterCompleteGames(metas)
 }
 
 // filterMetasByMode filters game metas by mode: "solo", "duos", or "all"/empty.
@@ -258,7 +254,11 @@ func (s *Server) handleGetGame(w http.ResponseWriter, r *http.Request) {
 	}
 	gs, err := s.grpc.GetStore().GetGame(id)
 	if err != nil {
-		http.Error(w, "not found", http.StatusNotFound)
+		if errors.Is(err, store.ErrGameNotFound) {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	s.writeJSON(w, gameStateToJSON(*gs))
@@ -272,7 +272,11 @@ func (s *Server) handleGetModifications(w http.ResponseWriter, r *http.Request) 
 	}
 	gs, err := s.grpc.GetStore().GetGame(id)
 	if err != nil {
-		http.Error(w, "not found", http.StatusNotFound)
+		if errors.Is(err, store.ErrGameNotFound) {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	type modsResponse struct {

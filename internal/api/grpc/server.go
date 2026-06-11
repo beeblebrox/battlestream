@@ -3,6 +3,7 @@ package grpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -83,7 +84,10 @@ func (s *Server) GetGame(_ context.Context, req *bspb.GetGameRequest) (*bspb.Gam
 	}
 	gs, err := s.st.GetGame(req.GameId)
 	if err != nil {
-		return nil, status.Errorf(codes.NotFound, "game %q not found: %v", req.GameId, err)
+		if errors.Is(err, store.ErrGameNotFound) {
+			return nil, status.Errorf(codes.NotFound, "game %q not found", req.GameId)
+		}
+		return nil, status.Errorf(codes.Internal, "getting game %q: %v", req.GameId, err)
 	}
 	return gameStateToProto(*gs), nil
 }
@@ -136,14 +140,29 @@ func (s *Server) ListGames(_ context.Context, req *bspb.ListGamesRequest) (*bspb
 		offset = 0
 	}
 
-	metas, err := s.st.ListGames(limit, offset)
+	// Fetch all metas and paginate here (like the REST handler) so Total is
+	// the count of all complete games, not the page size, and so stale games
+	// (placement==0) are excluded consistently across both APIs.
+	all, err := s.st.ListGames(0, 0)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "listing games: %v", err)
 	}
+	metas := store.FilterCompleteGames(all)
 
 	resp := &bspb.ListGamesResponse{
 		Total: int32(len(metas)),
 	}
+
+	// Apply pagination.
+	if offset > len(metas) {
+		metas = nil
+	} else {
+		metas = metas[offset:]
+		if limit > 0 && limit < len(metas) {
+			metas = metas[:limit]
+		}
+	}
+
 	for _, m := range metas {
 		resp.Games = append(resp.Games, &bspb.GameMeta{
 			GameId:        m.GameID,
