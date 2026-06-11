@@ -1,6 +1,6 @@
 # File Output Schema
 
-JSON files are written atomically to `~/.battlestream/stats/` (configurable via `output.path`).
+JSON files are written atomically to `~/.battlestream/profiles/<profile>/stats/` (configurable via the profile's `output.path`; the `~/.battlestream` base directory can be overridden with the `BS_CONFIG_DIR` environment variable).
 
 Writes use a `.tmp` then `rename` pattern to prevent partial reads.
 
@@ -13,6 +13,8 @@ stats/
     player_stats.json
     board_state.json
     modifications.json
+    buff_sources.json
+    partner_stats.json   (Duos games only)
   aggregate/
     summary.json
   history/
@@ -116,6 +118,45 @@ Updated every `output.write_interval_ms` milliseconds.
 
 ---
 
+## `current/buff_sources.json`
+
+Per-category cumulative buff totals for the local player (Blood Gems, Tavern Spells, Nomi, etc.).
+
+```json
+{
+  "buff_sources": [
+    {"category": "BLOODGEM", "attack": 12, "health": 8},
+    {"category": "TAVERN_SPELL", "attack": 4, "health": 4}
+  ],
+  "updated_at": "2026-03-04T20:00:00Z"
+}
+```
+
+`category` values and their display names are defined in `internal/gamestate/categories.go`. `attack` and `health` are the current effective buff totals for that category.
+
+---
+
+## `current/partner_stats.json`
+
+Written only during Duos games, when a partner has been identified. Same shape as `player_stats.json` (without `placement`).
+
+```json
+{
+  "name": "Partner#1234",
+  "hero_card_id": "TB_BaconShop_HERO_42",
+  "health": 28,
+  "armor": 5,
+  "spell_power": 0,
+  "triple_count": 1,
+  "win_streak": 0,
+  "updated_at": "2026-03-04T20:00:00Z"
+}
+```
+
+Note: health/armor are a shared team pool in Duos.
+
+---
+
 ## `aggregate/summary.json`
 
 ```json
@@ -145,7 +186,7 @@ Point an OBS browser source at a local HTTP server that serves the `stats/` dire
 Example using Python's built-in HTTP server:
 
 ```sh
-cd ~/.battlestream/stats
+cd ~/.battlestream/profiles/<profile>/stats
 python3 -m http.server 8090
 ```
 

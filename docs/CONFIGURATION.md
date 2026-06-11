@@ -6,6 +6,10 @@ Config file is loaded from (in order):
 3. `./config.yaml`
 4. `/etc/battlestream/config.yaml`
 
+The `~/.battlestream` base directory (config search path and default profile
+data/stats locations) can be overridden with the `BS_CONFIG_DIR` environment
+variable. This is used by `scripts/safe-test.sh` and other isolation scenarios.
+
 ## Profiles
 
 battlestream supports multiple named profiles, one per Hearthstone installation.
@@ -84,6 +88,21 @@ logging:
 
   # Log to this file in addition to stderr. Empty = stderr only.
   file: ""
+
+# TUI layout preferences. Written automatically by the TUI when you drag
+# panel dividers — you normally don't edit these by hand. All values are
+# fractions (0.0–1.0); omitted/zero values use built-in defaults.
+tui:
+  # Position of the vertical divider between the left and right columns.
+  vertical_split: 0.5
+
+  # Per-column horizontal divider positions.
+  left_hsplit: 0.5
+  right_hsplit: 0.5
+
+  # Legacy single horizontal divider; used as a fallback for both columns
+  # when the per-column keys above are absent.
+  horizontal_split: 0.5
 ```
 
 ## Backward Compatibility

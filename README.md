@@ -169,7 +169,7 @@ Mouse wheel scrolls the board and buff panels. Drag dividers to resize columns.
 
 ## File Output
 
-JSON files are written to `~/.battlestream/stats/` by default. See [docs/FILE_OUTPUT_SCHEMA.md](docs/FILE_OUTPUT_SCHEMA.md) for schema documentation.
+JSON files are written to `~/.battlestream/profiles/<profile>/stats/` by default. See [docs/FILE_OUTPUT_SCHEMA.md](docs/FILE_OUTPUT_SCHEMA.md) for schema documentation.
 
 ## Platform Setup
 
