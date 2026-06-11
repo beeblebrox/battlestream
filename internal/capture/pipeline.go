@@ -11,6 +11,14 @@ import (
 	"battlestream.fixates.io/internal/watcher"
 )
 
+// catchupQuiescence is the fallback window for declaring the startup backlog
+// drained when the log's last line predates startup and nothing new is being
+// written. The tail reads pre-existing content at disk speed, so if the feed
+// goroutine is starved of lines for this long, the tail can only be parked at
+// EOF waiting for new writes — i.e. we have caught up. (Channel backpressure
+// cannot starve the receiver: a full channel hands a line over immediately.)
+const catchupQuiescence = 2 * time.Second
+
 // logEventSource wraps watcher + parser into an EventSource.
 type logEventSource struct {
 	watcher *watcher.Watcher
@@ -26,7 +34,10 @@ func NewEventSource(ctx context.Context, powerLogDir string) (EventSource, error
 
 	ctx, cancel := context.WithCancel(ctx)
 	w, err := watcher.New(ctx, watcher.Config{
-		LogDir:        powerLogDir,
+		LogDir: powerLogDir,
+		// Power.log only: the parser ignores everything else anyway, and the
+		// catchup barrier below must not be tripped by unrelated files.
+		Files:         []string{"Power.log"},
 		ReadFromStart: true,
 	})
 	if err != nil {
@@ -42,11 +53,57 @@ func NewEventSource(ctx context.Context, powerLogDir string) (EventSource, error
 	}
 
 	// Feed watcher lines to parser in background.
+	//
+	// Catchup barrier: ReadFromStart replays the whole Power.log, which may
+	// contain games that finished long ago. The capture loop must not start
+	// a session until that backlog is drained, or it would screenshot the
+	// current desktop into a historical game (audit finding H6). We emit a
+	// synthetic EventCatchupComplete once the backlog ends, detected by
+	// whichever comes first:
+	//
+	//  1. The first line the watcher marks as live (Line.Backlog=false,
+	//     a mechanical byte-offset boundary recorded at tail start). This is
+	//     the prompt path when Hearthstone is actively writing — e.g. a game
+	//     is in progress at startup, which we still want to capture.
+	//  2. catchupQuiescence elapsing with no lines at all — the quiet-tail
+	//     path when the log ends with old content and nothing new arrives.
+	//
+	// Both signals are injected by this goroutine, the sole producer on the
+	// events channel, and parser.Feed emits synchronously — so the marker is
+	// strictly ordered after every event derived from backlog lines. The
+	// loop flips its barrier only when the consumer dequeues the marker,
+	// i.e. after all backlog events have been applied to the tracker.
 	go func() {
-		for line := range w.Lines {
-			p.Feed(line.Text)
+		defer p.Flush()
+		caughtUp := false
+		markCaughtUp := func() {
+			caughtUp = true
+			events <- parser.GameEvent{Type: EventCatchupComplete}
 		}
-		p.Flush()
+		for {
+			if caughtUp {
+				line, ok := <-w.Lines
+				if !ok {
+					return
+				}
+				p.Feed(line.Text)
+				continue
+			}
+			select {
+			case line, ok := <-w.Lines:
+				if !ok {
+					return
+				}
+				if !line.Backlog {
+					// Marker first: this line is live, its events belong
+					// after the barrier opens.
+					markCaughtUp()
+				}
+				p.Feed(line.Text)
+			case <-time.After(catchupQuiescence):
+				markCaughtUp()
+			}
+		}
 	}()
 
 	return src, nil

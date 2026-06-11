@@ -34,6 +34,12 @@ type Watcher struct {
 type Line struct {
 	File string
 	Text string
+	// Backlog is true while the line comes from content that already existed
+	// in the file when the tail started (ReadFromStart replay of history).
+	// The first line with Backlog=false marks the live tail. Consumers that
+	// must distinguish "replaying old games" from "live play" (e.g. the
+	// bscapture catchup barrier) rely on this flag.
+	Backlog bool
 }
 
 // Config configures which log files to watch.
@@ -116,6 +122,19 @@ func (w *Watcher) startTails(ctx context.Context, logDir string, cfg Config, fro
 		}
 		// loc=nil means start from the beginning of the file.
 
+		// Record the size of any pre-existing content. Each emitted tail.Line
+		// carries the byte offset reached after reading it (SeekInfo.Offset),
+		// so lines at or below this size are backlog (replayed history) and
+		// lines beyond it are live writes. This is a purely mechanical
+		// boundary — unlike event timestamps it cannot be fooled by date
+		// rollover or a log written at the same wall-clock time yesterday.
+		var backlogSize int64
+		if fromStart {
+			if fi, err := os.Stat(path); err == nil {
+				backlogSize = fi.Size()
+			}
+		}
+
 		usePoll := runtime.GOOS == "darwin" // kqueue unreliable for appended writes on macOS
 		slog.Info("started tailing file", "file", name, "path", path, "poll", usePoll, "fromStart", fromStart)
 
@@ -132,7 +151,7 @@ func (w *Watcher) startTails(ctx context.Context, logDir string, cfg Config, fro
 		}
 		w.tails = append(w.tails, t)
 
-		go func(t *tail.Tail, fname string) {
+		go func(t *tail.Tail, fname string, backlogSize int64) {
 			firstLine := true
 			for {
 				select {
@@ -148,8 +167,12 @@ func (w *Watcher) startTails(ctx context.Context, logDir string, cfg Config, fro
 						slog.Info("first line received from tail", "file", fname)
 						firstLine = false
 					}
+					// SeekInfo.Offset is the position after the line was
+					// consumed; the last backlog line lands exactly on
+					// backlogSize, anything past it is live.
+					backlog := line.SeekInfo.Offset <= backlogSize
 					select {
-					case w.lines <- Line{File: fname, Text: line.Text}:
+					case w.lines <- Line{File: fname, Text: line.Text, Backlog: backlog}:
 					case <-ctx.Done():
 						return
 					}
@@ -157,7 +180,7 @@ func (w *Watcher) startTails(ctx context.Context, logDir string, cfg Config, fro
 					return
 				}
 			}
-		}(t, name)
+		}(t, name, backlogSize)
 	}
 
 	return nil
@@ -283,6 +306,14 @@ func (w *Watcher) startPlayerLogTail(ctx context.Context, path string, fromStart
 		loc = &tail.SeekInfo{Offset: 0, Whence: io.SeekEnd}
 	}
 
+	// Pre-existing content boundary — see startTails for rationale.
+	var backlogSize int64
+	if fromStart {
+		if fi, err := os.Stat(path); err == nil {
+			backlogSize = fi.Size()
+		}
+	}
+
 	slog.Info("using Player.log as primary source (macOS)", "path", path, "fromStart", fromStart)
 
 	t, err := tail.TailFile(path, tail.Config{
@@ -322,8 +353,9 @@ func (w *Watcher) startPlayerLogTail(ctx context.Context, path string, fromStart
 					slog.Info("first Power line received from Player.log")
 					firstLine = false
 				}
+				backlog := line.SeekInfo.Offset <= backlogSize
 				select {
-				case w.lines <- Line{File: "Power.log", Text: text}:
+				case w.lines <- Line{File: "Power.log", Text: text, Backlog: backlog}:
 				case <-ctx.Done():
 					return
 				}
