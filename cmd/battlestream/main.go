@@ -234,7 +234,7 @@ func startDaemon(ctx context.Context, cfg *config.Config, profile *config.Profil
 	}
 	// Set parser reference date from the session directory so timestamps
 	// are correct when reading from the start of historical log files.
-	if refDate := sessionDirDate(filepath.Join(w.ResolvedDir, "Power.log")); !refDate.IsZero() {
+	if refDate := sessionDirDate(filepath.Join(w.ResolvedDir(), "Power.log")); !refDate.IsZero() {
 		p.SetReferenceDate(refDate)
 		slog.Info("parser reference date set from session dir", "date", refDate.Format("2006-01-02"))
 	}
