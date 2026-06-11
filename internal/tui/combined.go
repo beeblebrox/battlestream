@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -142,6 +143,10 @@ func (c *CombinedModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case replayInitDoneMsg:
 		c.replay = msg.model
 		c.replayInitialized = true
+		// The combined TUI reserves row 0 for the tab bar; tell the replay
+		// model so its mouse hit-testing accounts for the shifted Y origin
+		// (the live model does the same via parentYOffset in NewCombined).
+		c.replay.SetParentYOffset(1)
 		// Start the replay model's async loading (spinner, progress, file parsing).
 		var cmds []tea.Cmd
 		cmds = append(cmds, c.replay.Init())
@@ -152,9 +157,13 @@ func (c *CombinedModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return c, tea.Batch(cmds...)
 	}
 
-	// Always forward to live model to keep event chain alive.
+	// Forward to the live model. When it's hidden (replay mode), only its
+	// connection-lifecycle, data, and tick messages pass through so its
+	// event/tick chains stay alive — never input (KeyMsg/MouseMsg), which
+	// would leak into the invisible live UI ('o' opening a browser, 'd'/'l'
+	// toggling state, mouse drags moving dividers and saving config).
 	var cmds []tea.Cmd
-	if c.live != nil {
+	if c.live != nil && (c.mode == modeLive || isLiveBackgroundMsg(msg)) {
 		_, cmd := c.live.Update(msg)
 		cmds = append(cmds, cmd)
 	}
@@ -164,6 +173,20 @@ func (c *CombinedModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	}
 	return c, tea.Batch(cmds...)
+}
+
+// isLiveBackgroundMsg reports whether msg is one the live model must keep
+// processing even while hidden behind the replay view: connection lifecycle,
+// state/data updates, and the self-re-arming tick chains. (WindowSizeMsg is
+// forwarded separately in Update.) Input messages are deliberately excluded.
+func isLiveBackgroundMsg(msg tea.Msg) bool {
+	switch msg.(type) {
+	case connectedMsg, disconnectedMsg, reconnectMsg,
+		gameUpdateMsg, aggUpdateMsg, eventMsg,
+		aggTickMsg, gameTickMsg, spinner.TickMsg:
+		return true
+	}
+	return false
 }
 
 func (c *CombinedModel) switchMode() (tea.Model, tea.Cmd) {
@@ -176,15 +199,15 @@ func (c *CombinedModel) switchMode() (tea.Model, tea.Cmd) {
 		return c, nil
 	}
 	c.mode = modeLive
-	// Re-establish live event chain and refresh state.
-	var cmds []tea.Cmd
+	// Refresh state on return to live. Do NOT start another event reader
+	// here: the live model's reader chain keeps itself alive (eventMsg
+	// re-arms waitForEventCmd, and background messages are forwarded even
+	// in replay mode), so arming one per Tab toggle would stack N+1
+	// concurrent readers, each triggering a full-state RPC per event.
 	if c.live != nil && c.live.client != nil {
-		cmds = append(cmds, fetchGameCmd(c.live.ctx, c.live.client))
-		if c.live.eventCh != nil {
-			cmds = append(cmds, waitForEventCmd(c.live.eventCh))
-		}
+		return c, fetchGameCmd(c.live.ctx, c.live.client, c.live.generation)
 	}
-	return c, tea.Batch(cmds...)
+	return c, nil
 }
 
 func (c *CombinedModel) initReplayCmd() tea.Cmd {
