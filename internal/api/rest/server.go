@@ -105,18 +105,29 @@ type Server struct {
 	apiKey string
 
 	hub *wsHub
+
+	mu      sync.Mutex // guards httpSrv and lis
+	httpSrv *http.Server
+	lis     net.Listener
+
+	shutdownCh   chan struct{} // closed when Shutdown begins; wakes SSE handlers
+	shutdownOnce sync.Once
 }
 
 // New creates a REST Server.
 func New(grpc *grpcserver.Server, apiKey string) *Server {
 	return &Server{
-		grpc:   grpc,
-		apiKey: apiKey,
-		hub:    newHub(),
+		grpc:       grpc,
+		apiKey:     apiKey,
+		hub:        newHub(),
+		shutdownCh: make(chan struct{}),
 	}
 }
 
-// Serve starts the HTTP server on addr. Blocks until ctx is cancelled.
+// Serve starts the HTTP server on addr and blocks until the server stops
+// accepting connections. Shutdown is initiated by calling Shutdown; ctx only
+// governs the WS hub and event-subscription goroutines. Callers must call
+// Shutdown to terminate the server and drain in-flight requests.
 func (s *Server) Serve(ctx context.Context, addr string) error {
 	mux := http.NewServeMux()
 
@@ -163,11 +174,21 @@ func (s *Server) Serve(ctx context.Context, addr string) error {
 		bindHost = h
 	}
 
+	lis, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("rest listen on %s: %w", addr, err)
+	}
+
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           hostCheckHandler(bindHost, mux),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+
+	s.mu.Lock()
+	s.httpSrv = srv
+	s.lis = lis
+	s.mu.Unlock()
 
 	// Start WS hub
 	go s.hub.run(ctx)
@@ -200,17 +221,44 @@ func (s *Server) Serve(ctx context.Context, addr string) error {
 
 	slog.Info("REST server listening", "addr", addr)
 
-	go func() {
-		<-ctx.Done()
-		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := srv.Shutdown(shutCtx); err != nil {
-			slog.Error("REST server shutdown", "err", err)
-		}
-	}()
-
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	if err := srv.Serve(lis); err != nil && err != http.ErrServerClosed {
 		return fmt.Errorf("rest serve: %w", err)
+	}
+	return nil
+}
+
+// BoundAddr returns the address the server is actually listening on
+// (useful when Serve was given a ":0" port), or "" before Serve has bound.
+func (s *Server) BoundAddr() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.lis == nil {
+		return ""
+	}
+	return s.lis.Addr().String()
+}
+
+// Shutdown stops accepting new connections and blocks until in-flight
+// requests have drained or ctx expires; on expiry, remaining connections are
+// forcibly closed. Long-lived SSE handlers are signalled to finish so the
+// drain can complete promptly. Safe to call when Serve was never started
+// (returns nil).
+func (s *Server) Shutdown(ctx context.Context) error {
+	s.mu.Lock()
+	srv := s.httpSrv
+	s.mu.Unlock()
+	if srv == nil {
+		return nil
+	}
+
+	// Wake SSE handlers; otherwise srv.Shutdown waits the full grace period
+	// for streams that only end on client disconnect.
+	s.shutdownOnce.Do(func() { close(s.shutdownCh) })
+
+	if err := srv.Shutdown(ctx); err != nil {
+		// Grace period expired — hard-close whatever is left.
+		_ = srv.Close()
+		return fmt.Errorf("rest shutdown: %w", err)
 	}
 	return nil
 }
@@ -476,6 +524,8 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			flusher.Flush()
+		case <-s.shutdownCh:
+			return
 		case <-r.Context().Done():
 			return
 		}

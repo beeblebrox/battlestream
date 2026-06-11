@@ -141,13 +141,47 @@ type daemonServices struct {
 	store          *store.Store
 	watcher        *watcher.Watcher
 	machine        *gamestate.Machine
+	grpcSrv        *grpcserver.Server
+	restSrv        *rest.Server
 	done           chan struct{}
 	logConfigFixed bool // true if log.config was patched (HS restart needed)
 }
 
+// shutdownGrace bounds each server's drain phase during shutdown.
+const shutdownGrace = 5 * time.Second
+
+// shutdown tears the daemon down in dependency order so that no server can
+// touch the store after it is closed. The caller must cancel the daemon
+// context first (the event-processing goroutine exits on ctx.Done).
+//
+// Order:
+//  1. Stop the watcher (no new log lines).
+//  2. Drain the REST server (stop accepting, finish in-flight requests,
+//     bounded by shutdownGrace, then hard-close).
+//  3. Stop the gRPC server (terminate event streams, GracefulStop bounded by
+//     shutdownGrace, then hard Stop).
+//  4. Wait for the event-processing goroutine (last store writer).
+//  5. Close the store — nothing can reach it anymore.
+func (svc *daemonServices) shutdown() {
+	svc.watcher.Stop()
+
+	restCtx, cancelRest := context.WithTimeout(context.Background(), shutdownGrace)
+	if err := svc.restSrv.Shutdown(restCtx); err != nil {
+		slog.Error("REST server shutdown", "err", err)
+	}
+	cancelRest()
+
+	grpcCtx, cancelGRPC := context.WithTimeout(context.Background(), shutdownGrace)
+	svc.grpcSrv.Stop(grpcCtx)
+	cancelGRPC()
+
+	<-svc.done
+	svc.store.Close()
+}
+
 // startDaemon starts all daemon services (watcher, parser, state machine, gRPC, REST)
-// and returns immediately. The caller must cancel ctx to initiate shutdown, then
-// wait on svc.done for goroutines to finish. Caller owns svc.store.Close() and svc.watcher.Stop().
+// and returns immediately. The caller must cancel ctx to initiate shutdown,
+// then call svc.shutdown() to drain the servers and close the store in order.
 func startDaemon(ctx context.Context, cfg *config.Config, profile *config.ProfileConfig) (*daemonServices, error) {
 	// --- Resolve log path and ensure log.config is correct ---
 	logPath := profile.Hearthstone.LogPath
@@ -377,6 +411,8 @@ func startDaemon(ctx context.Context, cfg *config.Config, profile *config.Profil
 		store:          st,
 		watcher:        w,
 		machine:        machine,
+		grpcSrv:        grpcSrv,
+		restSrv:        restSrv,
 		done:           done,
 		logConfigFixed: logConfigFixed,
 	}, nil
@@ -421,8 +457,6 @@ func cmdDaemon() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer svc.store.Close()
-			defer svc.watcher.Stop()
 
 			if svc.logConfigFixed {
 				fmt.Println()
@@ -431,12 +465,22 @@ func cmdDaemon() *cobra.Command {
 				fmt.Println("│  You must restart Hearthstone for logging to work.      │")
 				fmt.Println("│  Press Enter to continue...                             │")
 				fmt.Println("└─────────────────────────────────────────────────────────┘")
-				_, _ = fmt.Scanln()
+				// Read Enter off the main goroutine so a SIGINT/SIGTERM
+				// still drives shutdown while the prompt is up.
+				enterCh := make(chan struct{})
+				go func() {
+					_, _ = fmt.Scanln()
+					close(enterCh)
+				}()
+				select {
+				case <-enterCh:
+				case <-ctx.Done():
+				}
 			}
 
 			<-ctx.Done()
 			slog.Info("shutting down")
-			<-svc.done
+			svc.shutdown()
 			return nil
 		},
 	}
@@ -479,8 +523,6 @@ func cmdRun() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer svc.store.Close()
-			defer svc.watcher.Stop()
 
 			// Resolve log files for replay mode.
 			// On macOS, use Player.log exclusively to avoid duplicates
@@ -514,7 +556,7 @@ func cmdRun() *cobra.Command {
 			tuiErr := combined.Run()
 
 			cancel()
-			<-svc.done
+			svc.shutdown()
 			return tuiErr
 		},
 	}
