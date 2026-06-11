@@ -59,6 +59,23 @@ func TestIsNewer(t *testing.T) {
 		{"v0.14.0-beta", "v0.13.0-beta", true},
 		{"v0.14.0", "dev", false},
 		{"v0.14.0", "", false},
+		// Multi-digit components must compare numerically, not lexically.
+		{"0.10.0", "0.9.0", true},
+		{"0.9.0", "0.10.0", false},
+		{"1.2.0", "1.10.0", false},
+		{"1.10.0", "1.2.0", true},
+		// Pre-release versions are LOWER than the corresponding release.
+		{"0.6.1-beta", "0.6.1", false},
+		{"0.6.1", "0.6.1-beta", true},
+		// Equal versions are not newer.
+		{"0.6.1", "0.6.1", false},
+		{"0.6.1-beta", "0.6.1-beta", false},
+		// v-prefixed inputs (mixed and matched).
+		{"v0.10.0", "0.9.0", true},
+		{"0.9.0", "v0.10.0", false},
+		{"v0.6.1-beta", "v0.6.1", false},
+		{"v0.6.1", "v0.6.1-beta", true},
+		{"v0.6.1", "v0.6.1", false},
 	}
 	for _, tt := range tests {
 		if got := isNewer(tt.latest, tt.current); got != tt.want {
