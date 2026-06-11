@@ -3,12 +3,16 @@ package rest
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,8 +24,78 @@ import (
 	"battlestream.fixates.io/internal/store"
 )
 
+// Browser-facing requests (WebSocket upgrades, SSE) are only accepted from
+// loopback origins; requests without an Origin header (curl, native clients)
+// are always allowed. This prevents arbitrary websites from reading the
+// event feeds of a tracker bound to localhost.
 var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true }, // allow all origins (localhost usage)
+	CheckOrigin: isAllowedOrigin,
+}
+
+// isLoopbackHostname reports whether host (no port) is a localhost form:
+// "localhost" or a loopback IP literal (127.0.0.0/8, ::1).
+func isLoopbackHostname(host string) bool {
+	host = strings.Trim(host, "[]")
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
+// hostWithoutPort strips an optional :port from a Host header value.
+func hostWithoutPort(hostport string) string {
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		return h
+	}
+	return strings.Trim(hostport, "[]")
+}
+
+// isAllowedOrigin allows requests with no Origin header (non-browser
+// clients) and browser requests originating from a loopback host (any
+// port, any scheme). Everything else is rejected.
+func isAllowedOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	return isLoopbackHostname(u.Hostname())
+}
+
+// isAllowedRequestHost reports whether the request Host header (port already
+// stripped) is acceptable: localhost forms are always allowed, plus the host
+// the server was configured to bind. A wildcard bind (empty host, 0.0.0.0,
+// or ::) means the operator explicitly exposed the server beyond loopback,
+// so any Host is accepted in that case.
+func isAllowedRequestHost(host, bindHost string) bool {
+	if isLoopbackHostname(host) {
+		return true
+	}
+	switch bindHost {
+	case "", "0.0.0.0", "::":
+		return true
+	}
+	return strings.EqualFold(host, bindHost)
+}
+
+// hostCheckHandler rejects requests whose Host header matches neither a
+// localhost form nor the configured bind host. This defeats DNS rebinding
+// attacks, where a malicious domain resolves to 127.0.0.1 and the browser
+// sends the attacker's domain in the Host header.
+func hostCheckHandler(bindHost string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isAllowedRequestHost(hostWithoutPort(r.Host), bindHost) {
+			http.Error(w, "forbidden: unrecognized Host header", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Server is the REST + WebSocket + SSE HTTP server.
@@ -81,9 +155,17 @@ func (s *Server) Serve(ctx context.Context, addr string) error {
 		http.NotFound(w, r)
 	})
 
+	// Host derived from the configured bind address; used by the Host-header
+	// check (DNS rebinding protection).
+	bindHost := ""
+	if h, _, err := net.SplitHostPort(addr); err == nil {
+		bindHost = h
+	}
+
 	srv := &http.Server{
-		Addr:    addr,
-		Handler: mux,
+		Addr:              addr,
+		Handler:           hostCheckHandler(bindHost, mux),
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 
 	// Start WS hub
@@ -101,7 +183,13 @@ func (s *Server) Serve(ctx context.Context, addr string) error {
 				}
 				data, err := json.Marshal(e)
 				if err == nil {
-					s.hub.broadcast <- data
+					select {
+					case s.hub.broadcast <- data:
+					case <-s.hub.done:
+						return
+					case <-ctx.Done():
+						return
+					}
 				}
 			case <-ctx.Done():
 				return
@@ -292,45 +380,12 @@ func (s *Server) handleGetPlayer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "name required", http.StatusBadRequest)
 		return
 	}
-	metas, err := s.grpc.GetStore().ListGames(0, 0)
-	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	type playerProfile struct {
-		Name          string   `json:"name"`
-		GamesPlayed   int      `json:"games_played"`
-		Wins          int      `json:"wins"`
-		Losses        int      `json:"losses"`
-		AvgPlacement  float64  `json:"avg_placement"`
-		BestPlacement int      `json:"best_placement,omitempty"`
-		GameIDs       []string `json:"game_ids"`
-	}
-	p := playerProfile{Name: name, BestPlacement: 8}
-	var total int
-	for _, m := range filterCompleteGames(metas) {
-		p.GamesPlayed++
-		p.GameIDs = append(p.GameIDs, m.GameID)
-		total += m.Placement
-		winThreshold := 4
-		if m.IsDuos {
-			winThreshold = 2
-		}
-		if m.Placement <= winThreshold {
-			p.Wins++
-		} else {
-			p.Losses++
-		}
-		if m.Placement < p.BestPlacement {
-			p.BestPlacement = m.Placement
-		}
-	}
-	if p.GamesPlayed > 0 {
-		p.AvgPlacement = float64(total) / float64(p.GamesPlayed)
-	} else {
-		p.BestPlacement = 0
-	}
-	s.writeJSON(w, p)
+	// The store does not record player names per game, so per-player
+	// filtering is impossible. The endpoint previously returned global stats
+	// for any name, which was misleading. Use /v1/stats/aggregate instead.
+	http.Error(w,
+		"per-player stats are not implemented: the store does not record player names per game; use /v1/stats/aggregate",
+		http.StatusNotImplemented)
 }
 
 // --- WebSocket handler ---
@@ -342,7 +397,14 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	client := &wsClient{hub: s.hub, conn: conn, send: make(chan []byte, 64)}
-	s.hub.register <- client
+	select {
+	case s.hub.register <- client:
+	case <-s.hub.done:
+		// Hub already stopped (server shutting down) — drop the connection
+		// instead of blocking forever on the register channel.
+		conn.Close()
+		return
+	}
 
 	go client.writePump()
 	go client.readPump()
@@ -350,11 +412,28 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 // --- SSE handler ---
 
+// sseKeepaliveInterval is how often the SSE handler emits a comment line so
+// EventSource clients and proxies can detect dead connections. Var so tests
+// can shorten it.
+var sseKeepaliveInterval = 25 * time.Second
+
 func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
+	// Same browser-origin policy as the WebSocket endpoint: no Origin header
+	// (curl, native clients) is fine; browser origins must be loopback.
+	if !isAllowedOrigin(r) {
+		http.Error(w, "forbidden origin", http.StatusForbidden)
+		return
+	}
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	// Echo the (already validated, loopback) request Origin instead of "*";
+	// omit the header entirely for non-browser clients.
+	if origin := r.Header.Get("Origin"); origin != "" {
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Vary", "Origin")
+	}
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -362,8 +441,17 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Flush headers immediately so EventSource clients leave the CONNECTING
+	// state without waiting for the first event.
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprint(w, ": connected\n\n")
+	flusher.Flush()
+
 	eventCh := s.grpc.Subscribe()
 	defer s.grpc.Unsubscribe(eventCh)
+
+	keepalive := time.NewTicker(sseKeepaliveInterval)
+	defer keepalive.Stop()
 
 	for {
 		select {
@@ -377,6 +465,13 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 			}
 			fmt.Fprintf(w, "data: %s\n\n", data)
 			flusher.Flush()
+		case <-keepalive.C:
+			// Comment line: ignored by EventSource, keeps the connection
+			// alive and surfaces dead peers via the write error path.
+			if _, err := fmt.Fprint(w, ": keepalive\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
 		case <-r.Context().Done():
 			return
 		}
@@ -389,9 +484,10 @@ func (s *Server) withAuth(h http.HandlerFunc) http.HandlerFunc {
 	if s.apiKey == "" {
 		return h
 	}
+	expected := []byte("Bearer " + s.apiKey)
 	return func(w http.ResponseWriter, r *http.Request) {
-		auth := r.Header.Get("Authorization")
-		if auth != "Bearer "+s.apiKey {
+		auth := []byte(r.Header.Get("Authorization"))
+		if subtle.ConstantTimeCompare(auth, expected) != 1 {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -480,6 +576,7 @@ type wsHub struct {
 	broadcast  chan []byte
 	register   chan *wsClient
 	unregister chan *wsClient
+	done       chan struct{} // closed when run() exits; senders select on it
 	mu         sync.Mutex
 }
 
@@ -495,10 +592,12 @@ func newHub() *wsHub {
 		broadcast:  make(chan []byte, 256),
 		register:   make(chan *wsClient),
 		unregister: make(chan *wsClient, 8),
+		done:       make(chan struct{}),
 	}
 }
 
 func (h *wsHub) run(ctx context.Context) {
+	defer close(h.done)
 	for {
 		select {
 		case client := <-h.register:
@@ -564,7 +663,11 @@ func (c *wsClient) writePump() {
 
 func (c *wsClient) readPump() {
 	defer func() {
-		c.hub.unregister <- c
+		select {
+		case c.hub.unregister <- c:
+		case <-c.hub.done:
+			// Hub stopped — nobody is draining unregister; don't block.
+		}
 		c.conn.Close()
 	}()
 	c.conn.SetReadLimit(512)

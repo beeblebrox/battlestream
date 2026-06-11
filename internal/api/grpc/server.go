@@ -156,50 +156,16 @@ func (s *Server) ListGames(_ context.Context, req *bspb.ListGamesRequest) (*bspb
 	return resp, nil
 }
 
-// GetPlayerProfile returns per-player stats derived from stored game history.
+// GetPlayerProfile is not implemented: the store does not record player
+// names per game, so per-player filtering is impossible. The endpoint
+// previously returned global stats for any name, which was misleading.
+// Use GetAggregate for global stats.
 func (s *Server) GetPlayerProfile(_ context.Context, req *bspb.GetPlayerRequest) (*bspb.PlayerProfile, error) {
 	if req.Name == "" {
 		return nil, status.Error(codes.InvalidArgument, "name is required")
 	}
-
-	metas, err := s.st.ListGames(0, 0)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "listing games: %v", err)
-	}
-
-	profile := &bspb.PlayerProfile{Name: req.Name}
-	var totalPlacement int
-	best := int32(8)
-
-	for _, m := range metas {
-		if m.Placement <= 0 {
-			continue // skip stale/incomplete games
-		}
-		// Filter by player name stored in meta. For now include all — player
-		// filtering will be enhanced once per-player keys are added to store.
-		profile.GamesPlayed++
-		profile.GameIds = append(profile.GameIds, m.GameID)
-		totalPlacement += m.Placement
-		winThreshold := 4
-		if m.IsDuos {
-			winThreshold = 2
-		}
-		if int32(m.Placement) <= int32(winThreshold) {
-			profile.Wins++
-		} else {
-			profile.Losses++
-		}
-		if int32(m.Placement) < best {
-			best = int32(m.Placement)
-		}
-	}
-
-	if profile.GamesPlayed > 0 {
-		profile.AvgPlacement = float64(totalPlacement) / float64(profile.GamesPlayed)
-		profile.BestPlacement = best
-	}
-
-	return profile, nil
+	return nil, status.Error(codes.Unimplemented,
+		"per-player stats are not implemented: the store does not record player names per game; use GetAggregate")
 }
 
 // --- Pub/sub for streaming ---
