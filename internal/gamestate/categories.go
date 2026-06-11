@@ -22,6 +22,7 @@ const (
 	CatGeneral         = "GENERAL"
 	CatSpellsCast      = "SPELLS_CAST"
 	CatSpellcraftCast  = "SPELLCRAFT_CAST"
+	CatBeastBuff       = "BEAST_BUFF"
 )
 
 // categoryByEnchantmentCardID maps exact enchantment CardIDs to categories.
@@ -58,6 +59,12 @@ var categoryByEnchantmentCardID = map[string]string{
 	// BG_Consumed: purely per-minion buff (no Dnt player counter in HDT — no LightfangCounter or
 	// ConsumedCounter exists). CatConsumed has no handleDntTagChange case — this is intentional.
 	"BG_Consumed":                   CatConsumed,
+	// Lurking Leviathan (BG35_602 / BG35_602_G): "Whenever you summon a Beast, give
+	// it +2 Attack and improve this permanently." Each summoned Beast gets a
+	// BG35_602e (Leviathan's Wrath) enchantment whose TAG_SCRIPT_DATA_NUM_1 is the
+	// +ATK granted. There is no player-level Dnt (no BG35_602pe in logs) and no HDT
+	// counter class — tracked via max-seen SD1 in handleDntTagChange (ATK only).
+	"BG35_602e":                     CatBeastBuff,
 }
 
 // categoryByCreatorCardID maps CREATOR entity CardIDs to categories.
@@ -189,6 +196,7 @@ var CategoryDisplayName = map[string]string{
 	CatGeneral:         "General",
 	CatSpellsCast:      "Spells Played",
 	CatSpellcraftCast:  "Spellcraft",
+	CatBeastBuff:       "Leviathan",
 }
 
 // Buff group constants — used by the TUI and Stream Deck plugin to cluster
@@ -221,4 +229,5 @@ var CategoryGroup = map[string]string{
 	CatVolumizer:   GroupTypeBuffs,
 	CatConsumed:    GroupTypeBuffs,
 	CatTavernSpell: GroupTypeBuffs,
+	CatBeastBuff:   GroupTypeBuffs,
 }

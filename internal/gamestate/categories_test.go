@@ -24,6 +24,7 @@ func TestCategoryGroup_AllCategoriesMapped(t *testing.T) {
 		{CatVolumizer, GroupTypeBuffs},
 		{CatConsumed, GroupTypeBuffs},
 		{CatTavernSpell, GroupTypeBuffs},
+		{CatBeastBuff, GroupTypeBuffs},
 	}
 	for _, tc := range cases {
 		t.Run(tc.cat, func(t *testing.T) {
@@ -55,6 +56,7 @@ func TestCategoryGroup_NoUnexpectedEntries(t *testing.T) {
 		CatVolumizer:       GroupTypeBuffs,
 		CatConsumed:        GroupTypeBuffs,
 		CatTavernSpell:     GroupTypeBuffs,
+		CatBeastBuff:       GroupTypeBuffs,
 	}
 	if len(CategoryGroup) != len(expected) {
 		t.Errorf("CategoryGroup has %d entries, want %d", len(CategoryGroup), len(expected))

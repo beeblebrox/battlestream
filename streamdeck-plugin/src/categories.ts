@@ -26,6 +26,9 @@ export const CATEGORY_META: Record<string, CategoryMeta> = {
   WHELP:            { displayName: 'Whelps',       group: 'TYPE_BUFFS', gradient: ['#120a20', '#4a3070'], iconFile: 'whelp-buff.png' },
   BEETLE:           { displayName: 'Beetles',      group: 'TYPE_BUFFS', gradient: ['#120a20', '#4a3070'], iconFile: 'beetle-buff.png' },
   VOLUMIZER:        { displayName: 'Volumizer',    group: 'TYPE_BUFFS', gradient: ['#120a20', '#4a3070'], iconFile: 'volumizer-buff.png' },
+  // Lurking Leviathan (BG35_602e Leviathan's Wrath). No iconFile yet — falls back
+  // to the gradient-only rendering until a beast-buff icon is added to imgs/actions/.
+  BEAST_BUFF:       { displayName: 'Leviathan',    group: 'TYPE_BUFFS', gradient: ['#1a3a20', '#2d7a3a'] },
   CONSUMED:         { displayName: 'Consumed',     group: 'TYPE_BUFFS', gradient: ['#120a20', '#4a3070'], iconFile: 'consumed-buff.png' },
   TAVERN_SPELL:     { displayName: 'SPELL PWR',    group: 'TYPE_BUFFS', gradient: ['#4a004a', '#a93226'], iconFile: 'spell-power.png' },
   TAVERN_WIDE:      { displayName: 'TVN WIDE',     group: 'TAVERN_WIDE', gradient: ['#001a26', '#1a6b8a'], iconFile: 'tavern-wide-buff.png', aggregateCategories: ['NOMI_ALL', 'SHOP_BUFF', 'GENERAL'] },

@@ -153,8 +153,7 @@ func TestGameLog2026_05_08_LurkingLeviathanOnBoard(t *testing.T) {
 }
 
 // TestGameLog2026_05_08_LeviathanWrathEnchantment verifies that BG35_602e (Leviathan's Wrath)
-// appears as an enchantment on at least one board minion.
-// Currently tracked as category GENERAL since no specific category is mapped for BG35_602e yet.
+// appears as an enchantment on at least one board minion, classified as BEAST_BUFF.
 func TestGameLog2026_05_08_LeviathanWrathEnchantment(t *testing.T) {
 	s := sharedLog20260508State(t)
 	var found bool
@@ -164,6 +163,9 @@ func TestGameLog2026_05_08_LeviathanWrathEnchantment(t *testing.T) {
 				found = true
 				if e.SourceCardID != "BG35_602" {
 					t.Errorf("BG35_602e SourceCardID: expected BG35_602, got %q", e.SourceCardID)
+				}
+				if e.Category != gamestate.CatBeastBuff {
+					t.Errorf("BG35_602e Category: expected %q, got %q", gamestate.CatBeastBuff, e.Category)
 				}
 				break
 			}
@@ -175,6 +177,28 @@ func TestGameLog2026_05_08_LeviathanWrathEnchantment(t *testing.T) {
 	if !found {
 		t.Error("BG35_602e (Leviathan's Wrath) enchantment not found on any board minion")
 	}
+}
+
+// TestGameLog2026_05_08_LeviathanBuffSource verifies the BEAST_BUFF buff source from
+// Lurking Leviathan (BG35_602). Raw log ground truth: 171 BG35_602e enchantment
+// entities, all CONTROLLER=3 (Moch), each carrying TAG_SCRIPT_DATA_NUM_1 = the +ATK
+// granted to that Beast. The counter is max-seen (the Leviathan's buff only improves
+// permanently; combat copies replay older, lower values). Highest SD1 on a
+// GameState line in the log is 176; HP is never granted.
+func TestGameLog2026_05_08_LeviathanBuffSource(t *testing.T) {
+	s := sharedLog20260508State(t)
+	for _, bs := range s.BuffSources {
+		if bs.Category == gamestate.CatBeastBuff {
+			if bs.Attack != 176 {
+				t.Errorf("BEAST_BUFF attack: expected 176, got %d", bs.Attack)
+			}
+			if bs.Health != 0 {
+				t.Errorf("BEAST_BUFF health: expected 0, got %d", bs.Health)
+			}
+			return
+		}
+	}
+	t.Error("BEAST_BUFF category not found in buff_sources")
 }
 
 // TestGameLog2026_05_08_AllBoardMinionsAreBeasts verifies the final board is all Beasts.

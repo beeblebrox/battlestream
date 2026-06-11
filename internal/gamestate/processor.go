@@ -1561,6 +1561,12 @@ func (p *Processor) handleDntTagChange(entityID int, tag string, value int) {
 		p.handleAbsoluteDnt(bt, setBS, CatVolumizer, isSD1, value, 0, 0)
 	case "BG34_689e2":
 		p.handleAbsoluteDnt(bt, setBS, CatBloodgemBarrage, isSD1, value, 0, 0)
+	case "BG35_602e":
+		// Lurking Leviathan: per-minion enchantment, SD1 = +ATK granted to that
+		// Beast (the buff only improves permanently; no HP component).
+		if isSD1 {
+			p.handleMaxDnt(bt, setBS, CatBeastBuff, value)
+		}
 	default:
 		if cardID != "" && value != 0 {
 			slog.Debug("untracked Dnt enchantment", "cardID", cardID, "tag", tag, "value", value, "entityID", entityID)
@@ -1627,6 +1633,22 @@ func (p *Processor) handleAbsoluteDntDuos(category string, isSD1 bool, value, ba
 		p.partnerBuffs.buffSourceState[category] = [2]int{partnerAccum[0], partnerAccum[1]}
 		p.machine.SetPartnerBuffSource(category, partnerAccum[0], partnerAccum[1])
 	}
+}
+
+// handleMaxDnt tracks the maximum SD1 value seen for a category (ATK only).
+// Used for per-minion enchantments that carry the buff value granted at apply
+// time and are re-created with historical (lower) values by combat simulation
+// copies — e.g. BG35_602e (Leviathan's Wrath). The max is the enchantment
+// source's current, permanently-improved buff level; replayed old values must
+// neither regress nor double-count the display.
+func (p *Processor) handleMaxDnt(bt *buffTracker, setBS func(string, int, int), category string, value int) {
+	state := bt.buffSourceState[category]
+	if value <= state[0] {
+		return
+	}
+	state[0] = value
+	bt.buffSourceState[category] = state
+	setBS(category, state[0], state[1])
 }
 
 // handleGenericShopBuffDnt handles BG_ShopBuff (generic shop buff) with differential accumulation.

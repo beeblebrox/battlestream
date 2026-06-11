@@ -1,7 +1,35 @@
 # Triage: Lurking Leviathan Buff Tracking
 
 **Date:** 2026-05-08  
-**Status:** Card confirmed in HearthstoneJSON; tracking NOT yet implemented.
+**Status:** **IMPLEMENTED** (2026-06-10) — commit `dc03a7b` on branch `feat/lurking-leviathan-counter`.
+
+## Implementation Summary
+
+Open questions answered from the real game log (`internal/gamestate/testdata/power_log_2026_05_08.txt`,
+171 BG35_602e entities) and the HDT reference:
+
+1. **Per-minion enchantment, no player-level Dnt.** No `BG35_602pe` appears in logs, and HDT
+   has no counter class for BG35 — Option A below was correct.
+2. **ATK only.** `TAG_SCRIPT_DATA_NUM_1` carries the +ATK granted to that Beast; no HP component
+   is ever set.
+3. **Own category:** `CatBeastBuff` (`"BEAST_BUFF"`), display name "Leviathan", group TYPE_BUFFS.
+
+**Accumulation: max-seen SD1** (new `handleMaxDnt` in `processor.go`). Combat simulation copies
+replay historical (lower) SD1 values, so neither "latest" nor "sum" is stable; the max is the
+Leviathan's current permanently-improved buff level (176 at game end in the fixture log).
+
+Changes (commit `dc03a7b`):
+- `internal/gamestate/categories.go` — const, `BG35_602e` mapping, display name, group
+- `internal/gamestate/processor.go` — `handleDntTagChange` case + `handleMaxDnt`
+- `internal/tui/tui.go` — panel color
+- `streamdeck-plugin/src/categories.ts` — `BEAST_BUFF` CATEGORY_META entry (gradient only;
+  dedicated icon still TODO — renderer falls back gracefully without one)
+- Tests: `TestCounterLeviathanWrath` (unit, combat-replay regression),
+  `TestGameLog2026_05_08_LeviathanBuffSource` (real-log integration, asserts +176/+0)
+
+---
+
+*Original triage below (pre-implementation).*
 
 ---
 
