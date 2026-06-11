@@ -163,6 +163,107 @@ func TestWriteRoundTrip(t *testing.T) {
 	}
 }
 
+// TestWritePreservesUserVerboseInOtherSections is the regression test for the
+// audit finding that a user-set Verbose key under a non-Power section was
+// silently dropped on rewrite (it matched the global required-key list but
+// not the section's own key order, so neither write loop emitted it).
+func TestWritePreservesUserVerboseInOtherSections(t *testing.T) {
+	content := `[Zone]
+LogLevel=1
+FilePrinting=true
+ConsolePrinting=false
+ScreenPrinting=false
+Verbose=true
+
+[MyCustomSection]
+Verbose=false
+Foo=bar
+`
+	cfg, err := Parse(writeTmp(t, content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Merge()
+
+	path := filepath.Join(t.TempDir(), "log.config")
+	if err := cfg.Write(path); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg2, err := Parse(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zone := cfg2.findSection("Zone")
+	if zone == nil {
+		t.Fatal("Zone section missing after round-trip")
+	}
+	if zone.Fields["Verbose"] != "true" {
+		t.Errorf("user-set [Zone] Verbose dropped on rewrite: got %q, want \"true\"", zone.Fields["Verbose"])
+	}
+	custom := cfg2.findSection("MyCustomSection")
+	if custom == nil {
+		t.Fatal("user section missing after round-trip")
+	}
+	if custom.Fields["Verbose"] != "false" {
+		t.Errorf("user-set [MyCustomSection] Verbose dropped on rewrite: got %q, want \"false\"", custom.Fields["Verbose"])
+	}
+	if custom.Fields["Foo"] != "bar" {
+		t.Errorf("user extra key corrupted: got %q, want \"bar\"", custom.Fields["Foo"])
+	}
+}
+
+// TestWriteDeterministicOutput: repeated writes of the same config must
+// produce byte-identical files (extra keys were previously emitted in map
+// iteration order).
+func TestWriteDeterministicOutput(t *testing.T) {
+	content := `[MyCustomSection]
+Zeta=1
+Alpha=2
+Mike=3
+Quebec=4
+Bravo=5
+Yankee=6
+`
+	cfg, err := Parse(writeTmp(t, content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Merge()
+
+	dir := t.TempDir()
+	var prev []byte
+	for i := 0; i < 10; i++ {
+		path := filepath.Join(dir, "log.config")
+		if err := cfg.Write(path); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if prev != nil && string(data) != string(prev) {
+			t.Fatalf("nondeterministic output between writes:\n--- previous ---\n%s\n--- current ---\n%s", prev, data)
+		}
+		prev = data
+	}
+
+	// Extra keys must be sorted.
+	text := string(prev)
+	wantOrder := []string{"Alpha=2", "Bravo=5", "Mike=3", "Quebec=4", "Yankee=6", "Zeta=1"}
+	last := -1
+	for _, kv := range wantOrder {
+		idx := strings.Index(text, kv)
+		if idx < 0 {
+			t.Fatalf("extra key %q missing from output:\n%s", kv, text)
+		}
+		if idx < last {
+			t.Errorf("extra keys not sorted: %q appears before previous key:\n%s", kv, text)
+		}
+		last = idx
+	}
+}
+
 func TestWriteAtomic(t *testing.T) {
 	// The .tmp file must not be left behind after a successful write.
 	dir := t.TempDir()

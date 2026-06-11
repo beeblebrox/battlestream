@@ -2,6 +2,7 @@ package capture
 
 import (
 	"context"
+	"errors"
 	"image"
 	"log/slog"
 	"os"
@@ -61,6 +62,13 @@ type mockScreenshotter struct{}
 
 func (m *mockScreenshotter) Capture(_ context.Context) (image.Image, error) {
 	return testImage(4, 4), nil // tiny image for fast tests
+}
+
+// failingScreenshotter always fails.
+type failingScreenshotter struct{}
+
+func (m *failingScreenshotter) Capture(_ context.Context) (image.Image, error) {
+	return nil, errors.New("grim exploded")
 }
 
 // mockFrameStore records calls.
@@ -364,6 +372,89 @@ func TestLoopIgnoresHistoricalGameInBacklog(t *testing.T) {
 	if !captured {
 		t.Fatalf("live game after catchup was not captured: initCalls=%v frames=%d (historical=%s)",
 			store.InitCalls(), store.FrameCount(), historicalID)
+	}
+}
+
+// TestConsumeEventsNeverBlocksOnFreshnessChannel is the regression test for
+// the audit finding that the event consumer used a blocking send on the
+// freshness channel. With the channel full and nothing draining it (as
+// happens once Run has exited), the consumer must keep processing events and
+// still exit promptly on ctx cancellation instead of wedging forever.
+func TestConsumeEventsNeverBlocksOnFreshnessChannel(t *testing.T) {
+	events := newMockEventSource()
+	tracker := &mockStateTracker{}
+	loop := NewLoop(events, tracker, &mockScreenshotter{}, &mockFrameStore{},
+		time.Hour, time.Hour)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Tiny freshness channel, pre-filled so every send would block, and
+	// deliberately never drained (simulates Run having returned).
+	eventTimeCh := make(chan time.Time, 1)
+	eventTimeCh <- time.Now()
+	caughtUpCh := make(chan struct{}, 1)
+
+	done := make(chan struct{})
+	go func() {
+		loop.consumeEvents(ctx, eventTimeCh, caughtUpCh)
+		close(done)
+	}()
+
+	// Events keep arriving while the freshness channel is full. A blocking
+	// send wedges here on the first event.
+	for i := 0; i < 10; i++ {
+		events.Send(parser.GameEvent{Type: parser.EventGameStart})
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("consumeEvents did not exit after ctx cancel; blocked on full freshness channel")
+	}
+}
+
+// TestLoopThrottlesScreenshotFailureLogs is the regression test for the audit
+// finding that a persistently failing screenshotter logged an error on every
+// tick. The first failure must be logged, then at most one per
+// screenshotFailureLogEvery consecutive failures.
+func TestLoopThrottlesScreenshotFailureLogs(t *testing.T) {
+	var buf syncBuffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	defer slog.SetDefault(prev)
+
+	events := newMockEventSource()
+	tracker := &mockStateTracker{}
+	store := &mockFrameStore{}
+
+	loop := NewLoop(events, tracker, &failingScreenshotter{}, store,
+		5*time.Millisecond, time.Hour)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go loop.Run(ctx)
+
+	events.Send(parser.GameEvent{Type: EventCatchupComplete})
+	tracker.SetInGame(true, "failing-game")
+
+	// ~60 ticks; pre-throttle this produced ~60 error lines.
+	time.Sleep(300 * time.Millisecond)
+	cancel()
+
+	logs := buf.String()
+	count := strings.Count(logs, "screenshot failed")
+	if count == 0 {
+		t.Fatal("expected at least one screenshot-failure log line, got none")
+	}
+	// Allow headroom for scheduling jitter: even if more ticks than expected
+	// ran, the throttle caps lines at roughly ticks/screenshotFailureLogEvery.
+	if count > 4 {
+		t.Errorf("screenshot failures not throttled: %d log lines for ~60 ticks", count)
+	}
+	if store.FrameCount() != 0 {
+		t.Errorf("no frames should be saved when every capture fails, got %d", store.FrameCount())
 	}
 }
 

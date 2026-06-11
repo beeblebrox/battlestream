@@ -2,6 +2,7 @@ package capture
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 )
 
@@ -58,7 +59,7 @@ func migrateV1(tx *sql.Tx) error {
 	}
 	for _, s := range stmts {
 		if _, err := tx.Exec(s); err != nil {
-			return fmt.Errorf("exec %q: %w", s[:40], err)
+			return fmt.Errorf("exec %q: %w", s[:min(len(s), 40)], err)
 		}
 	}
 	return nil
@@ -73,6 +74,13 @@ func ensureSchema(db *sql.DB) error {
 	var current int
 	row := db.QueryRow(`SELECT version FROM schema_version LIMIT 1`)
 	if err := row.Scan(&current); err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			// A real read error (corrupt DB, locked file, bad column type)
+			// must NOT be mistaken for a fresh DB — re-running migrations
+			// against an existing schema fails at best and clobbers
+			// version bookkeeping at worst.
+			return fmt.Errorf("read schema version: %w", err)
+		}
 		// No row = fresh DB, version 0.
 		current = 0
 	}

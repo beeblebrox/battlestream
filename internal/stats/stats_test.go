@@ -12,6 +12,44 @@ func TestComputeEmpty(t *testing.T) {
 	}
 }
 
+// TestComputeAllUnplaced is the regression test for the audit finding that an
+// all-unplaced result set returned GamesPlayed:0 with nonsense sentinel
+// placements (BestPlacement:8, WorstPlacement:1). With no counted games every
+// field must be zero.
+func TestComputeAllUnplaced(t *testing.T) {
+	results := []GameResult{
+		{Placement: 0},
+		{Placement: 0},
+		{Placement: -1},
+	}
+	s := Compute(results)
+	if s != (AggregateStats{}) {
+		t.Errorf("expected zero AggregateStats for all-unplaced input, got %+v", s)
+	}
+}
+
+// TestComputeSkipsUnplacedButKeepsValid mixes stale and valid results.
+func TestComputeSkipsUnplacedButKeepsValid(t *testing.T) {
+	results := []GameResult{
+		{Placement: 0},
+		{Placement: 3},
+		{Placement: 7},
+	}
+	s := Compute(results)
+	if s.GamesPlayed != 2 {
+		t.Errorf("GamesPlayed: expected 2, got %d", s.GamesPlayed)
+	}
+	if s.BestPlacement != 3 {
+		t.Errorf("BestPlacement: expected 3, got %d", s.BestPlacement)
+	}
+	if s.WorstPlacement != 7 {
+		t.Errorf("WorstPlacement: expected 7, got %d", s.WorstPlacement)
+	}
+	if s.AvgPlacement != 5.0 {
+		t.Errorf("AvgPlacement: expected 5.0, got %f", s.AvgPlacement)
+	}
+}
+
 func TestComputeWinLoss(t *testing.T) {
 	results := []GameResult{
 		{Placement: 1},

@@ -7,6 +7,7 @@ import (
 	"image/color"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -46,6 +47,38 @@ func TestEnsureSchema(t *testing.T) {
 	}
 	if version != 1 {
 		t.Errorf("schema version: got %d, want 1", version)
+	}
+}
+
+// TestEnsureSchemaReturnsVersionReadError is the regression test for the
+// audit finding that any error scanning the schema version was treated as a
+// fresh DB (version 0), causing migrations to re-run against an existing
+// schema. A read error must surface as a "schema version" error, not as a
+// confusing downstream migration failure.
+func TestEnsureSchemaReturnsVersionReadError(t *testing.T) {
+	dir := t.TempDir()
+	db, err := sql.Open("sqlite", dir+"/test.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	if err := ensureSchema(db); err != nil {
+		t.Fatalf("initial ensureSchema: %v", err)
+	}
+
+	// Corrupt the version bookkeeping: a non-numeric value makes the int
+	// scan fail, simulating a damaged or incompatible schema_version table.
+	if _, err := db.Exec(`UPDATE schema_version SET version = 'garbage'`); err != nil {
+		t.Fatal(err)
+	}
+
+	err = ensureSchema(db)
+	if err == nil {
+		t.Fatal("expected error when schema version cannot be read, got nil")
+	}
+	if !strings.Contains(err.Error(), "schema version") {
+		t.Errorf("error should identify the version read failure, got: %v", err)
 	}
 }
 

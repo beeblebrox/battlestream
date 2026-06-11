@@ -310,6 +310,59 @@ func TestWalkForInstall(t *testing.T) {
 	}
 }
 
+// TestWalkForInstallSurvivesUnreadableSiblings covers the audit finding that
+// the WalkDir callbacks returned filepath.SkipDir on any error. Per the
+// SkipDir contract, returning it for a non-directory entry skips the
+// remaining entries of the *parent* directory — which can include the real
+// install. Today filepath.WalkDir only reports errors alongside directory
+// entries (ReadDir failures), so the old code happened to behave; this test
+// locks in the resilience guarantee against unreadable siblings either way.
+// An unreadable directory and an unreadable file are placed so they sort
+// before the install; the walk must still find it.
+func TestWalkForInstallSurvivesUnreadableSiblings(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: chmod 0 does not block reads")
+	}
+
+	parent := t.TempDir()
+
+	// "aaa-locked" sorts before "zzz-hearthstone", so the walk hits it first.
+	locked := filepath.Join(parent, "aaa-locked")
+	if err := os.Mkdir(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	lockedFile := filepath.Join(parent, "bbb-locked-file")
+	if err := os.WriteFile(lockedFile, []byte("x"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+
+	install := filepath.Join(parent, "zzz-hearthstone")
+	if err := os.Mkdir(install, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(install, "Hearthstone.exe"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := WalkForInstall(parent)
+	if err != nil {
+		t.Fatalf("WalkForInstall with unreadable siblings: %v", err)
+	}
+	if info.InstallRoot != install {
+		t.Errorf("InstallRoot: expected %q, got %q", install, info.InstallRoot)
+	}
+
+	all, err := WalkForAllInstalls(parent)
+	if err != nil {
+		t.Fatalf("WalkForAllInstalls with unreadable siblings: %v", err)
+	}
+	if len(all) != 1 || all[0].InstallRoot != install {
+		t.Errorf("WalkForAllInstalls: expected exactly [%q], got %+v", install, all)
+	}
+}
+
 func TestWalkForInstallNotFound(t *testing.T) {
 	_, err := WalkForInstall(t.TempDir())
 	if err == nil {
