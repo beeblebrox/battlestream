@@ -378,6 +378,207 @@ func TestPlayerLogSkipsNonPowerLines(t *testing.T) {
 	}
 }
 
+// TestWatcherStopClosesLines is the regression test for audit finding H4:
+// Stop documented closing the Lines channel but never did, so consumers
+// reading it blocked forever. After Stop, reads from Lines must observe the
+// channel closed within the timeout.
+func TestWatcherStopClosesLines(t *testing.T) {
+	dir := t.TempDir()
+	createLogFile(t, dir, "Power.log")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	w, err := New(ctx, Config{LogDir: dir, Files: []string{"Power.log"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w.Stop()
+
+	timeout := time.After(5 * time.Second)
+	for {
+		select {
+		case _, ok := <-w.Lines:
+			if !ok {
+				return // channel closed — expected
+			}
+		case <-timeout:
+			t.Fatal("Lines channel was not closed within 5s after Stop")
+		}
+	}
+}
+
+// TestWatcherConsumerExitsAfterStop verifies the capture-pipeline pattern:
+// a goroutine range-ing over Lines must terminate once Stop is called
+// (pre-fix it leaked, and its deferred cleanup never ran).
+func TestWatcherConsumerExitsAfterStop(t *testing.T) {
+	dir := t.TempDir()
+	createLogFile(t, dir, "Power.log")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	w, err := New(ctx, Config{LogDir: dir, Files: []string{"Power.log"}, ReadFromStart: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	consumerDone := make(chan struct{})
+	go func() {
+		defer close(consumerDone)
+		for range w.Lines {
+		}
+	}()
+
+	w.Stop()
+
+	select {
+	case <-consumerDone:
+		// consumer exited — expected
+	case <-time.After(5 * time.Second):
+		t.Fatal("consumer goroutine did not exit within 5s after Stop")
+	}
+}
+
+// TestWatcherSessionSwitchThenStop exercises the session-dir switch path
+// (stopTails + startTails mid-flight) followed by Stop while lines are still
+// being written. Run with -race: it must close Lines cleanly with no
+// send-on-closed-channel panic from the freshly started tails.
+func TestWatcherSessionSwitchThenStop(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping file-watcher integration test in short mode")
+	}
+
+	root := t.TempDir()
+	sess1 := filepath.Join(root, "Hearthstone_2026_06_01_10_00_00")
+	if err := os.MkdirAll(sess1, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	createLogFile(t, sess1, "Power.log")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	w, err := New(ctx, Config{LogDir: root, Files: []string{"Power.log"}, ReadFromStart: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := w.ResolvedDir(); got != sess1 {
+		t.Fatalf("initial ResolvedDir = %q, want %q", got, sess1)
+	}
+
+	// Give the session-dir fsnotify watch a moment to be registered.
+	time.Sleep(200 * time.Millisecond)
+
+	sess2 := filepath.Join(root, "Hearthstone_2026_06_01_11_00_00")
+	if err := os.MkdirAll(sess2, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logPath2 := createLogFile(t, sess2, "Power.log")
+
+	// Wait for the watcher to switch to the new session dir.
+	deadline := time.Now().Add(5 * time.Second)
+	for w.ResolvedDir() != sess2 {
+		if time.Now().After(deadline) {
+			t.Fatalf("watcher did not switch session dirs; ResolvedDir=%q", w.ResolvedDir())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// Drain lines until the channel closes.
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		for range w.Lines {
+		}
+	}()
+
+	// Keep appending lines to the new session's log while stopping, to
+	// stress the send-vs-close ordering.
+	writerStop := make(chan struct{})
+	var writerWG sync.WaitGroup
+	writerWG.Add(1)
+	go func() {
+		defer writerWG.Done()
+		for i := 0; ; i++ {
+			select {
+			case <-writerStop:
+				return
+			default:
+			}
+			f, err := os.OpenFile(logPath2, os.O_APPEND|os.O_WRONLY, 0o644)
+			if err != nil {
+				return
+			}
+			fmt.Fprintf(f, "line %d\n", i)
+			f.Close()
+			time.Sleep(time.Millisecond)
+		}
+	}()
+
+	// Let some post-switch lines flow, then stop mid-stream.
+	time.Sleep(100 * time.Millisecond)
+	w.Stop()
+
+	select {
+	case <-drained:
+		// Lines closed cleanly after the switch — no panic, no leak.
+	case <-time.After(5 * time.Second):
+		t.Fatal("Lines channel did not close within 5s after Stop (post session switch)")
+	}
+
+	close(writerStop)
+	writerWG.Wait()
+}
+
+// TestWatcherResolvedDirUpdatesOnSessionSwitch is the regression test for
+// audit finding M17: ResolvedDir went stale after a session-dir switch.
+func TestWatcherResolvedDirUpdatesOnSessionSwitch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping file-watcher integration test in short mode")
+	}
+
+	root := t.TempDir()
+	sess1 := filepath.Join(root, "Hearthstone_2026_06_01_10_00_00")
+	if err := os.MkdirAll(sess1, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	createLogFile(t, sess1, "Power.log")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	w, err := New(ctx, Config{LogDir: root, Files: []string{"Power.log"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Stop()
+
+	if got := w.ResolvedDir(); got != sess1 {
+		t.Fatalf("initial ResolvedDir = %q, want %q", got, sess1)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	sess2 := filepath.Join(root, "Hearthstone_2026_06_01_11_00_00")
+	if err := os.MkdirAll(sess2, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	createLogFile(t, sess2, "Power.log")
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if got := w.ResolvedDir(); got == sess2 {
+			return // updated — expected
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("ResolvedDir = %q after session switch, want %q", w.ResolvedDir(), sess2)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 func TestWatcherContextCancellation(t *testing.T) {
 	dir := t.TempDir()
 	createLogFile(t, dir, "Power.log")

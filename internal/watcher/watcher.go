@@ -19,15 +19,28 @@ import (
 
 // Watcher tails one or more HS log files and sends lines to Lines channel.
 type Watcher struct {
-	Lines       <-chan Line
-	ResolvedDir string // the resolved session log directory being tailed
-	lines       chan Line
-	errors      chan error
-	done        chan struct{}
-	stopOnce    sync.Once
+	Lines    <-chan Line
+	lines    chan Line
+	done     chan struct{}
+	stopOnce sync.Once
 
-	mu    sync.Mutex
-	tails []*tail.Tail
+	// wg tracks every goroutine that sends on w.lines. Stop waits for it
+	// before closing the channel, so a send-after-close is impossible.
+	wg sync.WaitGroup
+
+	mu          sync.Mutex
+	tails       []*tail.Tail
+	stopped     bool   // set under mu by Stop; blocks new tails/senders
+	resolvedDir string // the resolved session log directory being tailed
+}
+
+// ResolvedDir returns the session log directory currently being tailed.
+// It is updated when the watcher switches to a new Hearthstone session
+// directory (see watchForNewSessions).
+func (w *Watcher) ResolvedDir() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.resolvedDir
 }
 
 // Line is a raw log line with its source file.
@@ -61,10 +74,9 @@ func New(ctx context.Context, cfg Config) (*Watcher, error) {
 
 	lines := make(chan Line, 512)
 	w := &Watcher{
-		Lines:  lines,
-		lines:  lines,
-		errors: make(chan error, 1),
-		done:   make(chan struct{}),
+		Lines: lines,
+		lines: lines,
+		done:  make(chan struct{}),
 	}
 
 	// On macOS, use Player.log exclusively. Hearthstone's per-file logging
@@ -72,33 +84,38 @@ func New(ctx context.Context, cfg Config) (*Watcher, error) {
 	// output (ConsolePrinting) goes to Player.log without that limit.
 	if cfg.PlayerLogPath != "" {
 		if err := w.startPlayerLogTail(ctx, cfg.PlayerLogPath, cfg.ReadFromStart); err != nil {
+			w.Stop()
 			return nil, err
 		}
-		go func() {
-			<-ctx.Done()
-			w.Stop()
-		}()
+		go w.stopOnCancel(ctx)
 		return w, nil
 	}
 
 	// Non-macOS: tail per-session log files in the Logs directory.
 	logDir := resolveLogDir(cfg.LogDir, cfg.Files)
-	w.ResolvedDir = logDir
 	slog.Info("resolved log directory", "configured", cfg.LogDir, "resolved", logDir)
 
 	if err := w.startTails(ctx, logDir, cfg, cfg.ReadFromStart); err != nil {
+		w.Stop()
 		return nil, err
 	}
 
 	// Watch for new session directories so we switch when HS restarts.
 	go w.watchForNewSessions(ctx, cfg)
 
-	go func() {
-		<-ctx.Done()
-		w.Stop()
-	}()
+	go w.stopOnCancel(ctx)
 
 	return w, nil
+}
+
+// stopOnCancel stops the watcher when ctx is cancelled. It also exits when
+// Stop is called directly, so it does not leak on non-context shutdown.
+func (w *Watcher) stopOnCancel(ctx context.Context) {
+	select {
+	case <-ctx.Done():
+	case <-w.done:
+	}
+	w.Stop()
 }
 
 // startTails begins tailing all configured files in the given directory.
@@ -106,6 +123,13 @@ func New(ctx context.Context, cfg Config) (*Watcher, error) {
 func (w *Watcher) startTails(ctx context.Context, logDir string, cfg Config, fromStart bool) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+
+	// Stop has run (or is running): the Lines channel is closing, so no new
+	// tails or sender goroutines may be created.
+	if w.stopped {
+		return nil
+	}
+	w.resolvedDir = logDir
 
 	for _, name := range cfg.Files {
 		path := filepath.Join(logDir, name)
@@ -151,7 +175,13 @@ func (w *Watcher) startTails(ctx context.Context, logDir string, cfg Config, fro
 		}
 		w.tails = append(w.tails, t)
 
+		// Register the sender while holding w.mu: Stop sets w.stopped under
+		// the same lock before calling wg.Wait, so either this Add is visible
+		// to Wait, or the stopped check above prevented the goroutine from
+		// being created at all.
+		w.wg.Add(1)
 		go func(t *tail.Tail, fname string, backlogSize int64) {
+			defer w.wg.Done()
 			firstLine := true
 			for {
 				select {
@@ -175,8 +205,12 @@ func (w *Watcher) startTails(ctx context.Context, logDir string, cfg Config, fro
 					case w.lines <- Line{File: fname, Text: line.Text, Backlog: backlog}:
 					case <-ctx.Done():
 						return
+					case <-w.done:
+						return
 					}
 				case <-ctx.Done():
+					return
+				case <-w.done:
 					return
 				}
 			}
@@ -186,12 +220,22 @@ func (w *Watcher) startTails(ctx context.Context, logDir string, cfg Config, fro
 	return nil
 }
 
-// stopTails stops all current tails.
+// stopTails stops all current tails (used when switching session dirs).
 func (w *Watcher) stopTails() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	w.stopTailsLocked()
+}
+
+// stopTailsLocked stops and cleans up all current tails. Caller holds w.mu.
+// tail.Stop waits for the tail goroutine to exit (its sends select on the
+// tomb's Dying channel, so it cannot block on an abandoned Lines channel),
+// and Cleanup releases the inotify watch state — without it every
+// Hearthstone restart would leak a watch.
+func (w *Watcher) stopTailsLocked() {
 	for _, t := range w.tails {
 		_ = t.Stop()
+		t.Cleanup()
 	}
 	w.tails = nil
 }
@@ -285,12 +329,26 @@ func resolveLogDir(dir string, files []string) string {
 }
 
 // Stop gracefully stops all tails and closes the Lines channel.
-// Safe to call concurrently and multiple times.
+// Safe to call concurrently and multiple times. Concurrent callers block
+// until the first call completes; when Stop returns, the Lines channel is
+// closed and no further sends can occur.
 func (w *Watcher) Stop() {
 	w.stopOnce.Do(func() {
+		// Unblock any sender parked on a full w.lines channel.
 		close(w.done)
+
+		// Under the same lock the senders are registered with: after stopped
+		// is set, startTails/startPlayerLogTail refuse to create new senders,
+		// so wg below covers every goroutine that can send on w.lines.
+		w.mu.Lock()
+		w.stopped = true
+		w.stopTailsLocked()
+		w.mu.Unlock()
+
+		// Wait for all senders to exit, then closing is safe.
+		w.wg.Wait()
+		close(w.lines)
 	})
-	w.stopTails()
 }
 
 // powerLogPrefix is the category prefix prepended to Power log lines in Player.log.
@@ -329,10 +387,19 @@ func (w *Watcher) startPlayerLogTail(ctx context.Context, path string, fromStart
 	}
 
 	w.mu.Lock()
+	if w.stopped {
+		// Stop already ran — do not register a sender on a closing channel.
+		w.mu.Unlock()
+		_ = t.Stop()
+		t.Cleanup()
+		return nil
+	}
 	w.tails = append(w.tails, t)
+	w.wg.Add(1) // registered under w.mu — see startTails for the invariant
 	w.mu.Unlock()
 
 	go func() {
+		defer w.wg.Done()
 		firstLine := true
 		for {
 			select {
@@ -358,8 +425,12 @@ func (w *Watcher) startPlayerLogTail(ctx context.Context, path string, fromStart
 				case w.lines <- Line{File: "Power.log", Text: text, Backlog: backlog}:
 				case <-ctx.Done():
 					return
+				case <-w.done:
+					return
 				}
 			case <-ctx.Done():
+				return
+			case <-w.done:
 				return
 			}
 		}
