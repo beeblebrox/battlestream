@@ -10,11 +10,22 @@ import (
 	bspb "battlestream.fixates.io/internal/api/grpc/gen/battlestream/v1"
 )
 
+// daemonClient abstracts the daemon gRPC client so the model can be driven
+// with a fake in tests (e.g. to verify that stale clients are closed).
+type daemonClient interface {
+	Close() error
+	GetCurrentGame(ctx context.Context) (*bspb.GameState, error)
+	GetAggregate(ctx context.Context) (*bspb.AggregateStats, error)
+	StreamEvents(ctx context.Context) (<-chan *bspb.GameEvent, error)
+}
+
 // Client wraps the gRPC connection to the battlestream daemon.
 type Client struct {
 	conn *grpc.ClientConn
 	svc  bspb.BattlestreamServiceClient
 }
+
+var _ daemonClient = (*Client)(nil)
 
 // Dial connects to the daemon at addr. Caller must call Close() when done.
 func Dial(addr string) (*Client, error) {

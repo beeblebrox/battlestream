@@ -74,6 +74,47 @@ func TestUpdate_LoadErrEmbedded_DoesNotQuit(t *testing.T) {
 	}
 }
 
+// TestHandleMouse_ParentYOffset is a regression test for the off-by-one in
+// the combined TUI's replay tab: the combined view reserves row 0 for the tab
+// bar, shifting all mouse Y coordinates down by one, but hit-testing used raw
+// msg.Y. With SetParentYOffset(1), a click on the last scrollbar row (terminal
+// Y = view Y + 1) must register.
+func TestHandleMouse_ParentYOffset(t *testing.T) {
+	newModel := func(offset int) *Model {
+		m := NewFromReplay(&Replay{})
+		m.SetParentYOffset(offset)
+		// Board scrollbar track at X=5, view rows 3..6 inclusive.
+		m.boardScrollX = 5
+		m.boardVPY = 3
+		m.boardVPH = 4
+		return m
+	}
+	press := func(m *Model, x, y int) {
+		m.Update(tea.MouseMsg{X: x, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	}
+
+	// Embedded (offset 1): terminal Y=7 maps to view Y=6 — last track row.
+	m := newModel(1)
+	press(m, 5, 7)
+	if !m.scrubbing {
+		t.Error("offset=1: click at terminal Y=7 (view Y=6) must hit the scrollbar track")
+	}
+
+	// Embedded: terminal Y=3 maps to view Y=2 — just above the track.
+	m = newModel(1)
+	press(m, 5, 3)
+	if m.scrubbing {
+		t.Error("offset=1: click at terminal Y=3 (view Y=2) must miss the scrollbar track")
+	}
+
+	// Standalone (offset 0): terminal Y=7 is below the track and must miss.
+	m = newModel(0)
+	press(m, 5, 7)
+	if m.scrubbing {
+		t.Error("offset=0: click at terminal Y=7 must miss the scrollbar track")
+	}
+}
+
 // TestUpdate_LoadErrStandalone_QuitsOnKey verifies the standalone replay
 // command keeps its "press any key to exit" behavior on load errors.
 func TestUpdate_LoadErrStandalone_QuitsOnKey(t *testing.T) {

@@ -95,7 +95,7 @@ const (
 // ============================================================
 
 type connectedMsg struct {
-	client  *Client
+	client  daemonClient
 	game    *bspb.GameState
 	agg     *bspb.AggregateStats
 	eventCh <-chan *bspb.GameEvent
@@ -103,11 +103,29 @@ type connectedMsg struct {
 
 type gameUpdateMsg struct{ game *bspb.GameState }
 type aggUpdateMsg struct{ agg *bspb.AggregateStats }
-type eventMsg struct{ event *bspb.GameEvent }
-type disconnectedMsg struct{ err error }
+
+// eventMsg, disconnectedMsg, aggTickMsg, and gameTickMsg carry the connection
+// generation they were spawned under. The Update loop drops messages whose
+// generation doesn't match the model's current one, so after a reconnect
+// exactly one event-reader chain and one of each tick chain survive — stale
+// chains from previous connections die instead of re-arming forever.
+type eventMsg struct {
+	event *bspb.GameEvent
+	gen   int
+}
+
+type disconnectedMsg struct {
+	err error
+	gen int
+	// fromConnect marks failures of the (single-flight) connectCmd itself.
+	// These are always handled — they must schedule the next retry — whereas
+	// disconnects reported by fetch/event commands are deduplicated.
+	fromConnect bool
+}
+
 type reconnectMsg struct{}
-type aggTickMsg struct{}
-type gameTickMsg struct{}
+type aggTickMsg struct{ gen int }
+type gameTickMsg struct{ gen int }
 
 // ============================================================
 // Model
@@ -121,8 +139,13 @@ type Model struct {
 
 	connState connState
 	connErr   error
-	client    *Client
+	client    daemonClient
 	eventCh   <-chan *bspb.GameEvent
+
+	// generation is incremented on every successful (re)connect. Commands
+	// spawned for a connection stamp their messages with the generation that
+	// was current when they were armed; Update drops mismatching messages.
+	generation int
 
 	spinner spinner.Model
 	game    *bspb.GameState
@@ -283,7 +306,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "r":
 			if m.connState == stateConnected && m.client != nil {
-				return m, fetchGameCmd(m.ctx, m.client)
+				return m, fetchGameCmd(m.ctx, m.client, m.generation)
 			}
 		case "R":
 			if m.connState == stateConnected && m.client != nil {
@@ -316,18 +339,34 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case connectedMsg:
+		// Close the previous client (if any) before replacing it so the old
+		// gRPC connection — and its event-stream goroutine — don't leak.
+		if m.client != nil && m.client != msg.client {
+			m.client.Close()
+		}
+		m.generation++
 		m.connState = stateConnected
+		m.connErr = nil
 		m.client = msg.client
 		m.game = msg.game
 		m.agg = msg.agg
 		m.eventCh = msg.eventCh
 		return m, tea.Batch(
-			waitForEventCmd(m.eventCh),
-			aggTickCmd(),
-			gameTickCmd(),
+			waitForEventCmd(m.eventCh, m.generation),
+			aggTickCmd(m.generation),
+			gameTickCmd(m.generation),
 		)
 
 	case disconnectedMsg:
+		// Single-flight reconnect: multiple in-flight commands can each report
+		// the same connection loss. Only the first one (matching the current
+		// generation, while still connected) schedules a reconnect; duplicates
+		// and stale reports from previous generations are dropped. connectCmd
+		// failures (fromConnect) are exempt — they are themselves single-flight
+		// and must schedule the next retry.
+		if !msg.fromConnect && (msg.gen != m.generation || m.connState != stateConnected) {
+			return m, nil
+		}
 		m.connState = stateDisconnected
 		m.connErr = msg.err
 		if m.client != nil {
@@ -350,27 +389,36 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.agg = msg.agg
 
 	case eventMsg:
+		if msg.gen != m.generation {
+			return m, nil // stale reader from a previous connection — let it die
+		}
 		// Re-fetch full game state on any event, then wait for next event
 		if m.client != nil {
 			return m, tea.Batch(
-				waitForEventCmd(m.eventCh),
-				fetchGameCmd(m.ctx, m.client),
+				waitForEventCmd(m.eventCh, m.generation),
+				fetchGameCmd(m.ctx, m.client, m.generation),
 			)
 		}
 
 	case aggTickMsg:
+		if msg.gen != m.generation {
+			return m, nil // stale tick chain from a previous connection
+		}
 		if m.client != nil {
 			return m, tea.Batch(
 				fetchAggCmd(m.ctx, m.client),
-				tea.Tick(10*time.Second, func(t time.Time) tea.Msg { return aggTickMsg{} }),
+				aggTickCmd(m.generation),
 			)
 		}
 
 	case gameTickMsg:
+		if msg.gen != m.generation {
+			return m, nil // stale tick chain from a previous connection
+		}
 		if m.client != nil {
 			return m, tea.Batch(
-				fetchGameCmd(m.ctx, m.client),
-				gameTickCmd(),
+				fetchGameCmd(m.ctx, m.client, m.generation),
+				gameTickCmd(m.generation),
 			)
 		}
 	}
@@ -1418,25 +1466,25 @@ func connectCmd(ctx context.Context, addr string) tea.Cmd {
 	return func() tea.Msg {
 		client, err := Dial(addr)
 		if err != nil {
-			return disconnectedMsg{err: err}
+			return disconnectedMsg{err: err, fromConnect: true}
 		}
 
 		game, err := client.GetCurrentGame(ctx)
 		if err != nil {
 			client.Close()
-			return disconnectedMsg{err: err}
+			return disconnectedMsg{err: err, fromConnect: true}
 		}
 
 		agg, err := client.GetAggregate(ctx)
 		if err != nil {
 			client.Close()
-			return disconnectedMsg{err: err}
+			return disconnectedMsg{err: err, fromConnect: true}
 		}
 
 		eventCh, err := client.StreamEvents(ctx)
 		if err != nil {
 			client.Close()
-			return disconnectedMsg{err: err}
+			return disconnectedMsg{err: err, fromConnect: true}
 		}
 
 		return connectedMsg{
@@ -1448,17 +1496,17 @@ func connectCmd(ctx context.Context, addr string) tea.Cmd {
 	}
 }
 
-func fetchGameCmd(ctx context.Context, client *Client) tea.Cmd {
+func fetchGameCmd(ctx context.Context, client daemonClient, gen int) tea.Cmd {
 	return func() tea.Msg {
 		game, err := client.GetCurrentGame(ctx)
 		if err != nil {
-			return disconnectedMsg{err: err}
+			return disconnectedMsg{err: err, gen: gen}
 		}
 		return gameUpdateMsg{game: game}
 	}
 }
 
-func fetchAggCmd(ctx context.Context, client *Client) tea.Cmd {
+func fetchAggCmd(ctx context.Context, client daemonClient) tea.Cmd {
 	return func() tea.Msg {
 		agg, err := client.GetAggregate(ctx)
 		if err != nil {
@@ -1469,25 +1517,24 @@ func fetchAggCmd(ctx context.Context, client *Client) tea.Cmd {
 }
 
 // waitForEventCmd blocks until an event arrives on ch, then returns it as a tea.Msg.
-func waitForEventCmd(ch <-chan *bspb.GameEvent) tea.Cmd {
+func waitForEventCmd(ch <-chan *bspb.GameEvent, gen int) tea.Cmd {
 	return func() tea.Msg {
 		e, ok := <-ch
 		if !ok {
-			return disconnectedMsg{err: fmt.Errorf("event stream closed")}
+			return disconnectedMsg{err: fmt.Errorf("event stream closed"), gen: gen}
 		}
-		return eventMsg{event: e}
+		return eventMsg{event: e, gen: gen}
 	}
 }
 
-
-func aggTickCmd() tea.Cmd {
+func aggTickCmd(gen int) tea.Cmd {
 	return tea.Tick(10*time.Second, func(t time.Time) tea.Msg {
-		return aggTickMsg{}
+		return aggTickMsg{gen: gen}
 	})
 }
 
-func gameTickCmd() tea.Cmd {
+func gameTickCmd(gen int) tea.Cmd {
 	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
-		return gameTickMsg{}
+		return gameTickMsg{gen: gen}
 	})
 }

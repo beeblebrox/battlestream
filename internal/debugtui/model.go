@@ -128,6 +128,18 @@ type Model struct {
 	// a replay load error must never quit the program (it would kill the
 	// live dashboard too).
 	embedded bool
+
+	// parentYOffset is the number of rows a parent view (e.g. the combined
+	// TUI's tab bar) renders above this model. Mouse Y coordinates arrive in
+	// terminal space and are shifted down by this amount, so hit-testing
+	// subtracts it before comparing against panel positions computed in View.
+	parentYOffset int
+}
+
+// SetParentYOffset tells the model how many rows a parent view occupies above
+// it, so mouse coordinates can be translated into this model's view space.
+func (m *Model) SetParentYOffset(n int) {
+	m.parentYOffset = n
 }
 
 // SetEmbedded marks the model as embedded in the combined TUI. Embedded
@@ -523,17 +535,22 @@ func (m *Model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // ── Mouse handling ───────────────────────────────────────────────
 
 func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	// Translate terminal-space Y into this model's view space (the combined
+	// TUI renders a tab bar above us; panel positions from View are relative
+	// to our own top row).
+	y := msg.Y - m.parentYOffset
+
 	// Wheel events: route to the panel under the cursor.
 	if tea.MouseEvent(msg).IsWheel() {
 		var cmd tea.Cmd
 		switch {
-		case msg.Y >= m.rawStartY:
+		case y >= m.rawStartY:
 			m.rawVP, cmd = m.rawVP.Update(msg)
-		case msg.Y >= m.row3StartY && msg.X < m.halfWBound:
+		case y >= m.row3StartY && msg.X < m.halfWBound:
 			m.buffVP, cmd = m.buffVP.Update(msg)
-		case msg.Y >= m.row3StartY:
+		case y >= m.row3StartY:
 			m.changesVP, cmd = m.changesVP.Update(msg)
-		case msg.Y >= m.row2StartY && msg.X >= m.halfWBound:
+		case y >= m.row2StartY && msg.X >= m.halfWBound:
 			m.boardVP, cmd = m.boardVP.Update(msg)
 		}
 		return m, cmd
@@ -542,18 +559,18 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	switch msg.Action {
 	case tea.MouseActionPress:
 		if msg.Button == tea.MouseButtonLeft {
-			panel, trackY, trackH := m.identifyScrollbar(msg.X, msg.Y)
+			panel, trackY, trackH := m.identifyScrollbar(msg.X, y)
 			if panel >= 0 {
 				m.scrubbing = true
 				m.scrubPanel = panel
 				m.scrubTrackY = trackY
 				m.scrubTrackH = trackH
-				m.scrubAt(msg.Y)
+				m.scrubAt(y)
 			}
 		}
 	case tea.MouseActionMotion:
 		if m.scrubbing && msg.Button == tea.MouseButtonLeft {
-			m.scrubAt(msg.Y)
+			m.scrubAt(y)
 		}
 	case tea.MouseActionRelease:
 		m.scrubbing = false
