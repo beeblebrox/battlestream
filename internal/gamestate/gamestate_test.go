@@ -4120,3 +4120,161 @@ func TestMinionsSoldTriple_FlagClearedAfterTriple(t *testing.T) {
 		t.Errorf("expected MINIONS_SOLD=1 after post-triple sell, got %d", ac.Value)
 	}
 }
+
+// ── Low-severity sweep regression tests (2026-06) ─────────────────────────────
+
+// TestMinionsSoldBounceToHandNotCounted verifies that a PLAY→HAND transition
+// (bounce back to hand) removes the minion from the board but does NOT
+// increment the MINIONS_SOLD counter, while a real sale afterwards still does.
+func TestMinionsSoldBounceToHandNotCounted(t *testing.T) {
+	m, p := setupRecruitPhase(t)
+	m.UpsertMinion(MinionState{EntityID: 310, Name: "Bouncer", Attack: 2, Health: 2})
+
+	// PLAY→HAND via the Handle ZONE path (bounce effect, not a sale).
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventTagChange,
+		EntityID: 310,
+		Tags:     map[string]string{"ZONE": "HAND"},
+	})
+
+	if m.HasMinion(310) {
+		t.Error("minion should leave the board on PLAY→HAND")
+	}
+	if ac := findAbilityCounter(m, "MINIONS_SOLD"); ac != nil && ac.Value > 0 {
+		t.Errorf("bounce to hand counted as sale: MINIONS_SOLD=%d", ac.Value)
+	}
+
+	// A genuine sale afterwards must still count.
+	m.UpsertMinion(MinionState{EntityID: 311, Name: "Sold", Attack: 1, Health: 1})
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventTagChange,
+		EntityID: 311,
+		Tags:     map[string]string{"ZONE": "SETASIDE"},
+	})
+	ac := findAbilityCounter(m, "MINIONS_SOLD")
+	if ac == nil || ac.Value != 1 {
+		t.Errorf("expected MINIONS_SOLD=1 after real sale, got %+v", ac)
+	}
+}
+
+// TestAddEnchantmentSyncsSnapshotDuringRecruit verifies the board-snapshot
+// invariant for AddEnchantment: an enchantment attached during recruit with no
+// accompanying stat delta must survive into the final board restored by GameEnd.
+func TestAddEnchantmentSyncsSnapshotDuringRecruit(t *testing.T) {
+	m := New()
+	m.GameStart("g1", time.Now())
+	m.SetGameEntityTurn(1) // recruit
+	m.UpsertMinion(MinionState{EntityID: 10, CardID: "BG_TEST_X", Name: "X", Attack: 2, Health: 2})
+	m.UpdateBoardSnapshot() // processor syncs after recruit-phase upserts
+
+	// Enchantment attached without any stat TAG_CHANGE following it.
+	m.AddEnchantment(Enchantment{
+		EntityID: 99, CardID: "BG_TEST_E", TargetID: 10,
+		AttackBuff: 1, HealthBuff: 1, Category: CatGeneral,
+	})
+
+	// Game ends directly from recruit — GameEnd restores the snapshot.
+	m.GameEnd(1, time.Now())
+	board := m.State().Board
+	if len(board) != 1 {
+		t.Fatalf("expected 1 minion on final board, got %d", len(board))
+	}
+	if len(board[0].Enchantments) != 1 {
+		t.Fatalf("enchantment lost at game end — AddEnchantment did not sync the recruit board snapshot")
+	}
+	if board[0].Enchantments[0].EntityID != 99 {
+		t.Errorf("unexpected enchantment on final board: %+v", board[0].Enchantments[0])
+	}
+}
+
+// TestAddEnchantmentNoSnapshotSyncDuringCombat verifies the inverse invariant:
+// during combat the snapshot preserves the recruit board and must NOT be
+// overwritten when an enchantment attaches to a combat-copy board entry.
+func TestAddEnchantmentNoSnapshotSyncDuringCombat(t *testing.T) {
+	m := New()
+	m.GameStart("g1", time.Now())
+	m.SetGameEntityTurn(1)
+	m.UpsertMinion(MinionState{EntityID: 10, CardID: "BG_TEST_X", Name: "X", Attack: 5, Health: 5})
+	m.SetGameEntityTurn(2) // combat — snapshot taken from recruit board
+
+	// Combat copy replaces the recruit entity on the live board.
+	m.RemoveMinion(10)
+	m.UpsertMinion(MinionState{EntityID: 500, CardID: "BG_TEST_X", Name: "X", Attack: 1, Health: 1})
+	m.AddEnchantment(Enchantment{EntityID: 99, CardID: "BG_TEST_E", TargetID: 500})
+
+	m.GameEnd(1, time.Now())
+	board := m.State().Board
+	if len(board) != 1 {
+		t.Fatalf("expected 1 minion on final board, got %d", len(board))
+	}
+	if board[0].EntityID != 10 || board[0].Attack != 5 {
+		t.Errorf("final board should be the recruit snapshot (entity 10, 5/5), got %+v", board[0])
+	}
+	if len(board[0].Enchantments) != 0 {
+		t.Errorf("combat-copy enchantment leaked into the recruit snapshot: %+v", board[0].Enchantments)
+	}
+}
+
+// TestCombatCopySlotMapResetOnGameStart verifies that combat-copy slot
+// assignments from a previous game do not survive into a new game.
+func TestCombatCopySlotMapResetOnGameStart(t *testing.T) {
+	m := New()
+	m.GameStart("g1", time.Now())
+	m.SetGameEntityTurn(1)
+	m.UpsertMinion(MinionState{EntityID: 10, CardID: "BG_TEST_X", Attack: 2, Health: 2})
+	m.SetGameEntityTurn(2) // combat — snapshot taken
+	m.UpdateSnapshotFromCombatCopy(500, "BG_TEST_X", 5, 5)
+	if len(m.combatCopySlotMap) == 0 {
+		t.Fatal("precondition: expected a combat-copy slot assignment")
+	}
+
+	m.GameStart("g2", time.Now())
+	if m.combatCopySlotMap != nil {
+		t.Errorf("combatCopySlotMap not reset on GameStart: %v", m.combatCopySlotMap)
+	}
+}
+
+// TestTripleFormationActiveResetOnNewGame verifies that an unresolved triple
+// gate from a previous game does not suppress sell counting in the next game.
+func TestTripleFormationActiveResetOnNewGame(t *testing.T) {
+	_, p := setupRecruitPhase(t)
+	p.tripleFormationActive = true
+
+	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+
+	if p.tripleFormationActive {
+		t.Error("tripleFormationActive not cleared by resetProcessorState on new game")
+	}
+}
+
+// TestPartnerBoardMarkedStaleOnCombatTransition verifies that in duos the
+// partner board snapshot is flagged stale when a new combat phase begins
+// (it is refreshed — and the flag cleared — when fresh copies are captured).
+func TestPartnerBoardMarkedStaleOnCombatTransition(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+	p.isDuos = true
+	m.SetDuosMode(true)
+	m.SetPartnerBoard([]MinionState{{EntityID: 1, CardID: "BG_TEST_X", Attack: 1, Health: 1}}, 5)
+	if m.State().PartnerBoard.Stale {
+		t.Fatal("fresh partner board should not be stale")
+	}
+
+	// Recruit transition must not mark it stale.
+	_ = p.OnTurnTransition(&action.TurnTransitionAction{GameEntityTurn: 11})
+	if m.State().PartnerBoard.Stale {
+		t.Error("recruit transition must not mark partner board stale")
+	}
+
+	// Combat transition marks it stale.
+	_ = p.OnTurnTransition(&action.TurnTransitionAction{GameEntityTurn: 12})
+	if !m.State().PartnerBoard.Stale {
+		t.Error("combat transition should mark the partner board stale in duos")
+	}
+
+	// A fresh capture clears the flag.
+	m.SetPartnerBoard([]MinionState{{EntityID: 2, CardID: "BG_TEST_Y", Attack: 2, Health: 2}}, 6)
+	if m.State().PartnerBoard.Stale {
+		t.Error("SetPartnerBoard should clear the stale flag")
+	}
+}

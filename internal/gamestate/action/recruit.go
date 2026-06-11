@@ -15,8 +15,15 @@ func (a *MinionBoughtAction) actionMarker()                        {}
 func (a *MinionBoughtAction) recruitPhase()                        {}
 func (a *MinionBoughtAction) AcceptRecruit(v RecruitVisitor) error { return v.OnMinionBought(a) }
 
-// MinionSoldAction fires when a player sells a minion from the board.
-type MinionSoldAction struct{ ActionBase }
+// MinionSoldAction fires when a minion leaves the PLAY zone outside of combat.
+// NewZone is the destination zone (e.g. "GRAVEYARD", "SETASIDE", "HAND"); a
+// PLAY→HAND transition is a bounce back to hand, not a sale, and must not
+// increment the MINIONS_SOLD counter. Empty NewZone means "unknown" and is
+// treated as a sale for backward compatibility.
+type MinionSoldAction struct {
+	ActionBase
+	NewZone string
+}
 
 func (a *MinionSoldAction) actionMarker()                        {}
 func (a *MinionSoldAction) recruitPhase()                        {}

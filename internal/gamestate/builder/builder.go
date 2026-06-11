@@ -131,7 +131,18 @@ func tagUint64(tags map[string]string, key string) uint64 {
 // ── Lifecycle builders ────────────────────────────────────────────────────────
 
 func (b *ActionBuilder) buildGameStart(e parser.GameEvent) action.Action {
-	b.phase = action.PhaseIdle
+	// A CREATE_GAME arriving while the builder still believes a game is in
+	// progress is a potential mid-game reconnect — the same signal OnGameStart
+	// uses to stash state for restoration. Keep the current phase in that case:
+	// on a real reconnect the replayed tag stream continues mid-phase, and
+	// resetting to idle would Drop phase-gated tags (and the dispatcher would
+	// route nothing) until the next TURN transition. OnReconnect confirms or
+	// refutes the reconnect via the following GameEntityTags block; a genuine
+	// new game is re-phased by its first TurnTransitionAction.
+	isReconnect := b.phase == action.PhaseRecruit || b.phase == action.PhaseCombat
+	if !isReconnect {
+		b.phase = action.PhaseIdle
+	}
 	b.gameEntityTurn = 0
 	b.entityCards = make(map[action.EntityID]string)
 	b.entityTypes = make(map[action.EntityID]string)
@@ -141,9 +152,10 @@ func (b *ActionBuilder) buildGameStart(e parser.GameEvent) action.Action {
 		gameID = "game-" + strconv.FormatInt(e.Timestamp.UnixMilli(), 10)
 	}
 	return &action.GameStartAction{
-		ActionBase: b.base(e),
-		GameID:     gameID,
-		Timestamp:  e.Timestamp,
+		ActionBase:  b.base(e),
+		GameID:      gameID,
+		Timestamp:   e.Timestamp,
+		IsReconnect: isReconnect,
 	}
 }
 

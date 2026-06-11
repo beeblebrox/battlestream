@@ -551,3 +551,62 @@ func TestEntityCards_CardIDInheritedFromCache(t *testing.T) {
 		t.Errorf("Card.ID = %q, want \"BP_foo\"", eco.Card.ID)
 	}
 }
+
+// ── Scenario: buildGameStart reconnect detection ──────────────────────────────
+
+// TestBuildGameStart_FreshStartNotReconnect verifies that a CREATE_GAME from
+// idle (or after a completed game) is not flagged as a reconnect.
+func TestBuildGameStart_FreshStartNotReconnect(t *testing.T) {
+	b := builder.New(noopCatalog())
+
+	got := b.Build(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+	a, ok := got.(*action.GameStartAction)
+	if !ok {
+		t.Fatalf("expected *action.GameStartAction, got %T", got)
+	}
+	if a.IsReconnect {
+		t.Error("fresh game start from idle flagged as reconnect")
+	}
+
+	// Play a game to completion, then start another — still not a reconnect.
+	b.Build(turnEvent(1))
+	b.Build(parser.GameEvent{Type: parser.EventGameEnd, Tags: map[string]string{}})
+	got = b.Build(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+	a, ok = got.(*action.GameStartAction)
+	if !ok {
+		t.Fatalf("expected *action.GameStartAction, got %T", got)
+	}
+	if a.IsReconnect {
+		t.Error("game start after a completed game flagged as reconnect")
+	}
+}
+
+// TestBuildGameStart_MidGameIsReconnect verifies that a CREATE_GAME arriving
+// while a game is in progress sets IsReconnect and keeps the builder phase, so
+// phase-gated tags in the replayed stream are not dropped before the next
+// TURN transition.
+func TestBuildGameStart_MidGameIsReconnect(t *testing.T) {
+	b := builder.New(noopCatalog())
+	b.Build(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+	b.Build(turnEvent(1)) // odd → PhaseRecruit: game in progress
+
+	got := b.Build(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+	a, ok := got.(*action.GameStartAction)
+	if !ok {
+		t.Fatalf("expected *action.GameStartAction, got %T", got)
+	}
+	if !a.IsReconnect {
+		t.Error("mid-game CREATE_GAME not flagged as potential reconnect")
+	}
+
+	// Builder phase must be preserved: a recruit-gated tag right after the
+	// reconnect CREATE_GAME must build, not Drop.
+	tagGot := b.Build(parser.GameEvent{
+		Type:     parser.EventTagChange,
+		EntityID: 50,
+		Tags:     map[string]string{"BACON_FREE_REFRESH_COUNT": "2"},
+	})
+	if _, ok := tagGot.(*action.EconomyChangedAction); !ok {
+		t.Errorf("recruit-gated tag after reconnect CREATE_GAME: expected *action.EconomyChangedAction, got %T", tagGot)
+	}
+}

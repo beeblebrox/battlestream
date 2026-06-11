@@ -127,6 +127,12 @@ func (p *Processor) OnTurnTransition(a *action.TurnTransitionAction) error {
 		p.pruneStaleEntities()
 		p.combatCopies = nil
 	}
+	// On combat transitions in duos, the partner board captured during the
+	// previous combat is now outdated. Mark it stale; SetPartnerBoard clears
+	// the flag again if fresh combat copies are captured during this combat.
+	if turn%2 == 0 && p.isDuos {
+		p.machine.MarkPartnerBoardStale()
+	}
 	return nil
 }
 
@@ -836,7 +842,6 @@ func (p *Processor) OnCombatPlayerChanged(a *action.CombatPlayerChangedAction) e
 	// Start tracking partner combat if this is the partner's turn to fight.
 	if combatPlayerID > 0 && combatPlayerID == p.partnerPlayerID {
 		p.partnerCombatActive = true
-		p.partnerCombatHeroCtrl = 0
 		p.partnerCombatMinions = nil
 		p.opponentCombatMinions = nil
 		p.partnerBoardSetupDone = false
@@ -885,7 +890,10 @@ func (p *Processor) OnMinionSold(a *action.MinionSoldAction) error {
 	if p.machine.Phase() == PhaseRecruit {
 		p.machine.UpdateBoardSnapshot()
 	}
-	if isRecruit && isOnBoard && !p.tripleFormationActive {
+	// PLAY→HAND is a bounce back to hand (e.g. return-to-hand effects), not a
+	// sale — the minion leaves the board but the sold counter must not move.
+	bouncedToHand := a.NewZone == "HAND"
+	if isRecruit && isOnBoard && !p.tripleFormationActive && !bouncedToHand {
 		count := p.machine.GetAbilityCounter("MINIONS_SOLD") + 1
 		p.machine.SetAbilityCounter("MINIONS_SOLD", count, fmt.Sprintf("%d", count))
 	}
@@ -1160,13 +1168,13 @@ func (p *Processor) resetProcessorState() {
 	p.punishLeaversActive = false
 	p.duosFromTeammate = false
 	p.partnerCombatActive = false
-	p.partnerCombatHeroCtrl = 0
 	p.partnerCombatMinions = nil
 	p.opponentCombatMinions = nil
 	p.partnerBoardSetupDone = false
 	p.combatPhaseActive = false
 	p.combatPhaseEntityIDs = nil
 	p.combatCopies = nil
+	p.tripleFormationActive = false
 	p.entityController = make(map[int]int)
 	p.heroEntities = make(map[int]bool)
 	p.entityProps = make(map[int]*entityInfo)

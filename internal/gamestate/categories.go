@@ -31,6 +31,12 @@ var categoryByEnchantmentCardID = map[string]string{
 	"BG_ShopBuff":             CatShopBuff,     // Generic shop buff (Staff of Enrichment, Shadowdancer, etc.)
 	"BG_ShopBuff_Elemental":   CatNomi,         // Nomi shop buff total
 	"BG30_MagicItem_544pe":    CatNomi,          // Nomi Sticker
+	// BGS_104pe (NomiKitchenNightmare_NomiPlayerEnchantDnt) intentionally has NO
+	// handleDntTagChange case: HDT's ShopBuffStatsCounter uses BGS_104 (Nomi) only
+	// as the UI display card and reads counter values exclusively from
+	// BG_ShopBuff_Elemental script data. Adding an SD handler for BGS_104pe would
+	// risk double-counting the same Nomi buffs. The mapping here exists only so
+	// ClassifyEnchantment labels the attached enchantment as Nomi.
 	"BGS_104pe":               CatNomi,          // NomiKitchenNightmare Dnt (regular Nomi)
 	"BG34_855pe":              CatNomiAll,       // NomiKitchenDream Dnt (Timewarped Nomi - buffs ALL)
 	"BG34_689e2":              CatBloodgemBarrage,

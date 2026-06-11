@@ -41,8 +41,17 @@ func New(out chan<- GameEvent) *Parser {
 // Also handles midnight wrap: if a timestamp appears earlier than the previous one,
 // the reference date is advanced by one day.
 func (p *Parser) SetReferenceDate(t time.Time) {
-	p.refDate = t.Truncate(24 * time.Hour)
+	p.refDate = startOfDay(t)
 	p.lastTS = time.Time{} // reset midnight wrap detection for new file
+}
+
+// startOfDay returns midnight of t's calendar day in t's own location.
+// time.Truncate(24h) must not be used here: it truncates on the UTC epoch,
+// which shifts the date backwards for zones ahead of UTC (e.g. 05:00 in
+// UTC+10 truncates to the previous calendar day).
+func startOfDay(t time.Time) time.Time {
+	y, m, d := t.Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, t.Location())
 }
 
 // blockTagMinIndent is the minimum number of leading spaces for block tag
@@ -130,15 +139,7 @@ func (p *Parser) Feed(line string) {
 			return
 		}
 		// Non-tag line ends the GameEntity block — emit accumulated tags.
-		if len(p.createGameEntityTags) > 0 {
-			p.emit(GameEvent{
-				Type: EventGameEntityTags,
-				Timestamp: ts,
-				Tags: p.createGameEntityTags,
-			})
-		}
-		p.inCreateGameEntity = false
-		p.createGameEntityTags = nil
+		p.flushCreateGameEntityTags(ts)
 	}
 
 	// If we're inside a FULL_ENTITY / SHOW_ENTITY block, check for
@@ -297,9 +298,31 @@ func (p *Parser) Feed(line string) {
 }
 
 // Flush emits any pending buffered block event. Call after the last line to
-// ensure a trailing FULL_ENTITY / SHOW_ENTITY block is not lost.
+// ensure a trailing FULL_ENTITY / SHOW_ENTITY block or a trailing CREATE_GAME
+// GameEntity tag block is not lost.
 func (p *Parser) Flush() {
+	if p.inCreateGameEntity {
+		ts := p.lastTS
+		if ts.IsZero() {
+			ts = time.Now()
+		}
+		p.flushCreateGameEntityTags(ts)
+	}
 	p.flushPending()
+}
+
+// flushCreateGameEntityTags emits the accumulated CREATE_GAME GameEntity tag
+// block (if any) and resets the capture state.
+func (p *Parser) flushCreateGameEntityTags(ts time.Time) {
+	if len(p.createGameEntityTags) > 0 {
+		p.emit(GameEvent{
+			Type:      EventGameEntityTags,
+			Timestamp: ts,
+			Tags:      p.createGameEntityTags,
+		})
+	}
+	p.inCreateGameEntity = false
+	p.createGameEntityTags = nil
 }
 
 func (p *Parser) flushPending() {
@@ -336,15 +359,17 @@ func (p *Parser) extractTimestamp(line string) time.Time {
 	}
 	ref := p.refDate
 	if ref.IsZero() {
-		ref = time.Now().Truncate(24 * time.Hour)
+		ref = startOfDay(time.Now())
 		p.refDate = ref
 	}
 	ts := time.Date(ref.Year(), ref.Month(), ref.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), ref.Location())
 	// Midnight wrap detection: if this timestamp is before the last one by more
 	// than 12 hours, assume we crossed midnight and advance the reference date.
+	// AddDate (not Add(24h)) keeps the wall-clock date correct across DST changes.
 	if !p.lastTS.IsZero() && ts.Before(p.lastTS) && p.lastTS.Sub(ts) > 12*time.Hour {
-		p.refDate = p.refDate.Add(24 * time.Hour)
-		ts = ts.Add(24 * time.Hour)
+		p.refDate = p.refDate.AddDate(0, 0, 1)
+		ts = time.Date(p.refDate.Year(), p.refDate.Month(), p.refDate.Day(),
+			t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), p.refDate.Location())
 	}
 	p.lastTS = ts
 	return ts
