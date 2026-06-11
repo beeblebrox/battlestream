@@ -19,6 +19,7 @@ import (
 	"battlestream.fixates.io/internal/gamestate"
 	"battlestream.fixates.io/internal/parser"
 	"battlestream.fixates.io/internal/store"
+	"battlestream.fixates.io/internal/textutil"
 )
 
 // replayLoadedMsg is sent when async loading completes.
@@ -870,17 +871,13 @@ func (m *Model) viewPicker() string {
 		if name == "" {
 			name = "(unknown)"
 		}
-		if len(name) > 20 {
-			name = name[:19] + "…"
-		}
+		name = textutil.Truncate(name, 20)
 
 		hero := gamestate.CardName(g.HeroCardID)
 		if hero == "" {
 			hero = "—"
 		}
-		if len(hero) > 30 {
-			hero = hero[:29] + "…"
-		}
+		hero = textutil.Truncate(hero, 30)
 
 		place := "—"
 		if g.Placement > 0 {

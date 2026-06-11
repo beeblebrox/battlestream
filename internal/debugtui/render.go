@@ -9,6 +9,7 @@ import (
 
 	"battlestream.fixates.io/internal/gamestate"
 	"battlestream.fixates.io/internal/parser"
+	"battlestream.fixates.io/internal/textutil"
 )
 
 // Style constants (copied from internal/tui/tui.go to avoid coupling).
@@ -69,9 +70,7 @@ func renderMinion(mn gamestate.MinionState) string {
 	if name == "" {
 		name = gamestate.CardName(mn.CardID)
 	}
-	if len(name) > 22 {
-		name = name[:21] + "…"
-	}
+	name = textutil.Truncate(name, 22)
 	stats := fmt.Sprintf("%d/%d", mn.Attack, mn.Health)
 	return fmt.Sprintf("  %s %s",
 		styleValue.Render(fmt.Sprintf("%-22s", name)),
@@ -142,11 +141,7 @@ func renderEvent(e parser.GameEvent) string {
 	parts = append(parts, string(e.Type))
 
 	if e.EntityName != "" {
-		name := e.EntityName
-		if len(name) > 40 {
-			name = name[:39] + "…"
-		}
-		parts = append(parts, name)
+		parts = append(parts, textutil.Truncate(e.EntityName, 40))
 	} else if e.EntityID > 0 {
 		parts = append(parts, fmt.Sprintf("id=%d", e.EntityID))
 	}
@@ -187,21 +182,25 @@ var eventTypeNames = []string{
 	string(parser.EventPlayerName),
 }
 
-// wrapLine splits a line into multiple lines that fit within maxWidth characters.
+// wrapLine splits a line into multiple lines of at most maxWidth runes each.
 func wrapLine(line string, maxWidth int) []string {
 	if maxWidth <= 0 {
 		maxWidth = 80
 	}
-	if len(line) <= maxWidth {
+	if len(line) <= maxWidth { // byte length bounds rune length — fast path
+		return []string{line}
+	}
+	runes := []rune(line)
+	if len(runes) <= maxWidth {
 		return []string{line}
 	}
 	var lines []string
-	for len(line) > maxWidth {
-		lines = append(lines, line[:maxWidth])
-		line = line[maxWidth:]
+	for len(runes) > maxWidth {
+		lines = append(lines, string(runes[:maxWidth]))
+		runes = runes[maxWidth:]
 	}
-	if len(line) > 0 {
-		lines = append(lines, line)
+	if len(runes) > 0 {
+		lines = append(lines, string(runes))
 	}
 	return lines
 }

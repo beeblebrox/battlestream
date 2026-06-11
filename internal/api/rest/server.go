@@ -152,8 +152,16 @@ func (s *Server) Serve(ctx context.Context, addr string) error {
 	mux.HandleFunc("GET /v1/events", s.withAuth(s.handleSSE))
 
 	// Dashboard — serve embedded SPA
-	dashSub, _ := fs.Sub(dashboardFS, "dashboard")
-	mux.Handle("GET /dashboard/", http.StripPrefix("/dashboard/", http.FileServer(http.FS(dashSub))))
+	if dashSub, err := fs.Sub(dashboardFS, "dashboard"); err != nil {
+		// Should be impossible with a correct embed, but don't serve a
+		// broken FileServer that panics later — fail with an explicit 404.
+		slog.Error("dashboard assets unavailable", "err", err)
+		mux.HandleFunc("GET /dashboard/", func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "dashboard assets unavailable", http.StatusNotFound)
+		})
+	} else {
+		mux.Handle("GET /dashboard/", http.StripPrefix("/dashboard/", http.FileServer(http.FS(dashSub))))
+	}
 	mux.HandleFunc("GET /dashboard", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/dashboard/", http.StatusMovedPermanently)
 	})
