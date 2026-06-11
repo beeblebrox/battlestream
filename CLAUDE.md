@@ -51,7 +51,7 @@ scripts/safe-test.sh ./internal/gamestate/
 scripts/safe-test.sh -run TestProcessorIntegration ./internal/gamestate/
 ```
 
-The wrapper copies `~/.battlestream/` to a temp directory, sets `BS_CONFIG_DIR` and `BS_DATA_DIR` env vars to that temp location, and cleans up on exit. This prevents accidental writes to the real config or database during testing.
+The wrapper copies `~/.battlestream/` to a temp directory, sets `BS_CONFIG_DIR` and `BS_DATA_DIR` env vars to that temp location (`internal/config` honors `BS_CONFIG_DIR` via `config.BaseDir()`), and also overrides `HOME` to the temp dir so code paths that derive `~/.battlestream` directly are isolated too. Go build/module caches are pinned to their real locations first. Everything is cleaned up on exit. This prevents accidental writes to the real config or database during testing.
 
 ## Architecture
 
