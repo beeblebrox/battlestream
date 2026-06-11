@@ -137,6 +137,7 @@ func NewStateTracker() StateTracker {
 		p.AsRecruitVisitor(),
 		p.AsCombatVisitor(),
 		p.AsTransitionVisitor(),
+		p.Touch,
 	)
 	return &machineStateTracker{machine: m, processor: p, builder: bldr, dispatcher: disp}
 }

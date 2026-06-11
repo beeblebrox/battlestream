@@ -263,6 +263,7 @@ func startDaemon(ctx context.Context, cfg *config.Config, profile *config.Profil
 		proc.AsRecruitVisitor(),
 		proc.AsCombatVisitor(),
 		proc.AsTransitionVisitor(),
+		proc.Touch, // keep the staleness clock fresh on the dispatcher path
 	)
 
 	go func() {
@@ -277,6 +278,10 @@ func startDaemon(ctx context.Context, cfg *config.Config, profile *config.Profil
 				if !ok {
 					return
 				}
+				// Routing contract: a concrete action → dispatcher; action.Drop
+				// (deliberately gated event) → dispatcher no-op, never Handle;
+				// nil (not yet migrated) → legacy Handle. Both Dispatch and
+				// Handle refresh the staleness clock (Processor.Touch).
 				if a := bldr.Build(e); a != nil {
 					if err := disp.Dispatch(a); err != nil {
 						slog.Warn("dispatcher error", "err", err, "type", fmt.Sprintf("%T", a))
@@ -978,6 +983,7 @@ func cmdReparse() *cobra.Command {
 				proc.AsRecruitVisitor(),
 				proc.AsCombatVisitor(),
 				proc.AsTransitionVisitor(),
+				proc.Touch,
 			)
 
 			// Process events in a goroutine.

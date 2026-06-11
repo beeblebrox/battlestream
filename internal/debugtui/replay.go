@@ -71,6 +71,7 @@ func LoadAllGamesWithProgress(paths []string, prog *loadProgress) (*Replay, erro
 		proc.AsRecruitVisitor(),
 		proc.AsCombatVisitor(),
 		proc.AsTransitionVisitor(),
+		proc.Touch,
 	)
 
 	var steps []Step

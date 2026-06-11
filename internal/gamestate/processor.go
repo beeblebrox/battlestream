@@ -209,9 +209,19 @@ func NewProcessor(m *Machine) *Processor {
 	}
 }
 
+// Touch refreshes the staleness clock used by CheckStaleness. Handle calls it
+// for every event it processes, and the ActionDispatcher calls it for every
+// dispatched action — so the clock advances for EVERY routed event no matter
+// which path it takes (dispatcher, deliberate builder drop, or legacy Handle).
+// lastEventTime is unsynchronized: Touch and CheckStaleness must be called
+// from the same goroutine (the daemon's event loop already does this).
+func (p *Processor) Touch() {
+	p.lastEventTime = time.Now()
+}
+
 // Handle processes a single GameEvent and updates the game state.
 func (p *Processor) Handle(e parser.GameEvent) {
-	p.lastEventTime = time.Now()
+	p.Touch()
 
 	// For migrated event types, Handle() is a thin adapter: it constructs the typed
 	// action and calls the visitor method. Direct callers (tests, legacy code) continue

@@ -38,9 +38,17 @@ func New(catalog card.Catalog) *ActionBuilder {
 	}
 }
 
-// Build converts e into a typed Action. Returns nil if the event type is not
-// yet handled (non-migrated events during incremental migration). The dispatcher
-// silently skips nil returns.
+// Build converts e into a typed Action. The return value defines the routing
+// contract with callers:
+//
+//   - a concrete action: the event is migrated — route it to the dispatcher.
+//   - action.Drop: the event is migrated AND deliberately discarded (e.g. a
+//     phase-gated tag outside its valid phase). It must NOT fall through to
+//     the legacy Processor.Handle path; the dispatcher treats it as a no-op.
+//   - nil: the event/tag is not yet migrated — fall through to Handle.
+//
+// The builder is the single source of truth for migrated tags: once a tag is
+// classified here, Handle must never see it via the daemon routing.
 func (b *ActionBuilder) Build(e parser.GameEvent) action.Action {
 	// Cache card ID by entity ID so tag-change events can inherit card info
 	// from their entity's earlier FULL_ENTITY/SHOW_ENTITY block.
@@ -66,13 +74,13 @@ func (b *ActionBuilder) Build(e parser.GameEvent) action.Action {
 	}
 
 	// Populate entityTypes cache for Phase 8 (hero vs minion disambiguation in buildTagChange).
-	// Returns nil — EventEntityUpdate is still handled by Handle() in Phase 7.4.
+	// Returns nil (fall-through) — EventEntityUpdate is still handled by Handle() in Phase 7.4.
 	if e.Type == parser.EventEntityUpdate && e.EntityID != 0 {
 		if ct := e.Tags["CARDTYPE"]; ct != "" {
 			b.entityTypes[action.EntityID(e.EntityID)] = ct
 		}
 	}
-	return nil
+	return nil // not migrated: fall through to Processor.Handle
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -208,6 +216,11 @@ func (b *ActionBuilder) buildReconnect(e parser.GameEvent) action.Action {
 // recruit-phase only. BACON_PLAYER_EXTRA_GOLD_NEXT_TURN is special: it fires
 // during both recruit (normal gold grant) and combat (Overconfidence mechanic),
 // so we emit the appropriate action type per phase.
+//
+// Phase/value gates inside migrated cases return action.Drop, NOT nil: the
+// event was classified and rejected, so it must not leak into the ungated
+// legacy Handle path. Only the final unmatched-tag return is nil (fall-through
+// for tags that are not yet migrated).
 func (b *ActionBuilder) buildTagChange(e parser.GameEvent) action.Action {
 	for tag, rawStr := range e.Tags {
 		switch tag {
@@ -215,7 +228,10 @@ func (b *ActionBuilder) buildTagChange(e parser.GameEvent) action.Action {
 			"BACON_ELEMENTAL_BUFFATKVALUE", "BACON_ELEMENTAL_BUFFHEALTHVALUE",
 			"TAVERN_SPELL_ATTACK_INCREASE", "TAVERN_SPELL_HEALTH_INCREASE":
 			if b.phase != action.PhaseRecruit {
-				return nil
+				// Drop: combat save/restore enchantments (e.g. BG29_813e) zero
+				// these tags outside recruit; processing them would corrupt the
+				// buff source counters.
+				return action.Drop
 			}
 			val, _ := strconv.Atoi(rawStr)
 			return &action.PlayerTagChangedAction{
@@ -228,7 +244,9 @@ func (b *ActionBuilder) buildTagChange(e parser.GameEvent) action.Action {
 
 		case "BACON_FREE_REFRESH_COUNT":
 			if b.phase != action.PhaseRecruit {
-				return nil
+				// Drop: free refreshes are a recruit-phase economy counter;
+				// out-of-phase updates are save/restore noise.
+				return action.Drop
 			}
 			raw, _ := strconv.Atoi(rawStr)
 			return &action.EconomyChangedAction{
@@ -262,7 +280,9 @@ func (b *ActionBuilder) buildTagChange(e parser.GameEvent) action.Action {
 					EntityName:   e.EntityName,
 				}
 			}
-			return nil
+			// Drop: gold-next-turn outside an active turn phase (idle/game-over)
+			// is meaningless — there is no upcoming turn to grant it on.
+			return action.Drop
 
 		case "PLAYER_TRIPLES":
 			val, _ := strconv.Atoi(rawStr)
@@ -330,7 +350,9 @@ func (b *ActionBuilder) buildTagChange(e parser.GameEvent) action.Action {
 					EntityName:      e.EntityName,
 				}
 			}
-			return nil
+			// Drop: a non-positive teammate ID carries no partner information
+			// (Handle applies the same pid > 0 gate).
+			return action.Drop
 
 		case "HERO_ENTITY":
 			heroID, _ := strconv.Atoi(rawStr)
@@ -342,14 +364,20 @@ func (b *ActionBuilder) buildTagChange(e parser.GameEvent) action.Action {
 					EntityName:   e.EntityName,
 				}
 			}
-			return nil
+			// Drop: a non-positive hero entity ID is not a valid assignment
+			// (Handle applies the same heroID > 0 gate).
+			return action.Drop
 
 		case "PROPOSED_ATTACKER":
 			if b.phase != action.PhaseCombat {
-				return nil
+				// Drop: attack proposals are only meaningful during combat;
+				// out-of-phase events must not perturb win/loss streak state.
+				return action.Drop
 			}
 			if e.EntityName != "GameEntity" {
-				return nil
+				// Drop: only the GameEntity-level proposal drives combat
+				// outcome tracking (Handle applies the same gate).
+				return action.Drop
 			}
 			attackerID, _ := strconv.Atoi(rawStr)
 			isHero := attackerID > 0 && b.entityTypes[action.EntityID(attackerID)] == "HERO"
@@ -361,14 +389,18 @@ func (b *ActionBuilder) buildTagChange(e parser.GameEvent) action.Action {
 
 		case "PROPOSED_DEFENDER":
 			if b.phase != action.PhaseCombat {
-				return nil
+				// Drop: see PROPOSED_ATTACKER — combat-only.
+				return action.Drop
 			}
 			if e.EntityName != "GameEntity" {
-				return nil
+				// Drop: only the GameEntity-level proposal matters.
+				return action.Drop
 			}
 			defenderID, _ := strconv.Atoi(rawStr)
 			if defenderID <= 0 {
-				return nil
+				// Drop: defender ID 0 means "proposal cleared", not an attack
+				// (Handle applies the same defenderID > 0 gate).
+				return action.Drop
 			}
 			isHero := b.entityTypes[action.EntityID(defenderID)] == "HERO"
 			return &action.CombatDefenderAction{
@@ -399,7 +431,9 @@ func (b *ActionBuilder) buildTagChange(e parser.GameEvent) action.Action {
 					ControllerID: ctrl,
 				}
 			}
-			return nil
+			// Drop: a controller change without an entity ID cannot be applied
+			// to the registry (Handle applies the same EntityID > 0 gate).
+			return action.Drop
 
 		case "BACON_CURRENT_COMBAT_PLAYER_ID":
 			combatPlayerID, _ := strconv.Atoi(rawStr)
@@ -411,5 +445,7 @@ func (b *ActionBuilder) buildTagChange(e parser.GameEvent) action.Action {
 			}
 		}
 	}
+	// Not a migrated tag (DAMAGE, ZONE, HEALTH, ATK, BACON_SUBSET_*, ...):
+	// fall through to Processor.Handle.
 	return nil
 }

@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"battlestream.fixates.io/internal/gamestate/action"
+	"battlestream.fixates.io/internal/gamestate/builder"
+	"battlestream.fixates.io/internal/gamestate/card"
 	"battlestream.fixates.io/internal/parser"
 )
 
@@ -2808,6 +2810,161 @@ func TestStaleGameNoopWhenIdle(t *testing.T) {
 	p.lastEventTime = time.Now().Add(-10 * time.Minute)
 	p.CheckStaleness()
 	// No panic or state change
+}
+
+// ── Dual-path routing regression tests (audit M1/M2) ─────────────────────────
+
+// daemonRoute mirrors the daemon's routing contract in cmd/battlestream/main.go:
+// a non-nil build result (concrete action OR action.Drop) goes to the dispatcher;
+// only nil (not migrated) falls through to the legacy Processor.Handle path.
+func daemonRoute(t *testing.T, bldr *builder.ActionBuilder, disp *ActionDispatcher, p *Processor, e parser.GameEvent) {
+	t.Helper()
+	if a := bldr.Build(e); a != nil {
+		if err := disp.Dispatch(a); err != nil {
+			t.Fatalf("dispatch error: %v", err)
+		}
+	} else {
+		p.Handle(e)
+	}
+}
+
+// Audit M1 regression: an event routed through the dispatcher (bypassing
+// Processor.Handle) must refresh the staleness clock. Pre-fix, only Handle()
+// updated lastEventTime, so dispatcher-routed events on a live game would let
+// CheckStaleness force a spurious GAME_OVER.
+func TestStalenessDispatcherPathRefreshesClock(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 20, PlayerID: 7,
+		EntityName: "Moch#1358",
+		Tags:       map[string]string{"TURN": "1"},
+	})
+	if m.Phase() != PhaseRecruit {
+		t.Fatalf("expected RECRUIT, got %s", m.Phase())
+	}
+
+	disp := NewActionDispatcher(
+		p.AsRecruitVisitor(), p.AsCombatVisitor(), p.AsTransitionVisitor(), p.Touch)
+
+	// Clock is past the staleness deadline, then a dispatcher-routed event arrives.
+	p.lastEventTime = time.Now().Add(-4 * time.Minute)
+	if err := disp.Dispatch(&action.TurnTransitionAction{
+		NewPhase:       action.PhaseRecruit,
+		GameEntityTurn: 3,
+	}); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+
+	p.CheckStaleness()
+	if m.Phase() == PhaseGameOver {
+		t.Error("dispatcher-routed event did not refresh the staleness clock: CheckStaleness force-ended a live game")
+	}
+}
+
+// Audit M1 regression: a deliberately dropped (phase-gated) event still
+// represents live log activity and must refresh the staleness clock.
+func TestStalenessDroppedEventRefreshesClock(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 20, PlayerID: 7,
+		EntityName: "Moch#1358",
+		Tags:       map[string]string{"TURN": "1"},
+	})
+
+	disp := NewActionDispatcher(
+		p.AsRecruitVisitor(), p.AsCombatVisitor(), p.AsTransitionVisitor(), p.Touch)
+
+	p.lastEventTime = time.Now().Add(-4 * time.Minute)
+	if err := disp.Dispatch(action.Drop); err != nil {
+		t.Fatalf("dispatch(Drop): %v", err)
+	}
+
+	p.CheckStaleness()
+	if m.Phase() == PhaseGameOver {
+		t.Error("dropped event did not refresh the staleness clock: CheckStaleness force-ended a live game")
+	}
+}
+
+// Audit M2 regression: BACON_FREE_REFRESH_COUNT during COMBAT is deliberately
+// gated by the builder. Pre-fix, the builder returned nil for the out-of-phase
+// tag and the daemon fell through to Processor.Handle, whose case has NO phase
+// guard — so the "gated" event leaked into the counter via the legacy path.
+// With the routing contract, the builder returns action.Drop and the event is
+// consumed without touching state on EITHER path.
+func TestRoutingFreeRefreshDuringCombatNotCounted(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+	bldr := builder.New(card.NewFuncCatalog(CardName))
+	disp := NewActionDispatcher(
+		p.AsRecruitVisitor(), p.AsCombatVisitor(), p.AsTransitionVisitor(), p.Touch)
+
+	freeRefresh := func(v string) parser.GameEvent {
+		return parser.GameEvent{
+			Type:       parser.EventTagChange,
+			PlayerID:   7,
+			EntityName: "Moch#1358",
+			Tags:       map[string]string{"BACON_FREE_REFRESH_COUNT": v},
+		}
+	}
+	gameEntityTurn := func(turn string) parser.GameEvent {
+		return parser.GameEvent{
+			Type: parser.EventTurnStart,
+			Tags: map[string]string{"TURN": turn},
+		}
+	}
+
+	// Recruit turn: the counter must work normally through the dispatcher path
+	// (guards against over-aggressive drop classification breaking migrated tags).
+	daemonRoute(t, bldr, disp, p, gameEntityTurn("1"))
+	daemonRoute(t, bldr, disp, p, freeRefresh("2"))
+	ac := findAbilityCounter(m, CatFreeRefresh)
+	if ac == nil || ac.Value != 2 {
+		t.Fatalf("recruit-phase free refresh should set counter to 2, got %+v", ac)
+	}
+
+	// Combat turn: the same tag must NOT update the counter through either path.
+	daemonRoute(t, bldr, disp, p, gameEntityTurn("2"))
+	if m.Phase() != PhaseCombat {
+		t.Fatalf("expected COMBAT after even GameEntity turn, got %s", m.Phase())
+	}
+	daemonRoute(t, bldr, disp, p, freeRefresh("9"))
+	ac = findAbilityCounter(m, CatFreeRefresh)
+	if ac == nil || ac.Value != 2 {
+		t.Errorf("combat-phase BACON_FREE_REFRESH_COUNT leaked through to the counter: got %+v, want value 2", ac)
+	}
+}
+
+// Audit M2 regression: PROPOSED_ATTACKER outside combat is deliberately gated
+// by the builder. Pre-fix, the nil build result fell through to Handle (whose
+// case has no phase guard) and perturbed the win/loss streak machinery by
+// setting pendingHeroAttackerID.
+func TestRoutingProposedAttackerOutsideCombatDropped(t *testing.T) {
+	_, p := newProc()
+	setupGame(p)
+	bldr := builder.New(card.NewFuncCatalog(CardName))
+	disp := NewActionDispatcher(
+		p.AsRecruitVisitor(), p.AsCombatVisitor(), p.AsTransitionVisitor(), p.Touch)
+
+	// Recruit phase.
+	daemonRoute(t, bldr, disp, p, parser.GameEvent{
+		Type: parser.EventTurnStart,
+		Tags: map[string]string{"TURN": "1"},
+	})
+
+	// Register a hero entity so a leaked event would be observable.
+	p.heroEntities[99] = true
+
+	daemonRoute(t, bldr, disp, p, parser.GameEvent{
+		Type:       parser.EventTagChange,
+		EntityName: "GameEntity",
+		Tags:       map[string]string{"PROPOSED_ATTACKER": "99"},
+	})
+
+	if p.pendingHeroAttackerID != 0 {
+		t.Errorf("recruit-phase PROPOSED_ATTACKER leaked through to Handle: pendingHeroAttackerID=%d, want 0", p.pendingHeroAttackerID)
+	}
 }
 
 // parseLogFile runs a Power.log through the parser and processor, returning final state.
