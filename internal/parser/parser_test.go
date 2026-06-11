@@ -493,3 +493,99 @@ func TestMidBlockNewGame(t *testing.T) {
 		t.Error("mid-block new game: expected EventGameStart after CREATE_GAME, got none")
 	}
 }
+
+// TestSetReferenceDateLocalMidnightAheadOfUTC verifies that the reference date
+// is truncated to local midnight, not UTC midnight. With Truncate(24h), a
+// reference time of 05:00 in UTC+10 lands on the previous calendar day.
+func TestSetReferenceDateLocalMidnightAheadOfUTC(t *testing.T) {
+	zone := time.FixedZone("UTC+10", 10*3600)
+	ch := make(chan GameEvent, 4)
+	p := New(ch)
+	p.SetReferenceDate(time.Date(2026, 6, 10, 5, 0, 0, 0, zone))
+
+	p.Feed("D 12:00:00.0000000 GameState.DebugPrintPower() - CREATE_GAME")
+	p.Flush()
+	close(ch)
+
+	var events []GameEvent
+	for e := range ch {
+		events = append(events, e)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	ts := events[0].Timestamp
+	y, m, d := ts.Date()
+	if y != 2026 || m != time.June || d != 10 {
+		t.Errorf("expected local date 2026-06-10, got %v", ts)
+	}
+	if ts.Hour() != 12 {
+		t.Errorf("expected hour 12, got %d (%v)", ts.Hour(), ts)
+	}
+}
+
+// TestMidnightWrapAcrossLocalDays verifies the midnight-wrap advance also uses
+// calendar-day semantics (AddDate) so the post-wrap date is the next local day.
+func TestMidnightWrapAcrossLocalDays(t *testing.T) {
+	zone := time.FixedZone("UTC+10", 10*3600)
+	ch := make(chan GameEvent, 8)
+	p := New(ch)
+	p.SetReferenceDate(time.Date(2026, 6, 10, 23, 0, 0, 0, zone))
+
+	p.Feed("D 23:59:58.0000000 GameState.DebugPrintPower() - CREATE_GAME")
+	p.Feed("D 00:00:01.0000000 GameState.DebugPrintPower() - CREATE_GAME")
+	p.Flush()
+	close(ch)
+
+	var events []GameEvent
+	for e := range ch {
+		events = append(events, e)
+	}
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(events))
+	}
+	first, second := events[0].Timestamp, events[1].Timestamp
+	if fy, fm, fd := first.Date(); fy != 2026 || fm != time.June || fd != 10 {
+		t.Errorf("pre-wrap event should be 2026-06-10, got %v", first)
+	}
+	if sy, sm, sd := second.Date(); sy != 2026 || sm != time.June || sd != 11 {
+		t.Errorf("post-wrap event should be 2026-06-11, got %v", second)
+	}
+	if !second.After(first) {
+		t.Errorf("post-wrap event (%v) should be after pre-wrap event (%v)", second, first)
+	}
+}
+
+// TestFlushEmitsPendingGameEntityTags verifies that a CREATE_GAME GameEntity
+// tag block still being accumulated when the input ends is emitted by Flush
+// rather than silently dropped.
+func TestFlushEmitsPendingGameEntityTags(t *testing.T) {
+	ch := make(chan GameEvent, 16)
+	p := New(ch)
+	p.Feed("D 20:04:12.2333830 GameState.DebugPrintPower() - CREATE_GAME")
+	p.Feed("D 20:04:12.2333830 GameState.DebugPrintPower() -     GameEntity EntityID=13")
+	p.Feed("D 20:04:12.2333830 GameState.DebugPrintPower() -         tag=STATE value=RUNNING")
+	p.Feed("D 20:04:12.2333830 GameState.DebugPrintPower() -         tag=TURN value=10")
+	// Input ends here — no non-tag line to close the block.
+	p.Flush()
+	close(ch)
+
+	var found bool
+	for e := range ch {
+		if e.Type == EventGameEntityTags {
+			found = true
+			if e.Tags["STATE"] != "RUNNING" {
+				t.Errorf("expected STATE=RUNNING, got %q", e.Tags["STATE"])
+			}
+			if e.Tags["TURN"] != "10" {
+				t.Errorf("expected TURN=10, got %q", e.Tags["TURN"])
+			}
+			if e.Timestamp.IsZero() {
+				t.Error("flushed GameEntityTags event has a zero timestamp")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("Flush did not emit the pending EventGameEntityTags block")
+	}
+}

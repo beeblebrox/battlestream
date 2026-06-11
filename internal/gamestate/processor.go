@@ -125,7 +125,6 @@ type Processor struct {
 
 	// Partner combat tracking
 	partnerCombatActive   bool          // true while partner's combat is in progress
-	partnerCombatHeroCtrl int           // CONTROLLER of partner's hero copy in combat
 	partnerCombatMinions  []MinionState // collected partner minions during combat
 	opponentCombatMinions []MinionState // collected opponent minions during partner's combat
 	partnerBoardSetupDone bool          // true after first combat action (PROPOSED_ATTACKER) — stops collection
@@ -605,6 +604,7 @@ func (p *Processor) handleTagChange(e parser.GameEvent) {
 			if e.EntityID > 0 && value != "PLAY" && p.machine.Phase() != PhaseGameOver {
 				_ = p.OnMinionSold(&action.MinionSoldAction{
 					ActionBase: action.ActionBase{Entity: action.EntityID(e.EntityID)},
+					NewZone:    value,
 				})
 			}
 
@@ -841,10 +841,7 @@ func (p *Processor) handleEntityUpdate(e parser.GameEvent) {
 	zonePos := parseInt(e.Tags["ZONE_POSITION"])
 	if p.partnerCombatActive && !p.partnerBoardSetupDone &&
 		controllerID > 0 && controllerID == p.localPlayerID {
-		if cardType == "HERO" {
-			// Partner hero copy — CONTROLLER matches localPlayerID during combat.
-			p.partnerCombatHeroCtrl = controllerID
-		} else if cardType == "MINION" && zonePos > 0 &&
+		if cardType == "MINION" && zonePos > 0 &&
 			info.Attack > 0 && info.Health > 0 && info.Zone == "PLAY" {
 			mn := MinionState{
 				EntityID:   e.EntityID,
@@ -1070,7 +1067,6 @@ func (p *Processor) finalizePartnerCombat() {
 	}
 	p.opponentCombatMinions = nil
 
-	p.partnerCombatHeroCtrl = 0
 	p.partnerBoardSetupDone = false
 }
 
@@ -1095,7 +1091,6 @@ func (p *Processor) collectPartnerCombatRetro() {
 			ctrl := p.entityController[eid]
 			if ctrl == p.localPlayerID {
 				heroCtrl = ctrl
-				p.partnerCombatHeroCtrl = ctrl
 				slog.Debug("partner hero found retroactively", "entityID", eid, "ctrl", ctrl)
 				break
 			}

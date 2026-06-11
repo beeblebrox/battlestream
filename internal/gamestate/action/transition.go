@@ -7,6 +7,10 @@ import "time"
 // lifecycle events: start, turn change, game over, reconnect, player identity.
 
 // GameStartAction fires when a new game CREATE_GAME block is processed.
+// IsReconnect is true when the CREATE_GAME arrived while a game was still in
+// progress (a potential mid-game reconnect): the builder then keeps its phase
+// and the dispatcher keeps routing in the current phase instead of resetting
+// to idle. The reconnect is confirmed/refuted by the following ReconnectAction.
 type GameStartAction struct {
 	ActionBase
 	GameID      string

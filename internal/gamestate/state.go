@@ -22,11 +22,16 @@ const (
 
 // BGGameState is the current state of a Battlegrounds game.
 type BGGameState struct {
-	GameID        string        `json:"game_id"`
-	Phase         GamePhase     `json:"phase"`
-	Turn          int           `json:"turn"`          // The BG turn the player sees (from player TURN tag)
-	TavernTier    int           `json:"tavern_tier"`
-	Player        PlayerState   `json:"player"`
+	GameID     string      `json:"game_id"`
+	Phase      GamePhase   `json:"phase"`
+	Turn       int         `json:"turn"` // The BG turn the player sees (from player TURN tag)
+	TavernTier int         `json:"tavern_tier"`
+	Player     PlayerState `json:"player"`
+	// Opponent is never populated: Power.log does not identify a single
+	// "current opponent" for the local player (all non-local heroes share bot
+	// controllers). The field is kept because the REST JSON shape and proto
+	// field 6 (GameState.opponent) already expose it; removing it would be a
+	// breaking API change for consumers that tolerate it being null/absent.
 	Opponent      *PlayerState  `json:"opponent,omitempty"`
 	Board         []MinionState `json:"board,omitempty"`
 	OpponentBoard []MinionState `json:"opponent_board,omitempty"`
@@ -165,10 +170,6 @@ type Machine struct {
 	goldTotal       int           // last RESOURCES value
 	goldUsed        int           // last RESOURCES_USED value
 
-	// Partner (Duos) state
-	partnerGoldTotal int
-	partnerGoldUsed  int
-
 	// Per-turn snapshot accumulation
 	turnSnapshots   []TurnSnapshot
 	prevBuffSources []BuffSource
@@ -240,10 +241,9 @@ func (m *Machine) GameStart(gameID string, t time.Time) {
 	}
 	m.gameEntityTurn = 0
 	m.boardSnapshot = nil
+	m.combatCopySlotMap = nil
 	m.goldTotal = 0
 	m.goldUsed = 0
-	m.partnerGoldTotal = 0
-	m.partnerGoldUsed = 0
 	m.turnSnapshots = nil
 	m.prevBuffSources = nil
 	m.prevAbilityCtrs = nil
@@ -683,33 +683,46 @@ func (m *Machine) RemoveAbilityCounter(category string) {
 func (m *Machine) AddEnchantment(ench Enchantment) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	attached := false
 	// Update existing enchantment if entity ID matches (script data update).
+	updated := false
 	for i, e := range m.state.Enchantments {
 		if e.EntityID == ench.EntityID {
 			m.state.Enchantments[i] = ench
-			m.attachEnchantmentToMinion(ench)
-			return
+			attached = m.attachEnchantmentToMinion(ench)
+			updated = true
+			break
 		}
 	}
-	m.state.Enchantments = append(m.state.Enchantments, ench)
-	m.attachEnchantmentToMinion(ench)
+	if !updated {
+		m.state.Enchantments = append(m.state.Enchantments, ench)
+		attached = m.attachEnchantmentToMinion(ench)
+	}
+	// Board snapshot invariant: any recruit-phase board mutation must be
+	// mirrored into the snapshot, otherwise an enchantment applied without an
+	// accompanying stat delta in the final recruit phase would be lost when
+	// GameEnd restores the snapshot.
+	if attached && m.state.Phase == PhaseRecruit {
+		m.boardSnapshot = deepCopyBoard(m.state.Board)
+	}
 }
 
 // attachEnchantmentToMinion adds or updates the enchantment on its target board minion.
-// Must be called with m.mu held.
-func (m *Machine) attachEnchantmentToMinion(ench Enchantment) {
+// Returns true if a board minion was modified. Must be called with m.mu held.
+func (m *Machine) attachEnchantmentToMinion(ench Enchantment) bool {
 	for i, mn := range m.state.Board {
 		if mn.EntityID == ench.TargetID {
 			for j, e := range mn.Enchantments {
 				if e.EntityID == ench.EntityID {
 					m.state.Board[i].Enchantments[j] = ench
-					return
+					return true
 				}
 			}
 			m.state.Board[i].Enchantments = append(m.state.Board[i].Enchantments, ench)
-			return
+			return true
 		}
 	}
+	return false
 }
 
 // RemoveEnchantmentsForEntity removes all enchantments targeting the given entity.
@@ -771,23 +784,6 @@ func (m *Machine) UpdatePartnerHeroCardID(cardID string) {
 	m.state.Partner.HeroCardID = cardID
 }
 
-
-// UpdatePartnerGold tracks partner gold from RESOURCES/RESOURCES_USED.
-func (m *Machine) UpdatePartnerGold(tag string, value int) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.state.Partner == nil {
-		m.state.Partner = &PlayerState{}
-	}
-	switch tag {
-	case "RESOURCES":
-		m.partnerGoldTotal = value
-		m.state.Partner.MaxGold = value
-	case "RESOURCES_USED":
-		m.partnerGoldUsed = value
-	}
-	m.state.Partner.CurrentGold = m.partnerGoldTotal - m.partnerGoldUsed
-}
 
 // SetPartnerBoard sets the partner board snapshot from combat copy minions.
 func (m *Machine) SetPartnerBoard(minions []MinionState, turn int) {
