@@ -581,8 +581,19 @@ func (p *Processor) OnMinionRegistered(a *action.MinionRegisteredAction) error {
 		return nil
 	}
 	// Register SETASIDE combat copies during combat for snapshot recovery.
+	// Skip while the partner's combat is active: in duos, the PARTNER's combat
+	// copies also have CONTROLLER=localPlayerID (see the partner tracking
+	// comment in handleEntityUpdate), and feeding their buffed stats into
+	// UpdateSnapshotFromCombatCopy would corrupt the local board snapshot
+	// whenever a partner minion shares a CardID with a local board minion.
+	// Constraint: copies created before BACON_CURRENT_COMBAT_PLAYER_ID fires
+	// cannot be attributed per-entity (minion copies carry no PLAYER_ID); those
+	// are handled by clearing combatCopies when partner combat is identified
+	// (see OnCombatPlayerChanged). In solo games partnerCombatActive is never
+	// set, so behavior is unchanged.
 	if a.Zone == "SETASIDE" && a.ControllerID == p.localPlayerID &&
-		p.machine.Phase() == PhaseCombat && info.CardID != "" {
+		p.machine.Phase() == PhaseCombat && info.CardID != "" &&
+		!p.partnerCombatActive {
 		if p.combatCopies == nil {
 			p.combatCopies = make(map[int]*combatCopyPeak)
 		}
@@ -806,6 +817,15 @@ func (p *Processor) OnCombatPlayerChanged(a *action.CombatPlayerChangedAction) e
 		p.partnerCombatMinions = nil
 		p.opponentCombatMinions = nil
 		p.partnerBoardSetupDone = false
+		// Drop combat-copy peak trackers: any copies registered earlier in this
+		// combat that belong to the partner (created before this flag fired —
+		// the same pre-flag window collectPartnerCombatRetro exists for) must
+		// not feed buffed partner stats into the local board snapshot. Local
+		// copies from an earlier local combat lose nothing: their peaks were
+		// already applied to the snapshot (UpdateSnapshotFromCombatCopy only
+		// ever raises stats), and any later raises on them would not be local
+		// recruit stats anyway.
+		p.combatCopies = nil
 		p.collectPartnerCombatRetro()
 	}
 

@@ -2380,6 +2380,191 @@ func TestPartnerBoardCaptureRetroactive(t *testing.T) {
 	}
 }
 
+// setupDuosSnapshotBoard puts a local minion on the board during recruit and
+// snapshots it, then advances to combat. Shared by the partner-combat-copy
+// snapshot corruption tests.
+func setupDuosSnapshotBoard(m *Machine, p *Processor) {
+	m.SetGameEntityTurn(1) // recruit
+	p.entityProps[300] = &entityInfo{
+		Name: "Wrath Weaver", CardID: "BGS_004", CardType: "MINION",
+		Attack: 5, Health: 8, Zone: "PLAY",
+	}
+	p.entityController[300] = 7
+	m.UpsertMinion(MinionState{EntityID: 300, CardID: "BGS_004", Name: "Wrath Weaver", Attack: 5, Health: 8})
+	m.UpdateBoardSnapshot()
+	m.SetGameEntityTurn(2) // combat
+}
+
+// TestDuosPartnerCombatCopyDoesNotCorruptSnapshot is the regression test for
+// audit finding H1: in duos, the PARTNER's combat copies have
+// CONTROLLER=localPlayerID, so they were registered as local combat-copy peak
+// trackers. A partner minion sharing a CardID with a local board minion would
+// raise the local snapshot's stats to the partner's buffed values, corrupting
+// the final restored board.
+func TestDuosPartnerCombatCopyDoesNotCorruptSnapshot(t *testing.T) {
+	m, p := newProc()
+	setupDuosGame(p)
+	setupDuosSnapshotBoard(m, p)
+
+	// Partner's combat starts.
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 20, PlayerID: 7,
+		EntityName: "LocalPlayer#1234",
+		Tags:       map[string]string{"BACON_CURRENT_COMBAT_PLAYER_ID": "8"},
+	})
+
+	// Partner's combat copy of the SAME CardID arrives SETASIDE with
+	// CONTROLLER=7 (localPlayerID — see partner tracking comment in
+	// handleEntityUpdate), then receives the partner's buffed stats.
+	p.Handle(parser.GameEvent{
+		Type: parser.EventEntityUpdate, EntityID: 500, CardID: "BGS_004",
+		EntityName: "Wrath Weaver",
+		Tags:       map[string]string{"CONTROLLER": "7", "CARDTYPE": "MINION", "ZONE": "SETASIDE", "ATK": "1", "HEALTH": "4"},
+	})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 500,
+		Tags: map[string]string{"ATK": "44"},
+	})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 500,
+		Tags: map[string]string{"HEALTH": "99"},
+	})
+
+	// Partner's combat ends.
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 20, PlayerID: 7,
+		EntityName: "LocalPlayer#1234",
+		Tags:       map[string]string{"BACON_CURRENT_COMBAT_PLAYER_ID": "0"},
+	})
+
+	m.GameEnd(3, time.Now())
+	restored := m.State().Board
+	if len(restored) != 1 {
+		t.Fatalf("expected 1 minion on restored board, got %d", len(restored))
+	}
+	if restored[0].Attack != 5 {
+		t.Errorf("Attack: want 5 (original), got %d (corrupted by partner combat copy)", restored[0].Attack)
+	}
+	if restored[0].Health != 8 {
+		t.Errorf("Health: want 8 (original), got %d (corrupted by partner combat copy)", restored[0].Health)
+	}
+}
+
+// TestDuosPartnerCombatCopyRegisteredBeforeFlag covers the retroactive case:
+// the partner's combat copy is created BEFORE BACON_CURRENT_COMBAT_PLAYER_ID
+// fires (and was therefore registered as a peak tracker), but its buffed stats
+// arrive after the flag. Registering it must not corrupt the snapshot once the
+// partner combat is identified.
+func TestDuosPartnerCombatCopyRegisteredBeforeFlag(t *testing.T) {
+	m, p := newProc()
+	setupDuosGame(p)
+	setupDuosSnapshotBoard(m, p)
+
+	// Partner combat copy created BEFORE the combat-player flag fires.
+	p.Handle(parser.GameEvent{
+		Type: parser.EventEntityUpdate, EntityID: 500, CardID: "BGS_004",
+		EntityName: "Wrath Weaver",
+		Tags:       map[string]string{"CONTROLLER": "7", "CARDTYPE": "MINION", "ZONE": "SETASIDE", "ATK": "1", "HEALTH": "4"},
+	})
+
+	// NOW the partner combat flag fires.
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 20, PlayerID: 7,
+		EntityName: "LocalPlayer#1234",
+		Tags:       map[string]string{"BACON_CURRENT_COMBAT_PLAYER_ID": "8"},
+	})
+
+	// Buffed partner stats arrive after the flag.
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 500,
+		Tags: map[string]string{"ATK": "44"},
+	})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 500,
+		Tags: map[string]string{"HEALTH": "99"},
+	})
+
+	// Partner's combat ends.
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 20, PlayerID: 7,
+		EntityName: "LocalPlayer#1234",
+		Tags:       map[string]string{"BACON_CURRENT_COMBAT_PLAYER_ID": "0"},
+	})
+
+	m.GameEnd(3, time.Now())
+	restored := m.State().Board
+	if len(restored) != 1 {
+		t.Fatalf("expected 1 minion on restored board, got %d", len(restored))
+	}
+	if restored[0].Attack != 5 {
+		t.Errorf("Attack: want 5 (original), got %d (corrupted by pre-flag partner combat copy)", restored[0].Attack)
+	}
+	if restored[0].Health != 8 {
+		t.Errorf("Health: want 8 (original), got %d (corrupted by pre-flag partner combat copy)", restored[0].Health)
+	}
+}
+
+// TestDuosLocalCombatCopyStillUpdatesSnapshot verifies the companion behavior:
+// during the LOCAL player's combat in a duos game, combat-copy peak tracking
+// must still recover enchantment-only recruit stats (the intended behavior of
+// UpdateSnapshotFromCombatCopy — see TestCombatCopyStatRecovery for solo).
+func TestDuosLocalCombatCopyStillUpdatesSnapshot(t *testing.T) {
+	m, p := newProc()
+	setupDuosGame(p)
+	setupDuosSnapshotBoard(m, p)
+
+	// LOCAL player's combat starts.
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 20, PlayerID: 7,
+		EntityName: "LocalPlayer#1234",
+		Tags:       map[string]string{"BACON_CURRENT_COMBAT_PLAYER_ID": "7"},
+	})
+
+	// Local combat copy briefly shows the real (enchantment-inclusive) stats
+	// before being stripped to base.
+	p.Handle(parser.GameEvent{
+		Type: parser.EventEntityUpdate, EntityID: 500, CardID: "BGS_004",
+		EntityName: "Wrath Weaver",
+		Tags:       map[string]string{"CONTROLLER": "7", "CARDTYPE": "MINION", "ZONE": "SETASIDE", "ATK": "1", "HEALTH": "4"},
+	})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 500,
+		Tags: map[string]string{"ATK": "25"},
+	})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 500,
+		Tags: map[string]string{"HEALTH": "65"},
+	})
+	// Stripped back to base.
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 500,
+		Tags: map[string]string{"ATK": "1"},
+	})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 500,
+		Tags: map[string]string{"HEALTH": "4"},
+	})
+
+	// Local combat ends.
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 20, PlayerID: 7,
+		EntityName: "LocalPlayer#1234",
+		Tags:       map[string]string{"BACON_CURRENT_COMBAT_PLAYER_ID": "0"},
+	})
+
+	m.GameEnd(3, time.Now())
+	restored := m.State().Board
+	if len(restored) != 1 {
+		t.Fatalf("expected 1 minion on restored board, got %d", len(restored))
+	}
+	if restored[0].Attack != 25 {
+		t.Errorf("Attack: want 25 (peak from local combat copy), got %d", restored[0].Attack)
+	}
+	if restored[0].Health != 65 {
+		t.Errorf("Health: want 65 (peak from local combat copy), got %d", restored[0].Health)
+	}
+}
+
 func TestDuosDntEnchantmentWithBotController(t *testing.T) {
 	m, p := newProc()
 	setupDuosGame(p)
