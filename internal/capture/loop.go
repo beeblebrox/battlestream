@@ -35,6 +35,12 @@ func NewLoop(
 	}
 }
 
+// screenshotFailureLogEvery throttles repeated screenshot-failure logging:
+// the first failure is logged, then one in every N consecutive failures.
+// At a 1s capture interval that is roughly one log line per 30 seconds
+// instead of one per tick.
+const screenshotFailureLogEvery = 30
+
 // finishGame finalizes the current capture session and closes the store,
 // logging (rather than discarding) any errors.
 func (l *Loop) finishGame(placement int) {
@@ -43,6 +49,43 @@ func (l *Loop) finishGame(placement int) {
 	}
 	if err := l.store.Close(); err != nil {
 		slog.Error("failed to close frame store", "err", err)
+	}
+}
+
+// consumeEvents applies events to the state tracker in order, signals event
+// freshness on eventTimeCh, and forwards the catchup marker on caughtUpCh.
+// Because events are applied in order here, the catchup signal is only raised
+// after every backlog event has reached the tracker (no race against the
+// 16K-event channel buffer). Returns when ctx is cancelled or the event
+// source closes.
+func (l *Loop) consumeEvents(ctx context.Context, eventTimeCh chan<- time.Time, caughtUpCh chan<- struct{}) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev, ok := <-l.events.Events():
+			if !ok {
+				return
+			}
+			if ev.Type == EventCatchupComplete {
+				select {
+				case caughtUpCh <- struct{}{}:
+				default:
+				}
+				continue
+			}
+			l.tracker.Apply(ev)
+			// Freshness signal only — never block on it. A blocking send
+			// here could wedge this goroutine forever once Run has exited
+			// (nothing drains the channel after that); dropping is fine
+			// because a pending timestamp is already queued.
+			select {
+			case eventTimeCh <- time.Now():
+			case <-ctx.Done():
+				return
+			default:
+			}
+		}
 	}
 }
 
@@ -59,39 +102,18 @@ func (l *Loop) Run(ctx context.Context) error {
 		caughtUp      = false
 		waitLogged    = false // logged the pre-catchup deferral for the current game
 		emptyIDLogged = false // logged the empty-GameID skip for the current game
+		// Consecutive screenshot failures; throttles error logging so a
+		// persistently broken screenshotter (e.g. grim missing) does not
+		// emit one error line per tick.
+		captureFailures = 0
 	)
 
 	ticker := time.NewTicker(l.interval)
 	defer ticker.Stop()
 
-	// Event consumer goroutine — applies events to state tracker, updates
-	// last event time, and forwards the catchup marker. Because events are
-	// applied in order here, the catchup signal is only raised after every
-	// backlog event has reached the tracker (no race against the 16K-event
-	// channel buffer).
 	eventTimeCh := make(chan time.Time, 256)
 	caughtUpCh := make(chan struct{}, 1)
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case ev, ok := <-l.events.Events():
-				if !ok {
-					return
-				}
-				if ev.Type == EventCatchupComplete {
-					select {
-					case caughtUpCh <- struct{}{}:
-					default:
-					}
-					continue
-				}
-				l.tracker.Apply(ev)
-				eventTimeCh <- time.Now()
-			}
-		}
-	}()
+	go l.consumeEvents(ctx, eventTimeCh, caughtUpCh)
 
 	setCaughtUp := func() {
 		if !caughtUp {
@@ -202,8 +224,16 @@ func (l *Loop) Run(ctx context.Context) error {
 
 				img, err := l.screenshotter.Capture(ctx)
 				if err != nil {
-					slog.Error("screenshot failed", "err", err)
+					captureFailures++
+					if captureFailures == 1 || captureFailures%screenshotFailureLogEvery == 0 {
+						slog.Error("screenshot failed", "err", err,
+							"consecutive_failures", captureFailures)
+					}
 					continue
+				}
+				if captureFailures > 0 {
+					slog.Info("screenshot recovered", "after_failures", captureFailures)
+					captureFailures = 0
 				}
 
 				latency := time.Since(captureStart).Milliseconds()

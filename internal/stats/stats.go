@@ -23,16 +23,20 @@ type GameResult struct {
 }
 
 // Compute calculates AggregateStats from a slice of game results.
+// Results with Placement <= 0 (stale/incomplete games) are skipped; when no
+// result has a valid placement, the zero AggregateStats is returned (in
+// particular BestPlacement/WorstPlacement are 0, meaning "no data").
+//
+// Known limitation: solo (placements 1-8) and duos (placements 1-4) results
+// are averaged together when both appear in the input. Wins/Losses use the
+// correct per-mode threshold, but AvgPlacement/BestPlacement/WorstPlacement
+// mix the two scales. The REST layer (`/v1/stats/aggregate?mode=`) filters
+// results by mode before calling Compute; the store's GetAggregate (used by
+// gRPC GetAggregate and the fileout summary) does not, so those consumers see
+// the mixed average. Per-mode computation here would require an API change
+// and is intentionally out of scope.
 func Compute(results []GameResult) AggregateStats {
-	if len(results) == 0 {
-		return AggregateStats{}
-	}
-
-	stats := AggregateStats{
-		GamesPlayed:    len(results),
-		BestPlacement:  8,
-		WorstPlacement: 1,
-	}
+	var stats AggregateStats
 
 	totalPlacement := 0
 	counted := 0
@@ -53,7 +57,7 @@ func Compute(results []GameResult) AggregateStats {
 		} else {
 			stats.Losses++
 		}
-		if r.Placement < stats.BestPlacement {
+		if stats.BestPlacement == 0 || r.Placement < stats.BestPlacement {
 			stats.BestPlacement = r.Placement
 		}
 		if r.Placement > stats.WorstPlacement {

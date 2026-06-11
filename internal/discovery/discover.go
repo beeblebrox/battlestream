@@ -203,13 +203,26 @@ func PlayerLogPath() string {
 	return filepath.Join(home, "Library", "Logs", "Blizzard Entertainment", "Hearthstone", "Player.log")
 }
 
+// skipUnreadable handles a WalkDir callback error: an unreadable directory is
+// skipped wholesale, while an error on a non-directory entry (or the walk
+// root, d == nil) is ignored so the walk continues. Returning
+// filepath.SkipDir for a non-directory would skip the *remaining entries of
+// the containing directory* (per the SkipDir contract) — potentially the very
+// sibling holding the Hearthstone install.
+func skipUnreadable(d os.DirEntry) error {
+	if d != nil && d.IsDir() {
+		return filepath.SkipDir
+	}
+	return nil
+}
+
 // WalkForInstall walks startDir looking for a Hearthstone install.
 // Returns the first match found, or an error if nothing is found.
 func WalkForInstall(startDir string) (*InstallInfo, error) {
 	var found *InstallInfo
 	err := filepath.WalkDir(startDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			return filepath.SkipDir
+			return skipUnreadable(d)
 		}
 		if !d.IsDir() {
 			return nil
@@ -236,7 +249,7 @@ func WalkForAllInstalls(startDir string) ([]*InstallInfo, error) {
 	var all []*InstallInfo
 	err := filepath.WalkDir(startDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			return filepath.SkipDir
+			return skipUnreadable(d)
 		}
 		if !d.IsDir() {
 			return nil

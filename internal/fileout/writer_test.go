@@ -161,6 +161,95 @@ func TestWriteHistory(t *testing.T) {
 	}
 }
 
+// TestPartnerStatsRemovedOnSoloGame is the regression test for the audit
+// finding that a stale current/partner_stats.json from a duos game survived
+// into subsequent solo games.
+func TestPartnerStatsRemovedOnSoloGame(t *testing.T) {
+	w := newWriter(t)
+	partnerPath := filepath.Join(w.baseDir, "current", "partner_stats.json")
+
+	duos := gamestate.BGGameState{
+		GameID: "duos-game",
+		IsDuos: true,
+		Partner: &gamestate.PlayerState{
+			Name:   "PartnerHero",
+			Health: 25,
+		},
+		StartTime: time.Now(),
+	}
+	if err := w.WriteCurrentState(duos); err != nil {
+		t.Fatal(err)
+	}
+	var ps PlayerStatsFile
+	readJSON(t, partnerPath, &ps)
+	if ps.Name != "PartnerHero" {
+		t.Fatalf("partner stats not written for duos game: %+v", ps)
+	}
+
+	solo := gamestate.BGGameState{
+		GameID:    "solo-game",
+		IsDuos:    false,
+		StartTime: time.Now(),
+	}
+	if err := w.WriteCurrentState(solo); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(partnerPath); !os.IsNotExist(err) {
+		t.Errorf("stale partner_stats.json survived into a solo game (stat err: %v)", err)
+	}
+
+	// Writing another solo state with the file already absent must not error.
+	if err := w.WriteCurrentState(solo); err != nil {
+		t.Fatalf("WriteCurrentState with absent partner file: %v", err)
+	}
+}
+
+// TestPartnerStatsRemovedWhenPartnerUnresolved: a duos state without a
+// resolved partner must also not leave a previous game's partner file around.
+func TestPartnerStatsRemovedWhenPartnerUnresolved(t *testing.T) {
+	w := newWriter(t)
+	partnerPath := filepath.Join(w.baseDir, "current", "partner_stats.json")
+
+	duos := gamestate.BGGameState{
+		GameID:    "duos-game",
+		IsDuos:    true,
+		Partner:   &gamestate.PlayerState{Name: "PartnerHero"},
+		StartTime: time.Now(),
+	}
+	if err := w.WriteCurrentState(duos); err != nil {
+		t.Fatal(err)
+	}
+
+	unresolved := gamestate.BGGameState{
+		GameID:    "duos-game-2",
+		IsDuos:    true,
+		Partner:   nil,
+		StartTime: time.Now(),
+	}
+	if err := w.WriteCurrentState(unresolved); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(partnerPath); !os.IsNotExist(err) {
+		t.Errorf("stale partner_stats.json survived into a partner-less duos state (stat err: %v)", err)
+	}
+}
+
+// TestWriteJSONFilePermissions: output files must stay world-readable for
+// external overlay consumers (CreateTemp defaults to 0600).
+func TestWriteJSONFilePermissions(t *testing.T) {
+	w := newWriter(t)
+	if err := w.WriteCurrentState(gamestate.BGGameState{GameID: "g", StartTime: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(filepath.Join(w.baseDir, "current", "game_state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != 0644 {
+		t.Errorf("expected file mode 0644, got %o", perm)
+	}
+}
+
 func TestAtomicWriteNoTmpLeftBehind(t *testing.T) {
 	w := newWriter(t)
 	state := gamestate.BGGameState{GameID: "g", StartTime: time.Now()}

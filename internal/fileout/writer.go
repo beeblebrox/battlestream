@@ -125,24 +125,37 @@ func (w *Writer) WriteCurrentState(s gamestate.BGGameState) error {
 		return err
 	}
 
-	// Write partner files for Duos games.
-	if s.IsDuos {
-		if s.Partner != nil {
-			if err := w.writeJSON(filepath.Join("current", "partner_stats.json"), PlayerStatsFile{
-				Name:        s.Partner.Name,
-				HeroCardID:  s.Partner.HeroCardID,
-				Health:      s.Partner.Health,
-				Armor:       s.Partner.Armor,
-				SpellPower:  s.Partner.SpellPower,
-				TripleCount: s.Partner.TripleCount,
-				WinStreak:   s.Partner.WinStreak,
-				UpdatedAt:   now,
-			}); err != nil {
-				return err
-			}
+	// Write partner files for Duos games. For non-duos states (or duos states
+	// without a resolved partner yet) remove any stale partner_stats.json left
+	// over from a previous duos game, so overlays don't keep showing it.
+	if s.IsDuos && s.Partner != nil {
+		if err := w.writeJSON(filepath.Join("current", "partner_stats.json"), PlayerStatsFile{
+			Name:        s.Partner.Name,
+			HeroCardID:  s.Partner.HeroCardID,
+			Health:      s.Partner.Health,
+			Armor:       s.Partner.Armor,
+			SpellPower:  s.Partner.SpellPower,
+			TripleCount: s.Partner.TripleCount,
+			WinStreak:   s.Partner.WinStreak,
+			UpdatedAt:   now,
+		}); err != nil {
+			return err
+		}
+	} else {
+		if err := w.removeFile(filepath.Join("current", "partner_stats.json")); err != nil {
+			return err
 		}
 	}
 
+	return nil
+}
+
+// removeFile deletes baseDir/relPath if it exists.
+func (w *Writer) removeFile(relPath string) error {
+	err := os.Remove(filepath.Join(w.baseDir, relPath))
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("removing %s: %w", relPath, err)
+	}
 	return nil
 }
 
@@ -164,23 +177,59 @@ func (w *Writer) WriteHistory(s gamestate.BGGameState) error {
 	return w.writeJSON(filepath.Join("history", name), s)
 }
 
-// writeJSON atomically writes v as JSON to baseDir/relPath.
+// writeJSON atomically and durably writes v as JSON to baseDir/relPath.
+//
+// The temp file is created with a unique name (so a stray second daemon
+// writing the same file cannot interleave with our temp file), fsync'd before
+// the rename (so a crash/power loss cannot leave a truncated target behind),
+// and the containing directory is fsync'd after the rename (so the rename
+// itself is durable).
 func (w *Writer) writeJSON(relPath string, v interface{}) error {
 	full := filepath.Join(w.baseDir, relPath)
-	tmp := full + ".tmp"
+	dir := filepath.Dir(full)
 
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshaling %s: %w", relPath, err)
 	}
 
-	if err := os.WriteFile(tmp, data, 0644); err != nil {
-		return fmt.Errorf("writing temp %s: %w", relPath, err)
+	f, err := os.CreateTemp(dir, filepath.Base(full)+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("creating temp for %s: %w", relPath, err)
+	}
+	tmp := f.Name()
+	cleanup := func(err error) error {
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
+
+	if _, err := f.Write(data); err != nil {
+		return cleanup(fmt.Errorf("writing temp %s: %w", relPath, err))
+	}
+	// CreateTemp uses 0600; these files are consumed by external overlay
+	// tools, keep them world-readable like the previous implementation.
+	if err := f.Chmod(0644); err != nil {
+		return cleanup(fmt.Errorf("chmod temp %s: %w", relPath, err))
+	}
+	if err := f.Sync(); err != nil {
+		return cleanup(fmt.Errorf("syncing temp %s: %w", relPath, err))
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("closing temp %s: %w", relPath, err)
 	}
 
 	if err := os.Rename(tmp, full); err != nil {
 		os.Remove(tmp)
 		return fmt.Errorf("renaming %s: %w", relPath, err)
+	}
+
+	// Best-effort directory sync to make the rename durable. Some platforms
+	// (notably Windows) do not support fsync on directories; ignore errors.
+	if d, err := os.Open(dir); err == nil {
+		_ = d.Sync()
+		_ = d.Close()
 	}
 	return nil
 }

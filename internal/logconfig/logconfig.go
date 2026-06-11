@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 )
 
@@ -149,17 +150,26 @@ func (c *Config) Write(path string) error {
 			fmt.Fprintln(w)
 		}
 		fmt.Fprintf(w, "[%s]\n", s.Name)
-		// Write required fields in deterministic order
-		for _, k := range sectionKeyOrder(s.Name) {
+		// Write the section's well-known fields in deterministic order.
+		ordered := sectionKeyOrder(s.Name)
+		for _, k := range ordered {
 			if v, ok := s.Fields[k]; ok {
 				fmt.Fprintf(w, "%s=%s\n", k, v)
 			}
 		}
-		// Write any extra fields the user might have added
-		for k, v := range s.Fields {
-			if !isRequiredKey(k) {
-				fmt.Fprintf(w, "%s=%s\n", k, v)
+		// Write any extra fields the user might have added, sorted for
+		// deterministic output. "Extra" is judged against this section's own
+		// key order — e.g. a user-set Verbose under a non-Power section must
+		// be preserved, not silently dropped.
+		var extras []string
+		for k := range s.Fields {
+			if !containsFold(ordered, k) {
+				extras = append(extras, k)
 			}
+		}
+		sort.Strings(extras)
+		for _, k := range extras {
+			fmt.Fprintf(w, "%s=%s\n", k, s.Fields[k])
 		}
 	}
 
@@ -231,9 +241,10 @@ func sectionKeyOrder(name string) []string {
 	return keys
 }
 
-func isRequiredKey(k string) bool {
-	for _, req := range []string{"LogLevel", "FilePrinting", "ConsolePrinting", "ScreenPrinting", "Verbose"} {
-		if strings.EqualFold(k, req) {
+// containsFold reports whether keys contains k, case-insensitively.
+func containsFold(keys []string, k string) bool {
+	for _, key := range keys {
+		if strings.EqualFold(k, key) {
 			return true
 		}
 	}
