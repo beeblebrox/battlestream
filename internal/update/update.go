@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/mod/semver"
 	"gopkg.in/yaml.v3"
 )
 
@@ -18,7 +19,11 @@ const (
 	checkInterval = 24 * time.Hour
 	repoSlug      = "beeblebrox/battlestream"
 	stateFile     = "update-state.yaml"
+	httpTimeout   = 10 * time.Second
 )
+
+// httpClient bounds the GitHub API request; the default client has no timeout.
+var httpClient = &http.Client{Timeout: httpTimeout}
 
 type ReleaseInfo struct {
 	Version string `json:"tag_name" yaml:"version"`
@@ -56,7 +61,7 @@ func ShouldCheck(stateDir string) bool {
 // a result if a newer version is available.
 func CheckForUpdate(stateDir, currentVersion string) (*CheckResult, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", repoSlug)
-	resp, err := http.Get(url)
+	resp, err := httpClient.Get(url)
 	if err != nil {
 		return nil, err
 	}
@@ -103,13 +108,21 @@ func AssetName(version string) string {
 	return fmt.Sprintf("battlestream_%s_%s_%s.%s", v, goos, arch, ext)
 }
 
+// isNewer reports whether latest is a strictly newer semantic version than
+// current. Inputs may or may not carry a leading "v". Equal versions are not
+// newer, and per semver a pre-release (e.g. 0.6.1-beta) is lower than its
+// release (0.6.1).
 func isNewer(latest, current string) bool {
-	latest = strings.TrimPrefix(latest, "v")
-	current = strings.TrimPrefix(current, "v")
 	if current == "dev" || current == "" {
 		return false
 	}
-	return latest != current && latest > current
+	// semver.Compare requires a leading "v"; normalize both inputs.
+	l := "v" + strings.TrimPrefix(latest, "v")
+	c := "v" + strings.TrimPrefix(current, "v")
+	if !semver.IsValid(l) || !semver.IsValid(c) {
+		return false
+	}
+	return semver.Compare(l, c) > 0
 }
 
 func statePath(dir string) string {
