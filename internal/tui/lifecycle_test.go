@@ -351,3 +351,75 @@ func TestCombinedReplayMode_ForwardsBackgroundMsgsToLive(t *testing.T) {
 		t.Fatal("gameTickMsg must reach the hidden live model and re-arm its chain")
 	}
 }
+
+// TestCombinedReplayInit_LateResultInstallsRealModel is a regression test for
+// the 5s init-timeout discard (audit H7 adjacent): when replay init exceeded
+// the timeout, an empty model was installed and the real result — delivered
+// later on the done channel — was dropped, leaving the replay tab permanently
+// empty. Now the timeout yields replayInitPendingMsg (the view keeps its
+// loading placeholder) and a follow-up command installs the real model when
+// it arrives.
+func TestCombinedReplayInit_LateResultInstallsRealModel(t *testing.T) {
+	c := &CombinedModel{mode: modeReplay}
+
+	// Simulate the timeout path: init is still in flight.
+	done := make(chan replayInitDoneMsg, 1)
+	_, cmd := c.Update(replayInitPendingMsg{done: done})
+	if c.replay != nil {
+		t.Fatal("pending init must not install a model (placeholder view expects nil replay)")
+	}
+	if c.replayInitialized {
+		t.Fatal("pending init must not mark replay as initialized")
+	}
+	if cmd == nil {
+		t.Fatal("pending init must arm a command that waits for the real model")
+	}
+
+	// The real model eventually arrives on the done channel.
+	real := debugtui.NewFromReplay(&debugtui.Replay{})
+	real.SetEmbedded(true)
+	done <- replayInitDoneMsg{model: real}
+
+	msg := cmd()
+	dm, ok := msg.(replayInitDoneMsg)
+	if !ok {
+		t.Fatalf("expected replayInitDoneMsg from the wait command, got %T", msg)
+	}
+	c.Update(dm)
+
+	if c.replay != real {
+		t.Fatal("late replayInitDoneMsg must install the real model, not be discarded")
+	}
+	if !c.replayInitialized {
+		t.Fatal("late replayInitDoneMsg must mark replay as initialized")
+	}
+}
+
+// TestCombinedSwitchMode_NoDoubleInitWhilePending verifies that tabbing away
+// and back while replay init is still pending does not spawn a second init.
+func TestCombinedSwitchMode_NoDoubleInitWhilePending(t *testing.T) {
+	fc := &fakeClient{}
+	live := &Model{
+		connState:  stateConnected,
+		client:     fc,
+		generation: 1,
+		ctx:        context.Background(),
+	}
+	c := &CombinedModel{mode: modeLive, live: live}
+
+	// First Tab: starts init.
+	if _, cmd := c.Update(tea.KeyMsg{Type: tea.KeyTab}); cmd == nil {
+		t.Fatal("first switch to replay must start init")
+	}
+	if !c.replayInitStarted {
+		t.Fatal("first switch must mark init as started")
+	}
+
+	// Tab back to live, then Tab to replay again while init is pending:
+	// must NOT issue another init command.
+	c.Update(tea.KeyMsg{Type: tea.KeyTab})
+	_, cmd := c.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if cmd != nil {
+		t.Fatal("re-entering replay while init is pending must not spawn a second init")
+	}
+}

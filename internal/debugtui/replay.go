@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 	"time"
 
@@ -18,13 +19,35 @@ import (
 // playerLogPowerPrefix is the category tag prepended to Power lines in Player.log.
 const playerLogPowerPrefix = "[Power] "
 
+// maxRawLinesPerStep caps how many raw log lines a single Step retains.
+// The RAW LOG panel is a scrollable viewport, so a couple hundred lines is
+// far more than is ever read for one step; without a cap, steps that absorb
+// many collapsed no-change events would grow without bound. When truncated,
+// Step.RawLinesDropped records how many leading lines were discarded and the
+// RAW LOG panel header notes the truncation.
+const maxRawLinesPerStep = 200
+
 // Step represents a single parsed event with its associated state snapshot.
 type Step struct {
-	Index    int
-	Event    parser.GameEvent
-	RawLines []string              // log lines that produced this event
-	State    gamestate.BGGameState // snapshot AFTER processing this event
-	Turn     int                   // BG turn number at this point
+	Index           int
+	Event           parser.GameEvent
+	RawLines        []string              // log lines that produced this event (capped at maxRawLinesPerStep)
+	RawLinesDropped int                   // count of leading raw lines truncated by the cap
+	State           gamestate.BGGameState // snapshot AFTER processing this event
+	Turn            int                   // BG turn number at this point
+}
+
+// appendRawLines appends lines to dst, enforcing maxRawLinesPerStep by
+// discarding the oldest lines. It returns the new slice and the updated
+// dropped-line count. The truncated slice is reallocated so the original
+// oversized backing array can be garbage collected.
+func appendRawLines(dst []string, dropped int, lines []string) ([]string, int) {
+	dst = append(dst, lines...)
+	if over := len(dst) - maxRawLinesPerStep; over > 0 {
+		dst = append([]string(nil), dst[over:]...)
+		dropped += over
+	}
+	return dst, dropped
 }
 
 // GameSummary describes a single game found during parsing.
@@ -47,6 +70,10 @@ type GameSummary struct {
 type Replay struct {
 	Steps []Step
 	Games []GameSummary
+	// EventCount is the total number of parsed events, including events that
+	// produced no visible state change and were collapsed into the previous
+	// Step (so len(Steps) <= EventCount).
+	EventCount int
 }
 
 // LoadReplay parses a single Power.log file into steps grouped by game.
@@ -78,9 +105,23 @@ func LoadAllGamesWithProgress(paths []string, prog *loadProgress) (*Replay, erro
 	var games []GameSummary
 	var accum []string
 	var currentFile string
+	eventCount := 0
 
 	// Track current game boundary.
 	gameStepStart := -1
+
+	// foldAccum merges pending raw lines into the most recent step so the
+	// RAW LOG panel still shows them, then clears the accumulator. Used for
+	// events that produced no visible state change (collapsed steps) and for
+	// trailing lines at file boundaries. If no step exists yet, the lines are
+	// dropped.
+	foldAccum := func() {
+		if len(accum) > 0 && len(steps) > 0 {
+			prev := &steps[len(steps)-1]
+			prev.RawLines, prev.RawLinesDropped = appendRawLines(prev.RawLines, prev.RawLinesDropped, accum)
+		}
+		accum = nil
+	}
 
 	drain := func() {
 		for {
@@ -91,14 +132,30 @@ func LoadAllGamesWithProgress(paths []string, prog *loadProgress) (*Replay, erro
 				} else {
 					proc.Handle(evt)
 				}
+				eventCount++
 				snap := machine.State()
-				steps = append(steps, Step{
-					Index:    len(steps),
-					Event:    evt,
-					RawLines: accum,
-					State:    snap,
-					Turn:     snap.Turn,
-				})
+
+				// Snapshot dedup (audit H7): most events change nothing the
+				// snapshot can see, yet each deep-copied BGGameState retained
+				// per event made memory O(events × state-size). Only append a
+				// new Step when the state actually changed; otherwise fold the
+				// event's raw lines into the previous step. Game start/end
+				// events always get a step because game boundary bookkeeping
+				// (gameStepStart/StepEnd) points at them.
+				forced := evt.Type == parser.EventGameStart || evt.Type == parser.EventGameEnd
+				if !forced && len(steps) > 0 && reflect.DeepEqual(steps[len(steps)-1].State, snap) {
+					foldAccum()
+					continue
+				}
+
+				step := Step{
+					Index: len(steps),
+					Event: evt,
+					State: snap,
+					Turn:  snap.Turn,
+				}
+				step.RawLines, step.RawLinesDropped = appendRawLines(nil, 0, accum)
+				steps = append(steps, step)
 				accum = nil
 
 				switch evt.Type {
@@ -119,6 +176,11 @@ func LoadAllGamesWithProgress(paths []string, prog *loadProgress) (*Replay, erro
 	}
 
 	for fileIdx, path := range paths {
+		// Trailing lines of the previous file must not bleed into the first
+		// event of this file: fold them into the previous file's last step.
+		if fileIdx > 0 {
+			foldAccum()
+		}
 		currentFile = path
 		if prog != nil {
 			prog.fileIdx.Store(int32(fileIdx))
@@ -164,6 +226,9 @@ func LoadAllGamesWithProgress(paths []string, prog *loadProgress) (*Replay, erro
 	p.Flush()
 	drain()
 
+	// Fold any trailing raw lines into the last step so they remain visible.
+	foldAccum()
+
 	// If a game was started but never ended, capture it as incomplete.
 	if gameStepStart >= 0 && gameStepStart < len(steps) {
 		games = append(games, buildSummary(
@@ -171,7 +236,7 @@ func LoadAllGamesWithProgress(paths []string, prog *loadProgress) (*Replay, erro
 		))
 	}
 
-	return &Replay{Steps: steps, Games: games}, nil
+	return &Replay{Steps: steps, Games: games, EventCount: eventCount}, nil
 }
 
 // Dump parses the log at path, renders the TUI state at the given BG turn to a plain
@@ -250,7 +315,7 @@ func LoadFromStore(st *store.Store, gameID string) (*Replay, error) {
 		IsDuos:     last.State.IsDuos,
 	}
 
-	return &Replay{Steps: steps, Games: []GameSummary{game}}, nil
+	return &Replay{Steps: steps, Games: []GameSummary{game}, EventCount: len(steps)}, nil
 }
 
 // LoadAllFromStore builds a Replay with all games from the database that have turn snapshots.
@@ -299,7 +364,7 @@ func LoadAllFromStore(st *store.Store) (*Replay, error) {
 		})
 	}
 
-	return &Replay{Steps: allSteps, Games: allGames}, nil
+	return &Replay{Steps: allSteps, Games: allGames, EventCount: len(allSteps)}, nil
 }
 
 func buildSummary(idx int, steps []Step, start, end int, file string) GameSummary {
