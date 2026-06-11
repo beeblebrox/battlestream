@@ -55,6 +55,7 @@ func runDispatchPath(t *testing.T, logPath string) gamestate.BGGameState {
 		proc.AsRecruitVisitor(),
 		proc.AsCombatVisitor(),
 		proc.AsTransitionVisitor(),
+		proc.Touch,
 	)
 
 	drain := func() {
@@ -203,6 +204,7 @@ func TestGoldenState_PhaseEnforcement(t *testing.T) {
 		proc.AsRecruitVisitor(),
 		proc.AsCombatVisitor(),
 		proc.AsTransitionVisitor(),
+		proc.Touch,
 	)
 
 	// Advance dispatcher to PhaseRecruit via a TurnTransitionAction (odd turn).

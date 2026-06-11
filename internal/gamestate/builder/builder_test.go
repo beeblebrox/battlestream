@@ -221,7 +221,9 @@ func TestBuildTurnTransition_EvenIsCombat(t *testing.T) {
 	}
 }
 
-// After a combat turn transition, a buff-source tag-change must return nil.
+// After a combat turn transition, a buff-source tag-change must be deliberately
+// dropped (action.Drop) — NOT nil, which would fall through to the ungated
+// legacy Handle path.
 func TestBuildTurnTransition_PhaseGateCombat(t *testing.T) {
 	b := builder.New(noopCatalog())
 	b.Build(turnEvent(2)) // even → PhaseCombat
@@ -230,8 +232,8 @@ func TestBuildTurnTransition_PhaseGateCombat(t *testing.T) {
 		Type: parser.EventTagChange,
 		Tags: map[string]string{"BACON_BLOODGEMBUFFATKVALUE": "5"},
 	})
-	if got != nil {
-		t.Errorf("expected nil during combat phase for buff-source tag, got %T", got)
+	if got != action.Drop {
+		t.Errorf("expected action.Drop during combat phase for buff-source tag, got %T", got)
 	}
 }
 
@@ -301,8 +303,8 @@ func TestBuildTagChange_BuffSourceTagsCombatPhase(t *testing.T) {
 				Type: parser.EventTagChange,
 				Tags: map[string]string{tag: "3"},
 			})
-			if got != nil {
-				t.Errorf("expected nil during combat for tag %q, got %T", tag, got)
+			if got != action.Drop {
+				t.Errorf("expected action.Drop during combat for tag %q, got %T", tag, got)
 			}
 		})
 	}
@@ -386,15 +388,16 @@ func TestBuildTagChange_ExtraGold_NegativeClamped_Combat(t *testing.T) {
 	}
 }
 
-func TestBuildTagChange_ExtraGold_Idle_ReturnsNil(t *testing.T) {
+func TestBuildTagChange_ExtraGold_Idle_ReturnsDrop(t *testing.T) {
 	b := builder.New(noopCatalog())
-	// No turn transition — phase is PhaseIdle.
+	// No turn transition — phase is PhaseIdle. The tag is migrated, so the
+	// out-of-phase event must be deliberately dropped, not handed to Handle.
 	got := b.Build(parser.GameEvent{
 		Type: parser.EventTagChange,
 		Tags: map[string]string{"BACON_PLAYER_EXTRA_GOLD_NEXT_TURN": "1"},
 	})
-	if got != nil {
-		t.Errorf("expected nil during idle phase, got %T", got)
+	if got != action.Drop {
+		t.Errorf("expected action.Drop during idle phase, got %T", got)
 	}
 }
 

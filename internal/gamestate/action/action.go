@@ -59,6 +59,21 @@ type Action interface {
 	actionMarker()
 }
 
+// dropAction is the sentinel no-op type behind Drop. It deliberately implements
+// only Action (not RecruitPhaseAction/CombatPhaseAction/TransitionAction), so it
+// can never be routed to a visitor.
+type dropAction struct{}
+
+func (dropAction) actionMarker() {}
+
+// Drop is the sentinel returned by builders for events that are deliberately
+// consumed and discarded — e.g. phase-gated tags arriving outside their valid
+// phase. It distinguishes "handled: do nothing" from a nil return, which means
+// "not migrated: fall through to the legacy Processor.Handle path". The
+// dispatcher treats Drop as a silent no-op, so call sites that route every
+// non-nil action to Dispatch are correct without any special casing.
+var Drop Action = dropAction{}
+
 // RecruitPhaseAction can only be dispatched during PhaseRecruit.
 // The unexported recruitPhase() method prevents accidental satisfaction
 // by types defined outside this package.

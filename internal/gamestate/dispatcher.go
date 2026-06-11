@@ -17,16 +17,38 @@ type ActionDispatcher struct {
 	combat     action.CombatVisitor
 	transition action.TransitionVisitor
 	phase      action.GamePhase
+	// touch refreshes the staleness clock on every dispatched action (including
+	// action.Drop). Together with Processor.Handle calling Touch() itself, this
+	// guarantees the clock advances for EVERY routed event regardless of which
+	// path (dispatcher, deliberate drop, or legacy Handle) it takes — so
+	// CheckStaleness never force-ends a live game just because its events were
+	// migrated out of Handle. May be nil (tests that don't care about staleness).
+	touch func()
 }
 
 // NewActionDispatcher constructs a dispatcher wired to the given visitors.
 // The initial phase is PhaseIdle; it advances as TurnTransitionActions arrive.
-func NewActionDispatcher(r action.RecruitVisitor, c action.CombatVisitor, t action.TransitionVisitor) *ActionDispatcher {
-	return &ActionDispatcher{recruit: r, combat: c, transition: t, phase: action.PhaseIdle}
+// touch is invoked on every Dispatch call to refresh the staleness clock —
+// pass the owning Processor's Touch method (nil is allowed for tests).
+func NewActionDispatcher(r action.RecruitVisitor, c action.CombatVisitor, t action.TransitionVisitor, touch func()) *ActionDispatcher {
+	return &ActionDispatcher{recruit: r, combat: c, transition: t, phase: action.PhaseIdle, touch: touch}
 }
 
 // Dispatch routes action a to the appropriate visitor.
 func (d *ActionDispatcher) Dispatch(a action.Action) error {
+	// Every dispatched action represents a live log event — refresh the
+	// staleness clock even when the action is dropped below.
+	if d.touch != nil {
+		d.touch()
+	}
+
+	// action.Drop marks an event the builder deliberately consumed and
+	// discarded (phase/value gate). It is not an error and must not reach a
+	// visitor — return before any phase routing or logging.
+	if a == action.Drop {
+		return nil
+	}
+
 	// Lifecycle actions are phase-agnostic — dispatch first.
 	if ta, ok := a.(action.TransitionAction); ok {
 		if err := ta.AcceptTransition(d.transition); err != nil {
