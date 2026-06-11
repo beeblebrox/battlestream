@@ -3,6 +3,7 @@ package store
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -17,11 +18,12 @@ const (
 	prefixGameMeta  = "game:meta:"
 	prefixGameState = "game:state:"
 	prefixGameList  = "game:list"
-	keyAggWins      = "stat:aggregate:wins"
-	keyAggLosses    = "stat:aggregate:losses"
-	keyAggPlacement = "stat:aggregate:placements"
 	prefixGameTurns = "game:turns:"
 )
+
+// ErrEmptyGameID is returned when a save is attempted with an empty GameID,
+// which would otherwise write records under bare prefix keys.
+var ErrEmptyGameID = errors.New("store: empty GameID")
 
 // Store wraps a BadgerDB instance.
 type Store struct {
@@ -59,36 +61,70 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-// SaveGame persists a game state and updates aggregate stats.
-func (s *Store) SaveGame(meta GameMeta, placement int) error {
+// SaveGame persists game metadata and appends the GameID to the game list.
+// The save is idempotent per GameID: if the ID is already in the list, the
+// metadata is overwritten in place and the list is left unchanged, so
+// duplicate saves never double-count a game. An empty GameID is rejected
+// with ErrEmptyGameID.
+func (s *Store) SaveGame(meta GameMeta) error {
 	return s.db.Update(func(txn *badger.Txn) error {
-		// Save meta
-		metaBytes, err := json.Marshal(meta)
-		if err != nil {
-			return err
-		}
-		if err := txn.Set([]byte(prefixGameMeta+meta.GameID), metaBytes); err != nil {
-			return err
-		}
-
-		// Append gameID to list
-		listKey := []byte(prefixGameList)
-		var ids []string
-		item, err := txn.Get(listKey)
-		if err == nil {
-			if err := item.Value(func(val []byte) error {
-				return json.Unmarshal(val, &ids)
-			}); err != nil {
-				return err
-			}
-		}
-		ids = append(ids, meta.GameID)
-		listBytes, err := json.Marshal(ids)
-		if err != nil {
-			return err
-		}
-		return txn.Set(listKey, listBytes)
+		return saveGameTxn(txn, meta)
 	})
+}
+
+// saveGameTxn writes the game metadata and updates the game list inside an
+// existing transaction.
+//
+// Any failure reading or decoding the existing game list aborts the
+// transaction with an error. A corrupt or unreadable list must never be
+// silently replaced with a fresh one-element list — that would orphan all
+// prior game history. Only badger.ErrKeyNotFound is treated as "no list
+// exists yet".
+func saveGameTxn(txn *badger.Txn, meta GameMeta) error {
+	if meta.GameID == "" {
+		return ErrEmptyGameID
+	}
+
+	// Save meta (idempotent overwrite).
+	metaBytes, err := json.Marshal(meta)
+	if err != nil {
+		return err
+	}
+	if err := txn.Set([]byte(prefixGameMeta+meta.GameID), metaBytes); err != nil {
+		return err
+	}
+
+	// Load the existing game list.
+	listKey := []byte(prefixGameList)
+	var ids []string
+	item, err := txn.Get(listKey)
+	switch {
+	case err == nil:
+		if err := item.Value(func(val []byte) error {
+			return json.Unmarshal(val, &ids)
+		}); err != nil {
+			return fmt.Errorf("decoding game list (refusing to overwrite): %w", err)
+		}
+	case errors.Is(err, badger.ErrKeyNotFound):
+		// First game: start a new list.
+	default:
+		return fmt.Errorf("reading game list: %w", err)
+	}
+
+	// In-transaction dedup: never append the same GameID twice. This is the
+	// authoritative duplicate guard; HasGame checks at call sites are only an
+	// optimization.
+	for _, id := range ids {
+		if id == meta.GameID {
+			return nil
+		}
+	}
+	ids = append(ids, meta.GameID)
+	listBytes, err := json.Marshal(ids)
+	if err != nil {
+		return err
+	}
+	return txn.Set(listKey, listBytes)
 }
 
 // GetAggregate loads all game metadata and delegates computation to the stats package.
@@ -164,13 +200,28 @@ func (s *Store) ListGames(limit, offset int) ([]GameMeta, error) {
 	return all, nil
 }
 
-// HasGame checks if a game with the given ID already exists in the store.
-func (s *Store) HasGame(gameID string) bool {
+// HasGame reports whether a game with the given ID already exists in the
+// store. The error is non-nil only for real database failures (not for a
+// missing key); callers may treat (false, non-nil) as "unknown" — duplicate
+// prevention is enforced inside SaveGame/SaveFullGame regardless, so HasGame
+// is only an optimization at call sites.
+func (s *Store) HasGame(gameID string) (bool, error) {
+	if gameID == "" {
+		return false, nil
+	}
+	var found bool
 	err := s.db.View(func(txn *badger.Txn) error {
 		_, err := txn.Get([]byte(prefixGameMeta + gameID))
-		return err
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		found = true
+		return nil
 	})
-	return err == nil
+	return found, err
 }
 
 // DropAll deletes all data in the database.
@@ -178,8 +229,14 @@ func (s *Store) DropAll() error {
 	return s.db.DropAll()
 }
 
-// SaveFullGame persists the complete game state snapshot.
+// SaveFullGame persists the game metadata, game-list entry, and full state
+// snapshot in a single transaction, so a crash can never leave a listed game
+// without a retrievable state. Like SaveGame, it is idempotent per GameID and
+// rejects an empty GameID with ErrEmptyGameID.
 func (s *Store) SaveFullGame(gs gamestate.BGGameState) error {
+	if gs.GameID == "" {
+		return ErrEmptyGameID
+	}
 	endTime := int64(0)
 	if gs.EndTime != nil {
 		endTime = gs.EndTime.Unix()
@@ -191,16 +248,15 @@ func (s *Store) SaveFullGame(gs gamestate.BGGameState) error {
 		Placement: gs.Placement,
 		IsDuos:    gs.IsDuos,
 	}
-	if err := s.SaveGame(meta, gs.Placement); err != nil {
+	stateBytes, err := json.Marshal(gs)
+	if err != nil {
 		return err
 	}
-	// Also store the full state JSON
 	return s.db.Update(func(txn *badger.Txn) error {
-		data, err := json.Marshal(gs)
-		if err != nil {
+		if err := saveGameTxn(txn, meta); err != nil {
 			return err
 		}
-		return txn.Set([]byte(prefixGameState+gs.GameID), data)
+		return txn.Set([]byte(prefixGameState+gs.GameID), stateBytes)
 	})
 }
 
@@ -257,15 +313,15 @@ func (s *Store) GetTurnSnapshots(gameID string) ([]gamestate.TurnSnapshot, error
 // badgerLogger adapts slog to badger's Logger interface.
 type badgerLogger struct{}
 
-func (badgerLogger) Errorf(fmt string, args ...interface{}) {
-	slog.Error("badger: "+fmt, args...)
+func (badgerLogger) Errorf(format string, args ...interface{}) {
+	slog.Error("badger: " + fmt.Sprintf(format, args...))
 }
-func (badgerLogger) Warningf(fmt string, args ...interface{}) {
-	slog.Warn("badger: "+fmt, args...)
+func (badgerLogger) Warningf(format string, args ...interface{}) {
+	slog.Warn("badger: " + fmt.Sprintf(format, args...))
 }
-func (badgerLogger) Infof(fmt string, args ...interface{}) {
-	slog.Debug("badger: "+fmt, args...)
+func (badgerLogger) Infof(format string, args ...interface{}) {
+	slog.Debug("badger: " + fmt.Sprintf(format, args...))
 }
-func (badgerLogger) Debugf(fmt string, args ...interface{}) {
-	slog.Debug("badger: "+fmt, args...)
+func (badgerLogger) Debugf(format string, args ...interface{}) {
+	slog.Debug("badger: " + fmt.Sprintf(format, args...))
 }

@@ -288,9 +288,20 @@ func startDaemon(ctx context.Context, cfg *config.Config, profile *config.Profil
 				// Persist game end
 				if e.Type == parser.EventGameEnd {
 					s := machine.State()
-					if st.HasGame(s.GameID) {
-						slog.Info("game already persisted, skipping", "gameID", s.GameID)
+					hasGame := false
+					if s.GameID == "" {
+						slog.Warn("game ended with empty GameID, skipping persistence")
 					} else {
+						var err error
+						hasGame, err = st.HasGame(s.GameID)
+						if err != nil {
+							// Not fatal: dedup is enforced inside SaveFullGame.
+							slog.Warn("checking for existing game", "gameID", s.GameID, "err", err)
+						}
+					}
+					if hasGame {
+						slog.Info("game already persisted, skipping", "gameID", s.GameID)
+					} else if s.GameID != "" {
 						if err := st.SaveFullGame(s); err != nil {
 							slog.Error("persisting game", "err", err)
 						}
@@ -986,7 +997,16 @@ func cmdReparse() *cobra.Command {
 					if e.Type == parser.EventGameEnd {
 						gamesFound++
 						s := machine.State()
-						if st.HasGame(s.GameID) {
+						if s.GameID == "" {
+							slog.Warn("game ended with empty GameID, skipping persistence")
+							continue
+						}
+						hasGame, err := st.HasGame(s.GameID)
+						if err != nil {
+							// Not fatal: dedup is enforced inside SaveFullGame.
+							slog.Warn("checking for existing game", "gameID", s.GameID, "err", err)
+						}
+						if hasGame {
 							continue
 						}
 						if err := st.SaveFullGame(s); err != nil {
