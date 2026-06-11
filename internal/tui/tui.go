@@ -17,6 +17,7 @@ import (
 	bspb "battlestream.fixates.io/internal/api/grpc/gen/battlestream/v1"
 	"battlestream.fixates.io/internal/config"
 	"battlestream.fixates.io/internal/gamestate"
+	"battlestream.fixates.io/internal/textutil"
 )
 
 // ============================================================
@@ -109,9 +110,10 @@ type aggUpdateMsg struct{ agg *bspb.AggregateStats }
 // generation doesn't match the model's current one, so after a reconnect
 // exactly one event-reader chain and one of each tick chain survive — stale
 // chains from previous connections die instead of re-arming forever.
+// eventMsg only signals that an event arrived (Update re-fetches the full
+// game state); the event payload itself is not carried.
 type eventMsg struct {
-	event *bspb.GameEvent
-	gen   int
+	gen int
 }
 
 type disconnectedMsg struct {
@@ -1080,18 +1082,24 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	x := msg.X
 	y := msg.Y - m.parentYOffset
 
-	// Wheel: route to whichever panel the cursor is over.
+	// Wheel: route to whichever panel the cursor is over. The vertical
+	// divider is draggable, so route by its actual position (m.dividerX,
+	// computed in View) — fall back to the midpoint before the first frame.
+	divider := m.dividerX
+	if divider <= 0 {
+		divider = m.width / 2
+	}
 	if tea.MouseEvent(msg).IsWheel() {
 		var cmd tea.Cmd
 		// Check partner pane first (below main panels).
 		if m.game != nil && m.game.IsDuos &&
 			y >= m.partnerVPY && y < m.partnerVPY+m.partnerVPH {
-			if x >= m.width/2 {
+			if x >= divider {
 				m.partnerModsVP, cmd = m.partnerModsVP.Update(msg)
 			} else {
 				m.partnerBoardVP, cmd = m.partnerBoardVP.Update(msg)
 			}
-		} else if x >= m.width/2 {
+		} else if x >= divider {
 			m.modsVP, cmd = m.modsVP.Update(msg)
 		} else {
 			m.boardVP, cmd = m.boardVP.Update(msg)
@@ -1412,9 +1420,7 @@ func renderMinion(mn *bspb.MinionState, maxW int) string {
 	if name == "" {
 		name = mn.CardId
 	}
-	if len(name) > nameW {
-		name = name[:nameW-1] + "…"
-	}
+	name = textutil.Truncate(name, nameW)
 	sb.WriteString(styleValue.Render(fmt.Sprintf("%-*s", nameW, name)))
 	sb.WriteString(styleLabel.Render(" "))
 
@@ -1525,11 +1531,10 @@ func fetchAggCmd(ctx context.Context, client daemonClient) tea.Cmd {
 // waitForEventCmd blocks until an event arrives on ch, then returns it as a tea.Msg.
 func waitForEventCmd(ch <-chan *bspb.GameEvent, gen int) tea.Cmd {
 	return func() tea.Msg {
-		e, ok := <-ch
-		if !ok {
+		if _, ok := <-ch; !ok {
 			return disconnectedMsg{err: fmt.Errorf("event stream closed"), gen: gen}
 		}
-		return eventMsg{event: e, gen: gen}
+		return eventMsg{gen: gen}
 	}
 }
 

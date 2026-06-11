@@ -13,7 +13,9 @@ message PlayerStats {
   int32 spell_power = 6;
   int32 triple_count = 7;
   int32 win_streak = 8;
-  int32 placement = 9;
+  // Deprecated: never populated by the server. Use GameState.placement
+  // (field 12 of GameState) instead.
+  int32 placement = 9 [deprecated = true];
   int32 loss_streak = 10;
   int32 max_health = 11;
   int32 damage = 12;
@@ -42,6 +44,9 @@ message Enchantment {
   int32 attack_buff = 6;
   int32 health_buff = 7;
   string category = 8;
+  // Field number 9 was reserved when this message was first committed;
+  // no named field was ever released under it (verified via git history),
+  // so there is no field name to reserve alongside the number.
   reserved 9;
 }
 

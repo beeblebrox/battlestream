@@ -22,21 +22,25 @@ const (
 )
 
 type PlayerStats struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	HeroCardId    string                 `protobuf:"bytes,2,opt,name=hero_card_id,json=heroCardId,proto3" json:"hero_card_id,omitempty"`
-	Health        int32                  `protobuf:"varint,3,opt,name=health,proto3" json:"health,omitempty"`
-	Armor         int32                  `protobuf:"varint,4,opt,name=armor,proto3" json:"armor,omitempty"`
-	TavernTier    int32                  `protobuf:"varint,5,opt,name=tavern_tier,json=tavernTier,proto3" json:"tavern_tier,omitempty"`
-	SpellPower    int32                  `protobuf:"varint,6,opt,name=spell_power,json=spellPower,proto3" json:"spell_power,omitempty"`
-	TripleCount   int32                  `protobuf:"varint,7,opt,name=triple_count,json=tripleCount,proto3" json:"triple_count,omitempty"`
-	WinStreak     int32                  `protobuf:"varint,8,opt,name=win_streak,json=winStreak,proto3" json:"win_streak,omitempty"`
-	Placement     int32                  `protobuf:"varint,9,opt,name=placement,proto3" json:"placement,omitempty"`
-	LossStreak    int32                  `protobuf:"varint,10,opt,name=loss_streak,json=lossStreak,proto3" json:"loss_streak,omitempty"`
-	MaxHealth     int32                  `protobuf:"varint,11,opt,name=max_health,json=maxHealth,proto3" json:"max_health,omitempty"`
-	Damage        int32                  `protobuf:"varint,12,opt,name=damage,proto3" json:"damage,omitempty"`
-	CurrentGold   int32                  `protobuf:"varint,13,opt,name=current_gold,json=currentGold,proto3" json:"current_gold,omitempty"`
-	MaxGold       int32                  `protobuf:"varint,14,opt,name=max_gold,json=maxGold,proto3" json:"max_gold,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Name        string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	HeroCardId  string                 `protobuf:"bytes,2,opt,name=hero_card_id,json=heroCardId,proto3" json:"hero_card_id,omitempty"`
+	Health      int32                  `protobuf:"varint,3,opt,name=health,proto3" json:"health,omitempty"`
+	Armor       int32                  `protobuf:"varint,4,opt,name=armor,proto3" json:"armor,omitempty"`
+	TavernTier  int32                  `protobuf:"varint,5,opt,name=tavern_tier,json=tavernTier,proto3" json:"tavern_tier,omitempty"`
+	SpellPower  int32                  `protobuf:"varint,6,opt,name=spell_power,json=spellPower,proto3" json:"spell_power,omitempty"`
+	TripleCount int32                  `protobuf:"varint,7,opt,name=triple_count,json=tripleCount,proto3" json:"triple_count,omitempty"`
+	WinStreak   int32                  `protobuf:"varint,8,opt,name=win_streak,json=winStreak,proto3" json:"win_streak,omitempty"`
+	// Deprecated: never populated by the server. Use GameState.placement
+	// (field 12 of GameState) instead.
+	//
+	// Deprecated: Marked as deprecated in battlestream/v1/game.proto.
+	Placement     int32 `protobuf:"varint,9,opt,name=placement,proto3" json:"placement,omitempty"`
+	LossStreak    int32 `protobuf:"varint,10,opt,name=loss_streak,json=lossStreak,proto3" json:"loss_streak,omitempty"`
+	MaxHealth     int32 `protobuf:"varint,11,opt,name=max_health,json=maxHealth,proto3" json:"max_health,omitempty"`
+	Damage        int32 `protobuf:"varint,12,opt,name=damage,proto3" json:"damage,omitempty"`
+	CurrentGold   int32 `protobuf:"varint,13,opt,name=current_gold,json=currentGold,proto3" json:"current_gold,omitempty"`
+	MaxGold       int32 `protobuf:"varint,14,opt,name=max_gold,json=maxGold,proto3" json:"max_gold,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -127,6 +131,7 @@ func (x *PlayerStats) GetWinStreak() int32 {
 	return 0
 }
 
+// Deprecated: Marked as deprecated in battlestream/v1/game.proto.
 func (x *PlayerStats) GetPlacement() int32 {
 	if x != nil {
 		return x.Placement
@@ -921,7 +926,7 @@ var File_battlestream_v1_game_proto protoreflect.FileDescriptor
 
 const file_battlestream_v1_game_proto_rawDesc = "" +
 	"\n" +
-	"\x1abattlestream/v1/game.proto\x12\x0fbattlestream.v1\"\xa9\x03\n" +
+	"\x1abattlestream/v1/game.proto\x12\x0fbattlestream.v1\"\xad\x03\n" +
 	"\vPlayerStats\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\fhero_card_id\x18\x02 \x01(\tR\n" +
@@ -934,8 +939,8 @@ const file_battlestream_v1_game_proto_rawDesc = "" +
 	"spellPower\x12!\n" +
 	"\ftriple_count\x18\a \x01(\x05R\vtripleCount\x12\x1d\n" +
 	"\n" +
-	"win_streak\x18\b \x01(\x05R\twinStreak\x12\x1c\n" +
-	"\tplacement\x18\t \x01(\x05R\tplacement\x12\x1f\n" +
+	"win_streak\x18\b \x01(\x05R\twinStreak\x12 \n" +
+	"\tplacement\x18\t \x01(\x05B\x02\x18\x01R\tplacement\x12\x1f\n" +
 	"\vloss_streak\x18\n" +
 	" \x01(\x05R\n" +
 	"lossStreak\x12\x1d\n" +

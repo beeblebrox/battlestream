@@ -12,6 +12,7 @@ import (
 
 	"battlestream.fixates.io/internal/config"
 	"battlestream.fixates.io/internal/discovery"
+	"battlestream.fixates.io/internal/textutil"
 )
 
 // ============================================================
@@ -862,15 +863,12 @@ func (m *DiscoverModel) viewSummary() string {
 	return styleWizBorder.Width(m.width - 4).Render(sb.String())
 }
 
-// truncatePath shortens a path to maxLen with a leading ellipsis if needed.
+// truncatePath shortens a path to maxLen runes with a leading ellipsis if needed.
 func truncatePath(p string, maxLen int) string {
 	if maxLen < 8 {
 		maxLen = 8
 	}
-	if len(p) <= maxLen {
-		return p
-	}
-	return "…" + p[len(p)-maxLen+1:]
+	return textutil.TruncateLeft(p, maxLen)
 }
 
 // ============================================================
