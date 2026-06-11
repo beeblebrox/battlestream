@@ -318,6 +318,85 @@ func TestDump_AllPanelsPresent(t *testing.T) {
 	}
 }
 
+// TestLoadAllGames_FileBoundaryAccumReset verifies that raw log lines trailing
+// the last event of one file do not bleed into the first event of the next
+// file (the accumulator must be folded/reset at file boundaries). The trailing
+// lines must instead remain visible on the previous file's last step.
+func TestLoadAllGames_FileBoundaryAccumReset(t *testing.T) {
+	dir := t.TempDir()
+	const prefix = "D 10:00:00.0000000 GameState.DebugPrintPower() - "
+
+	// File 1: one event (GameEntity TURN=2 → COMBAT phase, a state change),
+	// followed by trailing lines that match no parser regex.
+	file1 := dir + "/file1.log"
+	if err := os.WriteFile(file1, []byte(
+		prefix+"TAG_CHANGE Entity=GameEntity tag=TURN value=2\n"+
+			prefix+"FILE1_TRAILING_NOISE_A\n"+
+			prefix+"FILE1_TRAILING_NOISE_B\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// File 2: one event (TURN=3 → RECRUIT phase, another state change).
+	file2 := dir + "/file2.log"
+	if err := os.WriteFile(file2, []byte(
+		prefix+"TAG_CHANGE Entity=GameEntity tag=TURN value=3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	replay, err := LoadAllGames([]string{file1, file2})
+	if err != nil {
+		t.Fatalf("LoadAllGames: %v", err)
+	}
+	if len(replay.Steps) < 2 {
+		t.Fatalf("expected at least 2 steps, got %d", len(replay.Steps))
+	}
+
+	joined := func(s Step) string { return strings.Join(s.RawLines, "\n") }
+
+	// The file-2 step must not contain file 1's trailing noise.
+	last := replay.Steps[len(replay.Steps)-1]
+	if strings.Contains(joined(last), "FILE1_TRAILING_NOISE") {
+		t.Errorf("file 1 trailing lines bled into file 2's first step:\n%s", joined(last))
+	}
+	// The trailing noise must still be visible on file 1's last step.
+	first := replay.Steps[0]
+	if !strings.Contains(joined(first), "FILE1_TRAILING_NOISE_A") ||
+		!strings.Contains(joined(first), "FILE1_TRAILING_NOISE_B") {
+		t.Errorf("file 1 trailing lines lost; step 0 raw lines:\n%s", joined(first))
+	}
+}
+
+// TestLoadAllGames_NoChangeEventFoldsRawLines verifies that an event producing
+// no visible state change does not create a new Step but its raw lines fold
+// into the previous step (the RAW LOG must still show every line).
+func TestLoadAllGames_NoChangeEventFoldsRawLines(t *testing.T) {
+	dir := t.TempDir()
+	const prefix = "D 10:00:00.0000000 GameState.DebugPrintPower() - "
+
+	// TURN=2 changes phase to COMBAT; a repeated TURN=2 is parsed as an event
+	// but leaves the snapshot identical, so it must collapse into step 1.
+	path := dir + "/log.log"
+	if err := os.WriteFile(path, []byte(
+		prefix+"TAG_CHANGE Entity=GameEntity tag=TURN value=2\n"+
+			prefix+"TAG_CHANGE Entity=GameEntity tag=TURN value=2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	replay, err := LoadReplay(path)
+	if err != nil {
+		t.Fatalf("LoadReplay: %v", err)
+	}
+	if replay.EventCount != 2 {
+		t.Fatalf("expected 2 events, got %d", replay.EventCount)
+	}
+	if len(replay.Steps) != 1 {
+		t.Fatalf("expected duplicate event to collapse into 1 step, got %d", len(replay.Steps))
+	}
+	if got := len(replay.Steps[0].RawLines); got != 2 {
+		t.Errorf("expected both raw lines folded into the surviving step, got %d", got)
+	}
+}
+
 func TestLoadAllGamesMultiFile(t *testing.T) {
 	// Loading the same file twice should produce 2x the games.
 	// This test must call LoadAllGames directly (not the shared replay)

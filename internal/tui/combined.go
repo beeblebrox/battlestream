@@ -33,6 +33,10 @@ type CombinedModel struct {
 	width  int
 	height int
 
+	// replayInitStarted is set when initReplayCmd has been issued, preventing
+	// a second concurrent init if the user tabs away and back while loading.
+	// replayInitialized is set once the real replay model is installed.
+	replayInitStarted bool
 	replayInitialized bool
 
 	// Startup notice (e.g. log.config was patched). Blocks until Enter.
@@ -68,6 +72,18 @@ func (c *CombinedModel) Run() error {
 type replayInitDoneMsg struct {
 	model *debugtui.Model
 }
+
+// replayInitPendingMsg is sent when replay init has not finished within
+// replayInitTimeout. The view keeps showing the loading placeholder while a
+// follow-up command waits on done for the real model.
+type replayInitPendingMsg struct {
+	done <-chan replayInitDoneMsg
+}
+
+// replayInitTimeout is how long initReplayCmd waits before yielding a
+// pending message (which keeps the loading placeholder visible) instead of
+// blocking the message loop's command.
+const replayInitTimeout = 5 * time.Second
 
 func (c *CombinedModel) Init() tea.Cmd {
 	// Don't start the live model until the user dismisses the startup notice.
@@ -140,6 +156,13 @@ func (c *CombinedModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return c, tea.Batch(cmds...)
 
+	case replayInitPendingMsg:
+		// Replay data is still loading after the init timeout. Keep the
+		// "Loading replay data…" placeholder (View renders it while c.replay
+		// is nil) and install the real model whenever it arrives, instead of
+		// discarding it in favour of a permanently empty model.
+		return c, waitForReplayInitCmd(msg.done)
+
 	case replayInitDoneMsg:
 		c.replay = msg.model
 		c.replayInitialized = true
@@ -192,8 +215,11 @@ func isLiveBackgroundMsg(msg tea.Msg) bool {
 func (c *CombinedModel) switchMode() (tea.Model, tea.Cmd) {
 	if c.mode == modeLive {
 		c.mode = modeReplay
-		if !c.replayInitialized {
-			// Initialize replay model from store or log files.
+		if !c.replayInitStarted && !c.replayInitialized {
+			// Initialize replay model from store or log files. Guarded by
+			// replayInitStarted: if init is still pending after the timeout,
+			// tabbing away and back must not spawn a second concurrent init.
+			c.replayInitStarted = true
 			return c, c.initReplayCmd()
 		}
 		return c, nil
@@ -249,13 +275,21 @@ func (c *CombinedModel) initReplayCmd() tea.Cmd {
 		select {
 		case msg := <-done:
 			return msg
-		case <-time.After(5 * time.Second):
-			// Timeout — return empty model to avoid freezing the TUI.
-			model := debugtui.NewFromReplay(&debugtui.Replay{})
-			model.SetSources(st, logFiles, 0)
-			model.SetEmbedded(true)
-			return replayInitDoneMsg{model: model}
+		case <-time.After(replayInitTimeout):
+			// Still loading — show the placeholder now, but keep waiting for
+			// the real model instead of discarding it (a previous version
+			// installed a permanently empty model here, so the user never
+			// saw the replay once loading eventually finished).
+			return replayInitPendingMsg{done: done}
 		}
+	}
+}
+
+// waitForReplayInitCmd blocks until the in-flight replay init delivers the
+// real model, then installs it via the normal replayInitDoneMsg path.
+func waitForReplayInitCmd(done <-chan replayInitDoneMsg) tea.Cmd {
+	return func() tea.Msg {
+		return <-done
 	}
 }
 

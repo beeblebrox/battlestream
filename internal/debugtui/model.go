@@ -1220,9 +1220,14 @@ func (m *Model) renderRawLog(step *Step, w, h int) string {
 	m.rawVP.MouseWheelDelta = 3
 	m.rawVP.SetContent(content)
 
-	// Header line: title + line count.
+	// Header line: title + line count (noting truncation by the per-step cap).
 	hdr := styleTitle.Render("RAW LOG")
-	hdr += styleDim.Render(fmt.Sprintf("  %d lines", len(step.RawLines)))
+	if step.RawLinesDropped > 0 {
+		hdr += styleDim.Render(fmt.Sprintf("  last %d of %d lines (earlier lines truncated)",
+			len(step.RawLines), len(step.RawLines)+step.RawLinesDropped))
+	} else {
+		hdr += styleDim.Render(fmt.Sprintf("  %d lines", len(step.RawLines)))
+	}
 
 	vpView := lipgloss.JoinHorizontal(lipgloss.Top, m.rawVP.View(), renderScrollbar(m.rawVP, h))
 	return styleBorder.Width(w).Render(hdr + "\n" + vpView)

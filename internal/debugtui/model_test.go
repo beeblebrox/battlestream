@@ -115,6 +115,127 @@ func TestHandleMouse_ParentYOffset(t *testing.T) {
 	}
 }
 
+// TestNavigation_TurnJumpsAfterDedup verifies jump-to-turn and turn stepping
+// still land correctly now that no-change events are collapsed out of the
+// step list (snapshot dedup must never remove a turn's only step: turn and
+// phase transitions always change the snapshot).
+func TestNavigation_TurnJumpsAfterDedup(t *testing.T) {
+	replay := getSharedReplay(t)
+	m := NewFromReplay(replay)
+	m.selectGame(0)
+
+	// Collect the distinct turns present in the selected game, in order.
+	var turns []int
+	seen := map[int]bool{}
+	for _, s := range m.steps {
+		if s.Turn > 0 && !seen[s.Turn] {
+			seen[s.Turn] = true
+			turns = append(turns, s.Turn)
+		}
+	}
+	if len(turns) < 3 {
+		t.Fatalf("expected at least 3 distinct turns in testdata, got %v", turns)
+	}
+	t.Logf("turns present: %v", turns)
+
+	// jumpToTurn must land on the LAST step of each requested turn.
+	for _, turn := range turns {
+		m.jumpToTurn(turn)
+		s := m.currentStep()
+		if s == nil {
+			t.Fatalf("jumpToTurn(%d): no current step", turn)
+		}
+		if s.Turn != turn {
+			t.Fatalf("jumpToTurn(%d): landed on turn %d", turn, s.Turn)
+		}
+		if m.cursor+1 < len(m.filtered) {
+			if next := m.steps[m.filtered[m.cursor+1]]; next.Turn == turn {
+				t.Errorf("jumpToTurn(%d): not on last step of turn (next step is still turn %d)",
+					turn, next.Turn)
+			}
+		}
+	}
+
+	// ] (nextTurn) from the start must visit every turn in increasing order.
+	m.cursor = 0
+	var visited []int
+	for {
+		before := m.cursor
+		m.nextTurn()
+		if m.cursor == before {
+			break // no further turn
+		}
+		s := m.currentStep()
+		if len(visited) > 0 && s.Turn <= visited[len(visited)-1] {
+			t.Fatalf("nextTurn went backwards: %v then %d", visited, s.Turn)
+		}
+		visited = append(visited, s.Turn)
+	}
+	if len(visited) != len(turns) || visited[len(visited)-1] != turns[len(turns)-1] {
+		t.Errorf("nextTurn walk visited %v, want all of %v", visited, turns)
+	}
+
+	// [ (prevTurn) must land on the FIRST step of each previous turn.
+	for i := len(visited) - 1; i > 0; i-- {
+		m.prevTurn()
+		s := m.currentStep()
+		if s.Turn != visited[i-1] {
+			t.Fatalf("prevTurn: expected turn %d, got %d", visited[i-1], s.Turn)
+		}
+		if m.cursor > 0 {
+			if prev := m.steps[m.filtered[m.cursor-1]]; prev.Turn == s.Turn {
+				t.Errorf("prevTurn: not on first step of turn %d", s.Turn)
+			}
+		}
+	}
+}
+
+// TestNavigation_PhaseStepsAfterDedup verifies { and } phase navigation still
+// lands on phase boundaries after snapshot dedup.
+func TestNavigation_PhaseStepsAfterDedup(t *testing.T) {
+	replay := getSharedReplay(t)
+	m := NewFromReplay(replay)
+	m.selectGame(0)
+
+	// } (nextPhase) must always land on a step whose phase differs from the
+	// previous step's phase (a phase boundary).
+	m.cursor = 0
+	transitions := 0
+	for {
+		before := m.cursor
+		m.nextPhase()
+		if m.cursor == before {
+			break
+		}
+		cur := m.currentStep()
+		prev := m.steps[m.filtered[m.cursor-1]]
+		if cur.State.Phase == prev.State.Phase {
+			t.Fatalf("nextPhase landed mid-phase at cursor %d (phase %s)", m.cursor, cur.State.Phase)
+		}
+		transitions++
+	}
+	if transitions < 4 {
+		t.Errorf("expected at least 4 phase transitions in testdata, got %d", transitions)
+	}
+
+	// { (prevPhase) from the end must land on the first step of each earlier
+	// phase block.
+	for {
+		before := m.cursor
+		m.prevPhase()
+		if m.cursor == before {
+			break
+		}
+		cur := m.currentStep()
+		if m.cursor > 0 {
+			prev := m.steps[m.filtered[m.cursor-1]]
+			if prev.State.Phase == cur.State.Phase {
+				t.Fatalf("prevPhase landed mid-phase at cursor %d (phase %s)", m.cursor, cur.State.Phase)
+			}
+		}
+	}
+}
+
 // TestUpdate_LoadErrStandalone_QuitsOnKey verifies the standalone replay
 // command keeps its "press any key to exit" behavior on load errors.
 func TestUpdate_LoadErrStandalone_QuitsOnKey(t *testing.T) {
