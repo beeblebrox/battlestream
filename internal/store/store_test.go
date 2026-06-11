@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 	"time"
 
@@ -164,6 +165,37 @@ func TestGetGameNotFound(t *testing.T) {
 	_, err := st.GetGame("nonexistent")
 	if err == nil {
 		t.Error("expected error for missing game, got nil")
+	}
+	// Audit H8: the missing-game error must be the ErrGameNotFound sentinel so
+	// API layers can distinguish 404/NotFound from real store failures.
+	if !errors.Is(err, ErrGameNotFound) {
+		t.Errorf("GetGame missing game: err = %v, want errors.Is(err, ErrGameNotFound)", err)
+	}
+}
+
+func TestGetGameStoreFailureIsNotNotFound(t *testing.T) {
+	st := openTestStore(t)
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	_, err := st.GetGame("any")
+	if err == nil {
+		t.Fatal("expected error on closed store, got nil")
+	}
+	if errors.Is(err, ErrGameNotFound) {
+		t.Errorf("closed-store error must not match ErrGameNotFound: %v", err)
+	}
+}
+
+func TestFilterCompleteGames(t *testing.T) {
+	metas := []GameMeta{
+		{GameID: "done-1", Placement: 1},
+		{GameID: "stale", Placement: 0},
+		{GameID: "done-2", Placement: 8},
+	}
+	got := FilterCompleteGames(metas)
+	if len(got) != 2 || got[0].GameID != "done-1" || got[1].GameID != "done-2" {
+		t.Errorf("FilterCompleteGames = %+v, want [done-1 done-2]", got)
 	}
 }
 

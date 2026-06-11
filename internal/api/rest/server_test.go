@@ -7,9 +7,21 @@ import (
 	"testing"
 	"time"
 
+	grpcserver "battlestream.fixates.io/internal/api/grpc"
 	"battlestream.fixates.io/internal/gamestate"
 	"battlestream.fixates.io/internal/store"
 )
+
+// newStoreBackedServer returns a REST Server wired to a real store in a temp dir.
+func newStoreBackedServer(t *testing.T) (*Server, *store.Store) {
+	t.Helper()
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	return New(grpcserver.New(nil, st, nil), ""), st
+}
 
 func TestGameStateToJSON_AllFields(t *testing.T) {
 	now := time.Now()
@@ -176,6 +188,105 @@ func TestWithAuth_NonEmptyKey_RejectsUnauthenticated(t *testing.T) {
 	handler(rw2, req2)
 	if rw2.Code != http.StatusOK {
 		t.Fatalf("want 200 with correct token, got %d", rw2.Code)
+	}
+}
+
+// TestHandleListGames_FiltersIncompleteAndTotal pins the reference REST
+// behavior (audit H8): placement-0 games are excluded and total reflects the
+// full filtered count, not the page size.
+func TestHandleListGames_FiltersIncompleteAndTotal(t *testing.T) {
+	s, st := newStoreBackedServer(t)
+	for i, placement := range []int{1, 4, 0, 7} { // one stale game
+		meta := store.GameMeta{
+			GameID:    "g-" + string(rune('a'+i)),
+			StartTime: time.Now().Unix(),
+			Placement: placement,
+		}
+		if err := st.SaveGame(meta); err != nil {
+			t.Fatalf("SaveGame: %v", err)
+		}
+	}
+
+	req := httptest.NewRequest("GET", "/v1/stats/games?limit=2", nil)
+	rw := httptest.NewRecorder()
+	s.handleListGames(rw, req)
+	if rw.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d", rw.Code)
+	}
+
+	var resp struct {
+		Games []store.GameMeta `json:"games"`
+		Total int              `json:"total"`
+	}
+	if err := json.Unmarshal(rw.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Total != 3 {
+		t.Errorf("total = %d, want 3 (stale game excluded, full count)", resp.Total)
+	}
+	if len(resp.Games) != 2 {
+		t.Errorf("len(games) = %d, want 2 (page size)", len(resp.Games))
+	}
+	for _, g := range resp.Games {
+		if g.Placement == 0 {
+			t.Errorf("REST returned incomplete game %q", g.GameID)
+		}
+	}
+}
+
+// TestHandleGetGame_NotFound404: a missing game must return 404.
+func TestHandleGetGame_NotFound404(t *testing.T) {
+	s, _ := newStoreBackedServer(t)
+	req := httptest.NewRequest("GET", "/v1/game/nope", nil)
+	req.SetPathValue("game_id", "nope")
+	rw := httptest.NewRecorder()
+	s.handleGetGame(rw, req)
+	if rw.Code != http.StatusNotFound {
+		t.Fatalf("want 404 for missing game, got %d", rw.Code)
+	}
+}
+
+// TestHandleGetGame_StoreError500 is a regression test for audit H8 bug 3:
+// a store failure (closed DB) must return 500, not 404.
+func TestHandleGetGame_StoreError500(t *testing.T) {
+	s, st := newStoreBackedServer(t)
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	req := httptest.NewRequest("GET", "/v1/game/any", nil)
+	req.SetPathValue("game_id", "any")
+	rw := httptest.NewRecorder()
+	s.handleGetGame(rw, req)
+	if rw.Code != http.StatusInternalServerError {
+		t.Fatalf("want 500 for store failure, got %d", rw.Code)
+	}
+}
+
+// TestHandleGetModifications_StoreError500: same not-found/internal split for
+// the modifications endpoint.
+func TestHandleGetModifications_StoreError500(t *testing.T) {
+	s, st := newStoreBackedServer(t)
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	req := httptest.NewRequest("GET", "/v1/stats/games/any/modifications", nil)
+	req.SetPathValue("game_id", "any")
+	rw := httptest.NewRecorder()
+	s.handleGetModifications(rw, req)
+	if rw.Code != http.StatusInternalServerError {
+		t.Fatalf("want 500 for store failure, got %d", rw.Code)
+	}
+}
+
+// TestHandleGetModifications_NotFound404: missing game stays a 404.
+func TestHandleGetModifications_NotFound404(t *testing.T) {
+	s, _ := newStoreBackedServer(t)
+	req := httptest.NewRequest("GET", "/v1/stats/games/nope/modifications", nil)
+	req.SetPathValue("game_id", "nope")
+	rw := httptest.NewRecorder()
+	s.handleGetModifications(rw, req)
+	if rw.Code != http.StatusNotFound {
+		t.Fatalf("want 404 for missing game, got %d", rw.Code)
 	}
 }
 
