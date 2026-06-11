@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
@@ -20,6 +21,11 @@ type Config struct {
 	API           APIConfig                 `yaml:"api" mapstructure:"api"`
 	Logging       LoggingConfig             `yaml:"logging" mapstructure:"logging"`
 	TUI           TUIConfig                 `yaml:"tui,omitempty" mapstructure:"tui"`
+
+	// loadedPath is the config file this Config was loaded from (empty when
+	// no config file was found). SaveTUI writes back to this file so that a
+	// process started with --config /custom/path.yaml updates the right file.
+	loadedPath string
 }
 
 // TUIConfig holds TUI layout preferences.
@@ -178,6 +184,9 @@ func Load(cfgFile string) (*Config, error) {
 	if err := v.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
 	}
+	// Remember which file the config came from so SaveTUI can write back to
+	// it (empty when no config file was found).
+	cfg.loadedPath = v.ConfigFileUsed()
 
 	// Migrate legacy flat config (hearthstone/storage/output at top level).
 	if len(cfg.Profiles) == 0 && v.IsSet("hearthstone") {
@@ -213,8 +222,22 @@ func Load(cfgFile string) (*Config, error) {
 	return &cfg, nil
 }
 
-// Save writes the config to path using yaml.v3.
+// saveMu serializes all config file writes (Save and SaveTUI) so concurrent
+// writers cannot interleave read-modify-write cycles or clobber each other's
+// temp files.
+var saveMu sync.Mutex
+
+// Save writes the config to path using yaml.v3 (atomic temp+rename).
 func Save(cfg *Config, path string) error {
+	saveMu.Lock()
+	defer saveMu.Unlock()
+	return atomicWriteYAML(path, cfg)
+}
+
+// atomicWriteYAML encodes doc as YAML to a temp file in the target directory
+// and renames it over path, so readers never observe a partial file.
+// Callers must hold saveMu.
+func atomicWriteYAML(path string, doc interface{}) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return fmt.Errorf("creating config dir: %w", err)
 	}
@@ -225,7 +248,12 @@ func Save(cfg *Config, path string) error {
 	}
 	enc := yaml.NewEncoder(f)
 	enc.SetIndent(2)
-	if err := enc.Encode(cfg); err != nil {
+	if err := enc.Encode(doc); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
+	if err := enc.Close(); err != nil {
 		f.Close()
 		os.Remove(tmp)
 		return err
@@ -238,6 +266,14 @@ func Save(cfg *Config, path string) error {
 }
 
 func setGlobalDefaults(v *viper.Viper) {
+	// Viper limitation: AutomaticEnv only applies during Unmarshal to keys
+	// viper already knows about (registered defaults or keys present in the
+	// config file). Every documented BS_* env var (see docs/CONFIGURATION.md)
+	// therefore needs a default registered here, otherwise the override is
+	// silently ignored when the key is absent from the file. Profile-level
+	// keys (profiles.<name>.*) cannot be bound this way because profile
+	// names are dynamic; per-profile settings remain file-only.
+	v.SetDefault("active_profile", "")
 	v.SetDefault("api.grpc_addr", "127.0.0.1:50051")
 	v.SetDefault("api.rest_addr", "127.0.0.1:8080")
 	v.SetDefault("api.api_key", "")
@@ -259,31 +295,72 @@ func applyProfileDefaults(p *ProfileConfig, name string) {
 }
 
 func (p *ProfileConfig) expandPaths() {
+	p.Hearthstone.InstallPath = expandHome(p.Hearthstone.InstallPath)
+	p.Hearthstone.LogPath = expandHome(p.Hearthstone.LogPath)
 	p.Storage.DBPath = expandHome(p.Storage.DBPath)
 	p.Output.Path = expandHome(p.Output.Path)
 }
 
+// expandHome expands "~" and "~/..." to the current user's home directory.
+// "~user/..." paths are returned unchanged: resolving another user's home is
+// not portable, and mangling them into $HOME/user/... is worse than passing
+// them through.
 func expandHome(path string) string {
-	if path == "" || path[0] != '~' {
+	if path != "~" && !strings.HasPrefix(path, "~/") {
 		return path
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return path
 	}
-	return filepath.Join(home, path[1:])
+	if path == "~" {
+		return home
+	}
+	return filepath.Join(home, path[2:])
 }
 
-// SaveTUI persists just the TUI section to the config file.
-func (c *Config) SaveTUI() error {
-	path := filepath.Join(BaseDir(), "config.yaml")
+// SetTUI updates the TUI layout preferences under the same lock SaveTUI
+// uses, so callers may update prefs while a previous background SaveTUI is
+// still reading them.
+func (c *Config) SetTUI(t TUIConfig) {
+	saveMu.Lock()
+	c.TUI = t
+	saveMu.Unlock()
+}
 
-	v := viper.New()
-	v.SetConfigFile(path)
-	_ = v.ReadInConfig()
-	v.Set("tui.vertical_split", c.TUI.VerticalSplit)
-	v.Set("tui.horizontal_split", c.TUI.HorizontalSplit)
-	v.Set("tui.left_hsplit", c.TUI.LeftHSplit)
-	v.Set("tui.right_hsplit", c.TUI.RightHSplit)
-	return v.WriteConfig()
+// SaveTUI persists just the TUI section to the config file the Config was
+// loaded from, falling back to BaseDir()/config.yaml when no config file
+// existed at load time. It performs a read-modify-write that preserves all
+// other keys, writes atomically (temp+rename), and is safe to call from
+// multiple goroutines.
+func (c *Config) SaveTUI() error {
+	saveMu.Lock()
+	defer saveMu.Unlock()
+
+	path := c.loadedPath
+	if path == "" {
+		path = filepath.Join(BaseDir(), "config.yaml")
+	}
+
+	doc := map[string]interface{}{}
+	data, err := os.ReadFile(path)
+	switch {
+	case err == nil:
+		if err := yaml.Unmarshal(data, &doc); err != nil {
+			return fmt.Errorf("parsing config %s: %w", path, err)
+		}
+	case os.IsNotExist(err):
+		// No config file yet; write one containing only the tui section.
+	default:
+		return fmt.Errorf("reading config %s: %w", path, err)
+	}
+
+	doc["tui"] = map[string]interface{}{
+		"vertical_split":   c.TUI.VerticalSplit,
+		"horizontal_split": c.TUI.HorizontalSplit,
+		"left_hsplit":      c.TUI.LeftHSplit,
+		"right_hsplit":     c.TUI.RightHSplit,
+	}
+
+	return atomicWriteYAML(path, doc)
 }

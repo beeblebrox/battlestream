@@ -1178,10 +1178,16 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			m.draggingHL = false
 			m.draggingHR = false
 			if m.cfg != nil {
-				m.cfg.TUI.VerticalSplit = m.vSplit
-				m.cfg.TUI.LeftHSplit = m.leftHSplit
-				m.cfg.TUI.RightHSplit = m.rightHSplit
-				go m.cfg.SaveTUI() //nolint:errcheck // fire-and-forget
+				// SetTUI/SaveTUI share a lock in the config package, so
+				// rapid divider releases cannot race each other or tear
+				// the config file.
+				m.cfg.SetTUI(config.TUIConfig{
+					VerticalSplit:   m.vSplit,
+					HorizontalSplit: m.cfg.TUI.HorizontalSplit,
+					LeftHSplit:      m.leftHSplit,
+					RightHSplit:     m.rightHSplit,
+				})
+				go m.cfg.SaveTUI() //nolint:errcheck // fire-and-forget; serialized in config
 			}
 			return m, nil
 		}
