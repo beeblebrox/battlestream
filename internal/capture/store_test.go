@@ -1,9 +1,12 @@
 package capture
 
 import (
+	"bytes"
 	"database/sql"
 	"image"
 	"image/color"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -113,6 +116,68 @@ func TestStoreInitAndSaveFrame(t *testing.T) {
 	if boardJSON == "" || boardJSON == "null" {
 		t.Error("board_json is empty")
 	}
+}
+
+// TestSaveFrameDuplicateDoesNotClobberFile is the regression test for audit
+// finding H6 (frame overwrite): when the frames UNIQUE(game_id, sequence)
+// insert fails, the previously captured JPEG on disk must remain intact —
+// the failed save must not overwrite it.
+func TestSaveFrameDuplicateDoesNotClobberFile(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir, 90)
+
+	if err := store.InitGame("dup-test"); err != nil {
+		t.Fatalf("InitGame: %v", err)
+	}
+
+	first := Frame{
+		Sequence: 0,
+		Image:    testImage(64, 64),
+		State: CaptureState{
+			GameID:      "dup-test",
+			Timestamp:   time.Now(),
+			Phase:       "RECRUIT",
+			Board:       []MinionSnapshot{},
+			BuffSources: []BuffSourceSnapshot{},
+		},
+	}
+	if err := store.SaveFrame(first); err != nil {
+		t.Fatalf("first SaveFrame: %v", err)
+	}
+
+	framePath := filepath.Join(dir, "dup-test", "frames", "000000.jpg")
+	orig, err := os.ReadFile(framePath)
+	if err != nil {
+		t.Fatalf("read original frame: %v", err)
+	}
+
+	// Same sequence, different image — the UNIQUE constraint must reject it.
+	dup := first
+	dup.Image = testImage(16, 16)
+	if err := store.SaveFrame(dup); err == nil {
+		t.Fatal("expected duplicate sequence insert to fail")
+	}
+
+	after, err := os.ReadFile(framePath)
+	if err != nil {
+		t.Fatalf("read frame after duplicate save: %v", err)
+	}
+	if !bytes.Equal(orig, after) {
+		t.Fatal("duplicate insert clobbered the existing frame file on disk")
+	}
+
+	// No staging litter left behind in the frames directory.
+	entries, err := os.ReadDir(filepath.Join(dir, "dup-test", "frames"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name() != "000000.jpg" {
+			t.Errorf("unexpected file left in frames dir: %s", e.Name())
+		}
+	}
+
+	store.Close()
 }
 
 func TestStoreFinalizeUpdatesGame(t *testing.T) {
