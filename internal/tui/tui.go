@@ -44,6 +44,7 @@ var (
 	colorBeetle    = lipgloss.Color("178") // dark yellow
 	colorRightmost = lipgloss.Color("105") // light purple
 	colorVolumizer = lipgloss.Color("81")  // cyan
+	colorLeviathan = lipgloss.Color("30")  // deep teal (Lurking Leviathan / BEAST_BUFF)
 	colorGeneral         = lipgloss.Color("249") // gray
 	colorGroupTavernWide = lipgloss.Color("51")  // bright cyan for TAVERN-WIDE header
 	colorMuted   = lipgloss.Color("244")
@@ -1050,6 +1051,7 @@ func buffCategoryColor(cat string) lipgloss.Color {
 		"RIGHTMOST":       colorRightmost,
 		"UNDEAD":          colorUndead,
 		"VOLUMIZER":       colorVolumizer,
+		"BEAST_BUFF":      colorLeviathan,
 		"LIGHTFANG":       colorLightfang,
 		"NOMI_ALL":        colorNomi,
 		"NAGA_SPELLS":     colorTavern,

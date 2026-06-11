@@ -21,7 +21,7 @@ test('DYNAMIC_CATEGORIES includes all TARGETED categories', () => {
 });
 
 test('DYNAMIC_CATEGORIES includes all TYPE_BUFFS categories', () => {
-  for (const cat of ['NOMI', 'ELEMENTAL', 'UNDEAD', 'LIGHTFANG', 'WHELP', 'BEETLE', 'VOLUMIZER', 'CONSUMED', 'TAVERN_SPELL']) {
+  for (const cat of ['NOMI', 'ELEMENTAL', 'UNDEAD', 'LIGHTFANG', 'WHELP', 'BEETLE', 'VOLUMIZER', 'CONSUMED', 'TAVERN_SPELL', 'BEAST_BUFF']) {
     expect(DYNAMIC_CATEGORIES.has(cat)).toBe(true);
   }
 });

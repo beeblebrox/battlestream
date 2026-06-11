@@ -1153,6 +1153,7 @@ func TestCategoryClassification(t *testing.T) {
 		{"BG31_808pe", CatBeetle},
 		{"BG34_689e2", CatBloodgemBarrage},
 		{"BG30_MagicItem_544pe", CatNomi},
+		{"BG35_602e", CatBeastBuff},
 		{"UNKNOWN_CARD_ID", CatGeneral},
 	}
 	for _, tt := range tests {
@@ -1396,6 +1397,88 @@ func TestCounterUndeadAtkOnly(t *testing.T) {
 	}
 	if found.Attack != 15 || found.Health != 0 {
 		t.Errorf("Undead: expected +15/+0, got +%d/+%d", found.Attack, found.Health)
+	}
+}
+
+// TestCounterLeviathanWrath verifies BG35_602e (Leviathan's Wrath, from Lurking
+// Leviathan BG35_602) tracking. The enchantment is applied per-summoned-Beast with
+// TAG_SCRIPT_DATA_NUM_1 = the +ATK granted (the Leviathan "improves permanently",
+// so each new summon carries a higher value). Mirrors the documented log pattern
+// (docs/triage/lurking-leviathan.md / testdata/power_log_2026_05_08.txt):
+//
+//	SHOW_ENTITY - Updating Entity=9198 CardID=BG35_602e
+//	    tag=CONTROLLER value=3 / tag=CARDTYPE value=ENCHANTMENT
+//	    tag=ATTACHED value=9197 / tag=CREATOR value=8044
+//	TAG_CHANGE Entity=9198 tag=TAG_SCRIPT_DATA_NUM_1 value=2
+//
+// The counter is max-seen, ATK-only: combat simulation copies replay older
+// (lower) SD1 values and must not regress or double-count the display.
+func TestCounterLeviathanWrath(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+
+	// Beast minion on the local board (the enchantment target).
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventEntityUpdate,
+		EntityID: 9197,
+		CardID:   "BG_BEAST_001",
+		Tags: map[string]string{
+			"CARDTYPE": "MINION", "ZONE": "PLAY",
+			"ATK": "4", "HEALTH": "4", "CONTROLLER": "7",
+		},
+	})
+
+	// First summon: enchantment applied, SD1 arrives via TAG_CHANGE (log pattern).
+	leviathanEnch := func(entityID int) {
+		p.Handle(parser.GameEvent{
+			Type:     parser.EventEntityUpdate,
+			EntityID: entityID,
+			CardID:   "BG35_602e",
+			Tags: map[string]string{
+				"CARDTYPE":   "ENCHANTMENT",
+				"ATTACHED":   "9197",
+				"CREATOR":    "8044",
+				"CONTROLLER": "7",
+			},
+		})
+	}
+	leviathanEnch(9198)
+	sendSD(p, 9198, 1, 2)
+
+	found := findBuffSource(m, CatBeastBuff)
+	if found == nil {
+		t.Fatal("expected BEAST_BUFF buff source after first Leviathan's Wrath, not found")
+	}
+	if found.Attack != 2 || found.Health != 0 {
+		t.Errorf("Leviathan first summon: expected +2/+0, got +%d/+%d", found.Attack, found.Health)
+	}
+
+	// Second summon: Leviathan improved permanently — new enchantment carries 4.
+	leviathanEnch(9206)
+	sendSD(p, 9206, 1, 4)
+
+	found = findBuffSource(m, CatBeastBuff)
+	if found == nil || found.Attack != 4 || found.Health != 0 {
+		t.Fatalf("Leviathan second summon: expected +4/+0, got %+v", found)
+	}
+
+	// Combat simulation replays a copy of the FIRST enchantment with its
+	// historical (lower) value — the display must not regress to 2.
+	leviathanEnch(12179)
+	sendSD(p, 12179, 1, 2)
+
+	found = findBuffSource(m, CatBeastBuff)
+	if found == nil || found.Attack != 4 {
+		t.Fatalf("Leviathan after combat replay of old value: expected +4 (no regression), got %+v", found)
+	}
+
+	// A combat copy carrying the current value must not double-count either.
+	leviathanEnch(12185)
+	sendSD(p, 12185, 1, 4)
+
+	found = findBuffSource(m, CatBeastBuff)
+	if found == nil || found.Attack != 4 || found.Health != 0 {
+		t.Fatalf("Leviathan after combat copy of current value: expected +4/+0, got %+v", found)
 	}
 }
 
