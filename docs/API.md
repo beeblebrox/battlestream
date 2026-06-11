@@ -23,7 +23,7 @@ grpcurl -plaintext localhost:50051 battlestream.v1.BattlestreamService/GetAggreg
 | `StreamGameEvents` | `StreamRequest` | `stream GameEvent` | Real-time event stream |
 | `GetAggregate` | `GetAggregateRequest` | `AggregateStats` | Aggregate stats across all games (includes `best_placement`, `worst_placement`) |
 | `ListGames` | `ListGamesRequest{limit,offset}` | `ListGamesResponse` | Paginated game history |
-| `GetPlayerProfile` | `GetPlayerRequest{name}` | `PlayerProfile` | Per-player profile |
+| `GetPlayerProfile` | `GetPlayerRequest{name}` | `PlayerProfile` | **Not implemented** — returns `UNIMPLEMENTED`. The store does not record player names per game, so per-player filtering is impossible; use `GetAggregate`. The REST mapping `GET /v1/player/{name}` likewise returns `501 Not Implemented`. |
 
 ---
 
@@ -39,6 +39,14 @@ If `api.api_key` is set, include:
 ```
 Authorization: Bearer <key>
 ```
+
+### Browser access (Origin / Host policy)
+
+The server is intended for localhost use:
+
+- Requests **without** an `Origin` header (curl, native clients) are always accepted.
+- WebSocket upgrades and SSE connections **with** an `Origin` header are only accepted from loopback origins (`localhost`, `127.0.0.1`, `[::1]` — any port). Other origins get `403`.
+- All requests must carry a `Host` header that is a localhost form or the configured bind host (DNS-rebinding protection). A wildcard bind (`0.0.0.0` / `::`) accepts any host.
 
 ### Endpoints
 

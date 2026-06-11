@@ -1,11 +1,16 @@
 package rest
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/gorilla/websocket"
 
 	grpcserver "battlestream.fixates.io/internal/api/grpc"
 	"battlestream.fixates.io/internal/gamestate"
@@ -287,6 +292,220 @@ func TestHandleGetModifications_NotFound404(t *testing.T) {
 	s.handleGetModifications(rw, req)
 	if rw.Code != http.StatusNotFound {
 		t.Fatalf("want 404 for missing game, got %d", rw.Code)
+	}
+}
+
+// newWSTestServer starts an httptest server that serves only the WebSocket
+// handler, with the hub running so successful upgrades can register.
+func newWSTestServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	s := New(nil, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	go s.hub.run(ctx)
+	ts := httptest.NewServer(http.HandlerFunc(s.handleWebSocket))
+	t.Cleanup(func() {
+		ts.Close()
+		cancel()
+	})
+	return ts
+}
+
+func wsURL(ts *httptest.Server) string {
+	return "ws" + strings.TrimPrefix(ts.URL, "http")
+}
+
+func TestWebSocketOrigin_EvilRejected(t *testing.T) {
+	ts := newWSTestServer(t)
+	hdr := http.Header{"Origin": []string{"https://evil.example"}}
+	conn, resp, err := websocket.DefaultDialer.Dial(wsURL(ts), hdr)
+	if err == nil {
+		conn.Close()
+		t.Fatalf("want upgrade rejected for Origin https://evil.example, got success")
+	}
+	if resp == nil || resp.StatusCode != http.StatusForbidden {
+		code := 0
+		if resp != nil {
+			code = resp.StatusCode
+		}
+		t.Fatalf("want 403 for evil origin, got %d (err=%v)", code, err)
+	}
+}
+
+func TestWebSocketOrigin_NoOriginAllowed(t *testing.T) {
+	ts := newWSTestServer(t)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL(ts), nil)
+	if err != nil {
+		t.Fatalf("want upgrade success with no Origin header, got err: %v", err)
+	}
+	conn.Close()
+}
+
+func TestWebSocketOrigin_LocalhostAllowed(t *testing.T) {
+	ts := newWSTestServer(t)
+	hdr := http.Header{"Origin": []string{"http://localhost:8080"}}
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL(ts), hdr)
+	if err != nil {
+		t.Fatalf("want upgrade success with Origin http://localhost:8080, got err: %v", err)
+	}
+	conn.Close()
+}
+
+// sseGet performs a GET against the SSE handler and returns the response once
+// headers arrive. The request is cancelled on test cleanup.
+func sseGet(t *testing.T, ts *httptest.Server, origin string) *http.Response {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	t.Cleanup(cancel)
+	req, err := http.NewRequestWithContext(ctx, "GET", ts.URL, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	if origin != "" {
+		req.Header.Set("Origin", origin)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("SSE headers did not arrive immediately (handler must flush headers on connect): %v", err)
+	}
+	t.Cleanup(func() { resp.Body.Close() })
+	return resp
+}
+
+func newSSETestServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	s := New(grpcserver.New(nil, nil, nil), "")
+	ts := httptest.NewServer(http.HandlerFunc(s.handleSSE))
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+func TestSSE_ImmediateHeaders_NoOrigin(t *testing.T) {
+	ts := newSSETestServer(t)
+	resp := sseGet(t, ts, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
+		t.Errorf("Content-Type = %q, want text/event-stream", ct)
+	}
+	if acao := resp.Header.Get("Access-Control-Allow-Origin"); acao != "" {
+		t.Errorf("Access-Control-Allow-Origin should be absent without an Origin header, got %q", acao)
+	}
+}
+
+func TestSSE_LocalhostOrigin_EchoedACAO(t *testing.T) {
+	ts := newSSETestServer(t)
+	resp := sseGet(t, ts, "http://127.0.0.1:8080")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	if acao := resp.Header.Get("Access-Control-Allow-Origin"); acao != "http://127.0.0.1:8080" {
+		t.Errorf("Access-Control-Allow-Origin = %q, want the localhost request origin (never *)", acao)
+	}
+}
+
+func TestSSE_EvilOrigin_Rejected(t *testing.T) {
+	ts := newSSETestServer(t)
+	resp := sseGet(t, ts, "https://evil.example")
+	if resp.StatusCode == http.StatusOK {
+		if acao := resp.Header.Get("Access-Control-Allow-Origin"); acao != "" {
+			t.Fatalf("evil origin must not receive Access-Control-Allow-Origin, got %q", acao)
+		}
+	} else if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("want 403 (or 200 without ACAO) for evil origin, got %d", resp.StatusCode)
+	}
+}
+
+func TestSSE_Keepalive(t *testing.T) {
+	oldInterval := sseKeepaliveInterval
+	sseKeepaliveInterval = 50 * time.Millisecond
+	t.Cleanup(func() { sseKeepaliveInterval = oldInterval })
+
+	ts := newSSETestServer(t)
+	resp := sseGet(t, ts, "")
+	reader := bufio.NewReader(resp.Body)
+
+	// The handler writes an initial comment on connect...
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatalf("reading first SSE line: %v", err)
+	}
+	if !strings.HasPrefix(line, ":") {
+		t.Errorf("first SSE line = %q, want a comment line starting with ':'", line)
+	}
+
+	// ...and periodic keepalive comments thereafter.
+	sawKeepalive := false
+	for i := 0; i < 10; i++ {
+		line, err = reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("reading SSE stream: %v", err)
+		}
+		if strings.HasPrefix(line, ": keepalive") {
+			sawKeepalive = true
+			break
+		}
+	}
+	if !sawKeepalive {
+		t.Errorf("no keepalive comment observed on SSE stream")
+	}
+}
+
+func TestHostCheck(t *testing.T) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	tests := []struct {
+		name     string
+		bindHost string
+		reqHost  string
+		want     int
+	}{
+		{"evil host rejected", "127.0.0.1", "evil.example:8080", http.StatusForbidden},
+		{"127.0.0.1 allowed", "127.0.0.1", "127.0.0.1:8080", http.StatusOK},
+		{"localhost allowed", "127.0.0.1", "localhost:8080", http.StatusOK},
+		{"ipv6 loopback allowed", "127.0.0.1", "[::1]:8080", http.StatusOK},
+		{"no port allowed", "127.0.0.1", "localhost", http.StatusOK},
+		{"configured non-localhost bind host allowed", "192.168.1.5", "192.168.1.5:8080", http.StatusOK},
+		{"other host rejected on non-localhost bind", "192.168.1.5", "evil.example:8080", http.StatusForbidden},
+		{"wildcard bind allows any host", "", "anything.example:8080", http.StatusOK},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := hostCheckHandler(tt.bindHost, inner)
+			req := httptest.NewRequest("GET", "/v1/health", nil)
+			req.Host = tt.reqHost
+			rw := httptest.NewRecorder()
+			h.ServeHTTP(rw, req)
+			if rw.Code != tt.want {
+				t.Errorf("bind %q, Host %q: got %d, want %d", tt.bindHost, tt.reqHost, rw.Code, tt.want)
+			}
+		})
+	}
+}
+
+func TestHandleGetPlayer_NotImplemented(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+	if err := st.SaveGame(store.GameMeta{GameID: "g1", Placement: 3}); err != nil {
+		t.Fatalf("saving game: %v", err)
+	}
+
+	s := New(grpcserver.New(nil, st, nil), "")
+	req := httptest.NewRequest("GET", "/v1/player/SomeName", nil)
+	req.SetPathValue("name", "SomeName")
+	rw := httptest.NewRecorder()
+	s.handleGetPlayer(rw, req)
+
+	// The store does not record player names per game, so the endpoint must
+	// not pretend to filter — it returns 501 Not Implemented.
+	if rw.Code != http.StatusNotImplemented {
+		t.Fatalf("want 501 Not Implemented, got %d (body: %s)", rw.Code, rw.Body.String())
 	}
 }
 
