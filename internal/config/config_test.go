@@ -115,3 +115,48 @@ func TestNewProfileConfigHonorsOverride(t *testing.T) {
 		t.Errorf("NewProfileConfig Output.Path = %q, want under %q", p.Output.Path, wantBase)
 	}
 }
+
+// TestWriteIntervalNonPositiveClamped verifies that zero and negative
+// write_interval_ms values are normalized to the 500ms default. A negative
+// value previously passed through normalization and made time.NewTicker
+// panic in the daemon (audit M11, bug 4).
+func TestWriteIntervalNonPositiveClamped(t *testing.T) {
+	cases := []struct {
+		name     string
+		interval string
+		want     int
+	}{
+		{"negative", "-100", 500},
+		{"zero", "0", 500},
+		{"positive preserved", "250", 250},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("BS_CONFIG_DIR", dir)
+
+			yaml := `profiles:
+  default:
+    output:
+      enabled: true
+      write_interval_ms: ` + tc.interval + `
+active_profile: default
+`
+			if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			cfg, err := Load("")
+			if err != nil {
+				t.Fatalf("Load() error: %v", err)
+			}
+			p, err := cfg.GetProfile("")
+			if err != nil {
+				t.Fatalf("GetProfile() error: %v", err)
+			}
+			if p.Output.WriteIntervalMs != tc.want {
+				t.Errorf("WriteIntervalMs = %d, want %d", p.Output.WriteIntervalMs, tc.want)
+			}
+		})
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -28,11 +29,17 @@ type Server struct {
 	st     *store.Store
 	events <-chan parser.GameEvent
 
-	subsMu sync.Mutex
-	subs   []chan parser.GameEvent
+	subsMu     sync.Mutex
+	subs       []chan parser.GameEvent
+	subsClosed bool
 
+	mu      sync.Mutex // guards grpcSrv and lis
 	grpcSrv *grpc.Server
+	lis     net.Listener
 }
+
+// DefaultStopTimeout bounds GracefulStop before falling back to a hard Stop.
+const DefaultStopTimeout = 5 * time.Second
 
 // New creates a new gRPC Server.
 func New(gs *gamestate.Machine, st *store.Store, events <-chan parser.GameEvent) *Server {
@@ -43,30 +50,77 @@ func New(gs *gamestate.Machine, st *store.Store, events <-chan parser.GameEvent)
 	}
 }
 
-// Serve starts the gRPC server on addr. Blocks until ctx is cancelled.
+// Serve starts the gRPC server on addr and blocks until the server has fully
+// stopped. Shutdown is initiated by calling Stop; ctx only governs the event
+// fan-out goroutine. Callers must call Stop to terminate the server.
 func (s *Server) Serve(ctx context.Context, addr string) error {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("grpc listen on %s: %w", addr, err)
 	}
 
-	s.grpcSrv = grpc.NewServer()
-	bspb.RegisterBattlestreamServiceServer(s.grpcSrv, s)
-	reflection.Register(s.grpcSrv)
+	grpcSrv := grpc.NewServer()
+	bspb.RegisterBattlestreamServiceServer(grpcSrv, s)
+	reflection.Register(grpcSrv)
+
+	s.mu.Lock()
+	s.grpcSrv = grpcSrv
+	s.lis = lis
+	s.mu.Unlock()
 
 	slog.Info("gRPC server listening", "addr", addr)
 
 	go s.fanOut(ctx)
 
-	go func() {
-		<-ctx.Done()
-		s.grpcSrv.GracefulStop()
-	}()
-
-	if err := s.grpcSrv.Serve(lis); err != nil && ctx.Err() == nil {
+	if err := grpcSrv.Serve(lis); err != nil && ctx.Err() == nil {
 		return fmt.Errorf("grpc serve: %w", err)
 	}
 	return nil
+}
+
+// BoundAddr returns the address the server is actually listening on
+// (useful when Serve was given a ":0" port), or "" before Serve has bound.
+func (s *Server) BoundAddr() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.lis == nil {
+		return ""
+	}
+	return s.lis.Addr().String()
+}
+
+// Stop shuts the server down and blocks until it has fully stopped.
+//
+// Server-streaming RPCs (StreamGameEvents) only end when their subscriber
+// channel closes or the client disconnects, so GracefulStop alone can wait
+// forever while a TUI is attached. Stop first closes all active subscriber
+// channels (ending the streams), then runs GracefulStop bounded by ctx; if
+// ctx expires first, it falls back to a hard Stop. Safe to call when Serve
+// was never started (no-op).
+func (s *Server) Stop(ctx context.Context) {
+	s.mu.Lock()
+	grpcSrv := s.grpcSrv
+	s.mu.Unlock()
+
+	// Terminate active event streams so graceful stop can complete.
+	s.closeAllSubscribers()
+
+	if grpcSrv == nil {
+		return
+	}
+
+	done := make(chan struct{})
+	go func() {
+		grpcSrv.GracefulStop()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		slog.Warn("gRPC graceful stop timed out, forcing hard stop")
+		grpcSrv.Stop()
+		<-done
+	}
 }
 
 // --- BattlestreamServiceServer implementation ---
@@ -217,6 +271,13 @@ func (s *Server) Unsubscribe(ch chan parser.GameEvent) {
 func (s *Server) subscribe() chan parser.GameEvent {
 	ch := make(chan parser.GameEvent, 512)
 	s.subsMu.Lock()
+	if s.subsClosed {
+		// Server is shutting down: hand back a closed channel so the
+		// caller's stream loop terminates immediately.
+		s.subsMu.Unlock()
+		close(ch)
+		return ch
+	}
 	s.subs = append(s.subs, ch)
 	s.subsMu.Unlock()
 	return ch
@@ -225,14 +286,37 @@ func (s *Server) subscribe() chan parser.GameEvent {
 func (s *Server) unsubscribe(ch chan parser.GameEvent) {
 	s.subsMu.Lock()
 	defer s.subsMu.Unlock()
+	found := false
 	subs := s.subs[:0]
 	for _, sub := range s.subs {
 		if sub != ch {
 			subs = append(subs, sub)
+		} else {
+			found = true
 		}
 	}
 	s.subs = subs
-	close(ch)
+	// Only close channels we still own; closeAllSubscribers may have
+	// already closed (and removed) this one during shutdown.
+	if found {
+		close(ch)
+	}
+}
+
+// closeAllSubscribers closes every active subscriber channel and prevents new
+// subscriptions. This terminates server-streaming RPCs and SSE/WS feeds so a
+// graceful stop can drain. Idempotent.
+func (s *Server) closeAllSubscribers() {
+	s.subsMu.Lock()
+	defer s.subsMu.Unlock()
+	if s.subsClosed {
+		return
+	}
+	s.subsClosed = true
+	for _, ch := range s.subs {
+		close(ch)
+	}
+	s.subs = nil
 }
 
 func (s *Server) fanOut(ctx context.Context) {

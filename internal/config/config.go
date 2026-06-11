@@ -253,7 +253,8 @@ func applyProfileDefaults(p *ProfileConfig, name string) {
 	if p.Output.Path == "" {
 		p.Output.Path = filepath.Join(base, "stats")
 	}
-	if p.Output.WriteIntervalMs == 0 {
+	// Clamp non-positive values: time.NewTicker panics on intervals <= 0.
+	if p.Output.WriteIntervalMs <= 0 {
 		p.Output.WriteIntervalMs = 500
 	}
 }
