@@ -99,9 +99,13 @@ Environment variables override file values. Prefix: `BS_`, separator `_`.
 
 | Variable | Config Key | Example |
 |---|---|---|
+| `BS_ACTIVE_PROFILE` | `active_profile` | `laptop` |
 | `BS_API_GRPC_ADDR` | `api.grpc_addr` | `0.0.0.0:50051` |
 | `BS_API_REST_ADDR` | `api.rest_addr` | `0.0.0.0:8080` |
 | `BS_API_API_KEY` | `api.api_key` | `s3cr3t` |
 | `BS_LOGGING_LEVEL` | `logging.level` | `debug` |
+| `BS_LOGGING_FILE` | `logging.file` | `/tmp/bs.log` |
 
 Per-profile settings cannot be set via environment variables; use the config file.
+(Viper only applies env overrides to keys it already knows about, and profile
+names are dynamic, so `profiles.<name>.*` keys cannot be bound to env vars.)
