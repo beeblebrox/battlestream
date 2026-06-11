@@ -201,6 +201,7 @@ func (c *CombinedModel) initReplayCmd() tea.Cmd {
 				if err == nil && len(replay.Games) > 0 {
 					model = debugtui.NewFromReplay(replay)
 					model.SetSources(st, logFiles, debugtui.SourceDB)
+					model.SetEmbedded(true)
 					done <- replayInitDoneMsg{model: model}
 					return
 				}
@@ -210,6 +211,7 @@ func (c *CombinedModel) initReplayCmd() tea.Cmd {
 			if len(logFiles) > 0 {
 				model = debugtui.New(logFiles)
 				model.SetSources(st, logFiles, 0)
+				model.SetEmbedded(true)
 				done <- replayInitDoneMsg{model: model}
 				return
 			}
@@ -217,6 +219,7 @@ func (c *CombinedModel) initReplayCmd() tea.Cmd {
 			// No data available — create empty model.
 			model = debugtui.NewFromReplay(&debugtui.Replay{})
 			model.SetSources(st, logFiles, 0)
+			model.SetEmbedded(true)
 			done <- replayInitDoneMsg{model: model}
 		}()
 
@@ -227,6 +230,7 @@ func (c *CombinedModel) initReplayCmd() tea.Cmd {
 			// Timeout — return empty model to avoid freezing the TUI.
 			model := debugtui.NewFromReplay(&debugtui.Replay{})
 			model.SetSources(st, logFiles, 0)
+			model.SetEmbedded(true)
 			return replayInitDoneMsg{model: model}
 		}
 	}

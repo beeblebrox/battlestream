@@ -110,7 +110,9 @@ func renderTavernTier(tier int) string {
 	if tier <= 0 {
 		return styleValue.Render("—")
 	}
-	stars := strings.Repeat("★", tier) + strings.Repeat("☆", 6-tier)
+	// Tier 7 (anomaly tier) exceeds the normal 6-star scale; guard the
+	// empty-star count so strings.Repeat never gets a negative count.
+	stars := strings.Repeat("★", tier) + strings.Repeat("☆", max(0, 6-tier))
 	return lipgloss.NewStyle().Foreground(tavernTierColor(tier)).Render(fmt.Sprintf("%d %s", tier, stars))
 }
 
@@ -128,6 +130,8 @@ func tavernTierColor(tier int) lipgloss.Color {
 		return lipgloss.Color("202")
 	case 6:
 		return lipgloss.Color("196")
+	case 7:
+		return lipgloss.Color("201") // magenta — anomaly tier
 	default:
 		return lipgloss.Color("255")
 	}

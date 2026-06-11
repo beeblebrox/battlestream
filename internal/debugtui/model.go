@@ -122,6 +122,18 @@ type Model struct {
 
 	// Temporary notice (shown briefly then auto-dismissed).
 	notice string
+
+	// embedded is true when this model runs inside the combined TUI rather
+	// than as the standalone `battlestream replay` command. When embedded,
+	// a replay load error must never quit the program (it would kill the
+	// live dashboard too).
+	embedded bool
+}
+
+// SetEmbedded marks the model as embedded in the combined TUI. Embedded
+// models never emit tea.Quit on replay load errors.
+func (m *Model) SetEmbedded(v bool) {
+	m.embedded = v
 }
 
 func newJumpInput() textinput.Model {
@@ -158,10 +170,15 @@ func New(paths []string) *Model {
 }
 
 // NewFromReplay creates a debug TUI Model from a pre-loaded replay (for tests).
+//
+// progress must be initialized here too: the combined TUI constructs models
+// via NewFromReplay, and switching sources (L) sets loading=true, which makes
+// View dereference progress. Every constructor must set it (never nil).
 func NewFromReplay(replay *Replay) *Model {
 	m := &Model{
 		replay:      replay,
 		picking:     len(replay.Games) > 1,
+		progress:    &loadProgress{},
 		jumpInput:   newJumpInput(),
 		loadSpinner: newLoadSpinner(),
 	}
@@ -368,6 +385,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.loadErr != nil {
+			if m.embedded {
+				// Embedded in the combined TUI: quitting here would kill
+				// the live dashboard. Allow retrying the other source via
+				// L; swallow everything else (Tab/q/ctrl+c are handled by
+				// the combined model itself).
+				if msg.String() == "L" {
+					return m.switchSource()
+				}
+				return m, nil
+			}
+			// Standalone replay command: any key exits.
 			return m, tea.Quit
 		}
 		if m.picking {
@@ -753,6 +781,9 @@ func (m *Model) View() string {
 	}
 
 	if m.loadErr != nil {
+		if m.embedded {
+			return fmt.Sprintf("\n  Error: %v\n\n  L: try other source   Tab: back to live", m.loadErr)
+		}
 		return fmt.Sprintf("\n  Error: %v\n\n  Press any key to exit.", m.loadErr)
 	}
 
