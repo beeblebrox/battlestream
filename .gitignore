@@ -67,6 +67,12 @@ lastgames/
 # Local progress reports (board-facing, not committed)
 .progress/
 
+# Obsidian vault metadata
+.obsidian/
+
+# Local scratch space
+scratch/
+
 # Air live reload
 tmp/
 

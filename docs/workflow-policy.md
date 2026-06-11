@@ -14,8 +14,8 @@ This document defines the standard workflow all developers, UI engineers, and QA
 4. **Merging to `main` requires QA sign-off.** A task cannot be marked `done` and merged until QA has validated it on the worktree.
 5. **`main` is always releasable.** Only clean, tested, QA-approved code lands on `main`.
 6. **Bug fixes must include a regression test.** Every bug fix must be accompanied by a test that reproduces the original failure and passes after the fix. This prevents the same bug from regressing silently.
-7. **QA-ready issues must be assigned to the QA engineer.** When a task is ready for review, set the Paperclip issue status to `in_review` and **assign it to the QA agent**. Do not leave it assigned to yourself. QA will not pick up tasks that are not explicitly assigned to them.
-8. **QA failures must be reassigned to the developer — comments are not enough.** When QA finds bugs, they MUST: (a) set status to `in_progress`, (b) reassign to the developer, (c) post a bug report comment. A comment saying "ready for dev" without a reassignment and status change is a protocol violation — developers only see tasks assigned to them. Work left in a comment is lost work.
+7. **QA-ready issues must be handed off explicitly.** When a task is ready for review, mark it as in review in the issue tracker (when one is in use) and **assign it to the QA agent**. Do not leave it assigned to yourself. QA will not pick up tasks that are not explicitly assigned to them.
+8. **QA failures must be handed back to the developer — comments are not enough.** When QA finds bugs, they MUST: (a) move the task back to in-progress, (b) reassign it to the developer, (c) post a bug report. A comment saying "ready for dev" without a reassignment and status change is a protocol violation — developers only see tasks assigned to them. Work left in a comment is lost work.
 
 ---
 
@@ -39,9 +39,9 @@ cd ../battlestream-<issue-id>
 ### 2. Development
 
 - Do all dev work inside the worktree directory.
-- Commit frequently with meaningful messages. Always include:
+- Commit frequently with meaningful messages. Agent-authored commits end with the standard Claude Code trailer, e.g.:
   ```
-  Co-Authored-By: Paperclip <noreply@paperclip.ing>
+  Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
   ```
 - Push the branch to remote at natural checkpoints:
   ```sh
@@ -69,7 +69,7 @@ When development is complete:
    git status   # must be clean
    git push
    ```
-2. Update the Paperclip issue to `in_review` with a comment that includes:
+2. Mark the issue as in review (in whatever issue tracker is in use) with a handoff note that includes:
    - What was built and how to test it
    - The worktree path (e.g. `../battlestream-BAT-7`) or branch name
 3. **Assign the issue to the QA engineer** (required — QA will not act on tasks not assigned to them).
@@ -86,9 +86,9 @@ QA agent:
    git pull
    ```
 3. Runs the full validation suite.
-4. Records results in a Paperclip comment on the issue.
-5. **Pass** → set status to `in_progress`, reassign to the **developer**, and post a comment: "QA passed — please merge `feat/<issue-id>` to `main`, push, clean up the worktree, and mark this done." QA does **not** merge. The developer owns the merge step.
-6. **Fail** → **immediately**: set status to `in_progress`, reassign to the developer, post a bug report comment explaining what failed and what needs to be fixed. Do NOT leave a comment and walk away — the status change + reassignment is what notifies the developer. A bare comment is invisible to them.
+4. Records results on the issue.
+5. **Pass** → move the task back to in-progress, reassign to the **developer**, and post a note: "QA passed — please merge `feat/<issue-id>` to `main`, push, clean up the worktree, and mark this done." QA does **not** merge. The developer owns the merge step.
+6. **Fail** → **immediately**: move the task back to in-progress, reassign to the developer, post a bug report explaining what failed and what needs to be fixed. Do NOT leave a comment and walk away — the status change + reassignment is what notifies the developer. A bare comment is invisible to them.
 
 ### 5. Merging to `main` (Developer)
 
@@ -127,7 +127,7 @@ Once QA reassigns the issue back to you with a pass comment:
 - Do not create a worktree from a branch already checked out in another worktree.
 - Do not commit `.claude/plans/`, screenshot files (`*.png`), or game log directories (`Hearthstone_*/`) — these are gitignored.
 - Do not push directly to `main`. Even hotfixes go through a branch.
-- Do not mark a task `done` in Paperclip before QA has signed off.
+- Do not mark a task done in the issue tracker before QA has signed off.
 - Do not submit a bug fix without a regression test — QA will reject it.
 - Do not leave a QA-ready task assigned to yourself — it must be reassigned to the QA engineer with status `in_review`.
 - Do not post "ready for dev" in a comment without also reassigning the issue to the developer and setting status to `in_progress`. Comments without assignment changes are invisible to the developer — the work will be lost.
@@ -140,7 +140,7 @@ Once QA reassigns the issue back to you with a pass comment:
 New issue
   → git worktree (feat/<id> from origin/main)
   → dev commits + push
-  → Paperclip: status=in_review + assign to QA engineer (required)
+  → issue tracker: mark in review + assign to QA engineer (required)
   → QA validates same worktree
   → pass: merge to main + push + clean up worktree
   → fail: back to in_progress → assign back to dev → fixes → repeat QA

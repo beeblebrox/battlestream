@@ -56,6 +56,12 @@ Health check. Always returns `{"status":"ok"}`.
 #### `GET /v1/game/current`
 Current game state.
 
+#### `GET /v1/game/{game_id}`
+Historical game state by ID (same shape as `/v1/game/current`). Returns `404` if the game is not in the store.
+
+#### `GET /v1/game/{game_id}/turns`
+Per-turn snapshots for a stored game. Returns an array of turn snapshot objects, each containing `turn`, a full `state` (`BGGameState`) snapshot, and optional `buff_deltas`, `ability_deltas`, and `modifications` for that turn. Returns `[]` if no snapshots exist.
+
 ```json
 {
   "game_id": "game-1",
@@ -92,7 +98,13 @@ Current game state.
 ```
 
 #### `GET /v1/stats/aggregate`
-Aggregate stats across all games.
+Aggregate stats across all completed games (stale games with placement 0 are excluded).
+
+Query parameters:
+
+| Param | Description |
+|---|---|
+| `mode` | Filter by game mode: `solo`, `duos`, or `all` (default: all) |
 
 ```json
 {
@@ -107,14 +119,52 @@ Aggregate stats across all games.
 > For `best_placement` and `worst_placement`, use the gRPC `GetAggregate` RPC.
 
 #### `GET /v1/stats/games`
-List of recent games (newest first, up to 50 results).
+List of recent games (newest first). Stale games (placement 0) are excluded.
+
+Query parameters:
+
+| Param | Default | Description |
+|---|---|---|
+| `limit` | `50` | Maximum number of games to return (`0` = no limit) |
+| `offset` | `0` | Number of games to skip (offset pagination) |
+| `mode` | all | Filter by game mode: `solo`, `duos`, or `all` |
 
 ```json
-[
-  {"game_id": "game-11", "start_time_unix": 1741108800, "end_time_unix": 1741109400, "placement": 1},
-  {"game_id": "game-10", "start_time_unix": 1741022400, "end_time_unix": 1741023000, "placement": 3}
-]
+{
+  "games": [
+    {"game_id": "game-11", "start_time_unix": 1741108800, "end_time_unix": 1741109400, "placement": 1},
+    {"game_id": "game-10", "start_time_unix": 1741022400, "end_time_unix": 1741023000, "placement": 3, "is_duos": true}
+  ],
+  "total": 11
+}
 ```
+
+`total` is the number of games matching the filter *before* pagination, so clients can page off it.
+
+#### `GET /v1/stats/games/{game_id}/modifications`
+Stat modifications (board-wide buffs) recorded for a stored game. Returns `404` if the game is not in the store.
+
+```json
+{
+  "game_id": "game-11",
+  "modifications": [
+    {"turn": 3, "target": "Board (4x)", "stat": "ATTACK", "delta": 1}
+  ]
+}
+```
+
+#### `GET /v1/player/{name}`
+**Not implemented** — returns `501 Not Implemented`. The store does not record player names per game, so per-player filtering is impossible. Use `/v1/stats/aggregate` instead.
+
+#### `GET /v1/cardnames`
+Full CardID → friendly name map for all known Battlegrounds cards. Useful for clients that receive raw card IDs from the event stream.
+
+```json
+{"BG34_403": "Eternal Tycoon", "EX1_506": "Murloc Tidehunter"}
+```
+
+#### `GET /dashboard/`
+Built-in web dashboard (static HTML/JS, embedded in the binary). `GET /dashboard` redirects here. Not part of the versioned JSON API.
 
 ---
 
@@ -141,10 +191,11 @@ Connect to receive a real-time stream of `GameEvent` JSON objects. Events are pu
 | `GAME_START` | New game started |
 | `GAME_END` | Game ended (tags include `PLAYER_LEADERBOARD_PLACE`) |
 | `TURN_START` | New turn (tags include `TURN`) |
-| `TAG_CHANGE` | Entity tag changed |
+| `TAG_CHANGE` | Entity tag changed (zone moves arrive as `TAG_CHANGE` with `tag=ZONE`) |
 | `ENTITY_UPDATE` | Entity created or updated |
-| `ZONE_CHANGE` | Entity moved between zones |
-| `PLAYER_UPDATE` | Player stat changed |
+| `PLAYER_DEF` | Player entity definition from the CREATE_GAME block |
+| `PLAYER_NAME` | PlayerID → player name mapping |
+| `GAME_ENTITY_TAGS` | Tags from the GameEntity block in CREATE_GAME |
 
 ### Event Fields
 
@@ -153,9 +204,12 @@ Connect to receive a real-time stream of `GameEvent` JSON objects. Events are pu
 | `type` | string | One of the event types above |
 | `timestamp` | string (RFC3339) | When the log line was written |
 | `entity_id` | int | Entity ID (omitted if 0) |
+| `player_id` | int | CONTROLLER / `player=` field (omitted if 0) |
 | `tags` | object | Key-value tag map (omitted if empty) |
 | `entity_name` | string | Entity display name (omitted if empty) |
 | `card_id` | string | Hearthstone card ID (omitted if empty) |
+| `block_source` | int | Entity ID from the enclosing `BLOCK_START` (omitted if 0) |
+| `block_card_id` | string | Card ID from the enclosing `BLOCK_START` (omitted if empty) |
 
 ---
 

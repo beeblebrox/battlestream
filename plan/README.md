@@ -52,13 +52,11 @@ tasks with a log of what is done and what remains.
 
 | # | File | Issue |
 |---|------|-------|
-| 10 | [10-opponent-tracking.md](10-opponent-tracking.md) | No opponent tracking — `BGGameState.Opponent`/`OpponentBoard` never populated |
+| 10 | [10-opponent-tracking.md](10-opponent-tracking.md) | **PARTIAL** — `OpponentBoard` now populated from combat copies (`SetOpponentBoard`); `BGGameState.Opponent` hero PlayerState still never set |
 | 11 | [11-stat-mod-source.md](11-stat-mod-source.md) | `Modifications[]` Source/Category/CardID always empty — block context not used |
 | 12 | [12-win-loss-streak.md](12-win-loss-streak.md) | ~~`WinStreak`/`LossStreak` declared but never set~~ **DONE** — tracked via PREDAMAGE/TURN |
 | 13 | [13-gold-tracking.md](13-gold-tracking.md) | ~~`CurrentGold` declared but never set~~ **DONE** — tracked via RESOURCES/RESOURCES_USED tags |
 | 33 | [33-loss-streak-overcounting.md](33-loss-streak-overcounting.md) | **DONE** — Fixed: use PREDAMAGE tag instead of armor decrease to detect combat losses |
-| 34 | [34-hero-damage-tracking.md](34-hero-damage-tracking.md) | Hero DAMAGE tag not tracked — health never updates (effective HP = HEALTH - DAMAGE) |
-| 35 | [35-max-health-from-hero.md](35-max-health-from-hero.md) | ~~Max health hardcoded to 40 in TUI~~ **DONE** — MaxHealth tracked from hero HEALTH tag |
 | 14 | [14-parser-panic-recovery.md](14-parser-panic-recovery.md) | ~~No panic recovery in `Feed()`~~ **DONE** — defer recover() with slog.Error |
 | 15 | [15-dead-event-constants.md](15-dead-event-constants.md) | ~~`EventPlayerUpdate`/`EventZoneChange` declared but never emitted~~ **DONE** — removed dead constants |
 | 16 | [16-timestamp-date.md](16-timestamp-date.md) | ~~Timestamp uses today's date~~ **DONE** — refDate + midnight wrap detection |
@@ -71,7 +69,7 @@ tasks with a log of what is done and what remains.
 | 18 | [18-block-indent-threshold.md](18-block-indent-threshold.md) | ~~`reBlockTag` hard-codes 4-space indent~~ **DONE** — extracted to const + empty Tags warning |
 | 19 | [19-retagchange-ordering.md](19-retagchange-ordering.md) | ~~`reTagChange` catch-all undocumented priority~~ **DONE** — ordering comment added |
 | 20 | [20-block-type-parsing.md](20-block-type-parsing.md) | `BLOCK_START` `BlockType` ignored — can't distinguish attack/spell/play blocks |
-| 21 | [21-zone-position.md](21-zone-position.md) | `ZONE_POSITION` tag ignored — board order and position-dependent buffs wrong |
+| 21 | [21-zone-position.md](21-zone-position.md) | ~~`ZONE_POSITION` tag ignored — board order and position-dependent buffs wrong~~ **DONE** — processor consumes ZONE_POSITION for board collection and ordering |
 | 22 | [22-combat-damage-tags.md](22-combat-damage-tags.md) | No `DAMAGED`/`DEFENDING`/`ATTACKING` handling — combat buff suppression heuristic fragile |
 | 23 | [23-gameid-stable.md](23-gameid-stable.md) | ~~`gameSeq` resets on restart~~ **DONE** — timestamp-based game IDs |
 | 24 | [24-reparse-seq-reset.md](24-reparse-seq-reset.md) | ~~Reparse `gameSeq` inconsistent~~ **DONE** — moot via plan 23 |
@@ -84,4 +82,5 @@ tasks with a log of what is done and what remains.
 | 31 | [31-metrics.md](31-metrics.md) | No metrics/observability — no Prometheus or similar export |
 | 32 | [32-trinkets-artifacts.md](32-trinkets-artifacts.md) | No trinkets/artifacts support — post-2025 mechanics not covered |
 | 36 | [36-placement-in-result.md](36-placement-in-result.md) | ~~TUI shows WIN/LOSS without placement number~~ **DONE** — displays "WIN #4" / "LOSS #7" |
-| 37 | [37-gamenetlogger-signals.md](37-gamenetlogger-signals.md) | GameNetLogger.log has disconnect/reconnect signals not used by battlestream |
+| 37 | [37-anomaly-display.md](37-anomaly-display.md) | ~~No anomaly info shown anywhere~~ **DONE** — TUI shows anomaly name with `[d]` description toggle |
+| 43 | [43-gamenetlogger-signals.md](43-gamenetlogger-signals.md) | GameNetLogger.log has disconnect/reconnect signals not used by battlestream (renumbered from 37 — number collided with 37-anomaly-display) |

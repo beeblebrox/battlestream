@@ -55,9 +55,9 @@ The wrapper copies `~/.battlestream/` to a temp directory, sets `BS_CONFIG_DIR` 
 
 ## Architecture
 
-Hearthstone Battlegrounds stat tracker. The daemon tails `Power.log`, parses game events, maintains live state, and exposes it via multiple APIs.
+Hearthstone Battlegrounds stat tracker. The daemon tails `Power.log` and `Zone.log` (the watcher's default file set; on macOS it tails Unity's `Player.log` instead), parses game events, maintains live state, and exposes it via multiple APIs.
 
-**Data pipeline:** `watcher` (tail Power.log) -> `parser` (regex -> GameEvent) -> `gamestate.Processor` (state machine) -> outputs (fileout, gRPC, REST/WS/SSE)
+**Data pipeline:** `watcher` (tail Power.log + Zone.log) -> `parser` (regex -> GameEvent) -> `gamestate.Processor` (state machine) -> outputs (fileout, gRPC, REST/WS/SSE)
 
 Key packages under `internal/`:
 - **parser** — Regex-based line parser. Only processes `GameState` debug lines; filters out `PowerTaskList`. Outputs typed `GameEvent` structs.
@@ -68,7 +68,7 @@ Key packages under `internal/`:
 - **api/grpc** — gRPC server on :50051 with reflection. Generated code in `internal/api/grpc/gen/`.
 - **api/rest** — REST on :8080 + WebSocket (`/ws/events`) + SSE (`/v1/events`).
 
-Entry point: `cmd/battlestream/main.go` (cobra subcommands: daemon, tui, replay, discover, config, reparse, db-reset, version).
+Entry point: `cmd/battlestream/main.go` (cobra subcommands: run, daemon, tui, replay, discover, config, reparse, db-reset, version, update).
 
 ## Parser/Gamestate Conventions
 
@@ -146,8 +146,8 @@ See `docs/api-versioning.md` for the full policy. Summary:
 
 ## Module & Go Version
 
-Module path: `battlestream.fixates.io`. Targets Go 1.24 (per go.mod).
+Module path: `battlestream.fixates.io`. Targets Go 1.25.0 (per go.mod).
 
 ## CI
 
-GitHub Actions (`.github/workflows/ci.yml`): Build & Test, Lint (golangci-lint), Proto check, Proto breaking-change check (buf), Docker build.
+GitHub Actions (`.github/workflows/ci.yml`): Build & Test, Lint (golangci-lint), Stream Deck Plugin (type-check/test/build), Proto check (generated files up to date), Proto breaking-change check (buf), Docker build.
