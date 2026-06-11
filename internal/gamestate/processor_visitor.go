@@ -666,21 +666,44 @@ func (p *Processor) OnHeroStatChanged(a *action.HeroStatChangedAction) error {
 // (which fires from the CREATE_GAME Player block). Resolves partner name from entityProps
 // if already seen.
 func (p *Processor) OnDuosTeammate(a *action.DuosTeammateAction) error {
-	if a.PartnerPlayerID <= 0 || p.isDuos {
+	if a.PartnerPlayerID <= 0 {
+		return nil
+	}
+	if p.isDuos {
+		// Duos already detected (e.g. via the backup PUNISH_LEAVERS+DUO_PASSABLE
+		// path). The teammate tag is still authoritative evidence: record the
+		// partner ID if not yet known and upgrade detection so a later
+		// BACON_DUOS_PUNISH_LEAVERS=0 cannot incorrectly clear duos.
+		// Only the redundant re-detection side effects are skipped.
+		if !p.duosFromTeammate {
+			p.duosFromTeammate = true
+			slog.Info("Duos detection upgraded to authoritative teammate signal",
+				"partnerPlayerID", a.PartnerPlayerID)
+		}
+		if p.partnerPlayerID == 0 {
+			p.partnerPlayerID = a.PartnerPlayerID
+			p.resolvePartnerNameFromDefs(a.PartnerPlayerID)
+		}
 		return nil
 	}
 	p.isDuos = true
+	p.duosFromTeammate = true
 	p.partnerPlayerID = a.PartnerPlayerID
 	p.machine.SetDuosMode(true)
 	slog.Info("Duos detected", "partnerPlayerID", a.PartnerPlayerID)
-	// Try to resolve partner name/hero from already-seen player defs.
-	if entityID, ok := p.realPlayerIDs[a.PartnerPlayerID]; ok {
+	p.resolvePartnerNameFromDefs(a.PartnerPlayerID)
+	return nil
+}
+
+// resolvePartnerNameFromDefs tries to resolve the partner's display name from
+// already-seen player defs and pushes it to the machine if found.
+func (p *Processor) resolvePartnerNameFromDefs(partnerPlayerID int) {
+	if entityID, ok := p.realPlayerIDs[partnerPlayerID]; ok {
 		if info := p.entityProps[entityID]; info != nil && info.Name != "" {
 			p.partnerPlayerName = info.Name
 			p.machine.UpdatePartnerName(info.Name)
 		}
 	}
-	return nil
 }
 
 // OnHeroEntityAssigned handles HERO_ENTITY changes on the local or partner player entity.

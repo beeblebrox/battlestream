@@ -1881,6 +1881,10 @@ func (p *Processor) updateGoldNextTurnCounter() {
 	sure := bt.goldNextTurnSure
 	bonus := bt.overconfidenceCount * 3
 	if sure == 0 && bt.overconfidenceCount == 0 {
+		// Total dropped to zero (EXTRA_GOLD tag back to 0 and/or Overconfidence
+		// left play) — clear any previously displayed counter instead of leaving
+		// it stale. No-op if the counter was never set.
+		p.machine.RemoveAbilityCounter(CatGoldNextTurn)
 		return
 	}
 	var display string

@@ -170,6 +170,49 @@ func TestMachineRemoveMinion(t *testing.T) {
 	}
 }
 
+func TestMachineUpsertMinionPreservesEnchantments(t *testing.T) {
+	m := New()
+
+	m.UpsertMinion(MinionState{EntityID: 10, Name: "Murloc", Attack: 2, Health: 1})
+	m.AddEnchantment(Enchantment{
+		EntityID: 900, CardID: "BG_ShopBuff_Elemental", TargetID: 10,
+		AttackBuff: 2, HealthBuff: 2,
+	})
+
+	board := m.State().Board
+	if len(board) != 1 || len(board[0].Enchantments) != 1 {
+		t.Fatalf("precondition failed: expected 1 minion with 1 enchantment, got %+v", board)
+	}
+
+	// Re-upsert the same entity without enchantments (golden upgrade /
+	// repeated ZONE=PLAY re-registration) — the enchantment must survive.
+	m.UpsertMinion(MinionState{EntityID: 10, Name: "Murloc", Attack: 4, Health: 3})
+
+	board = m.State().Board
+	if len(board) != 1 {
+		t.Fatalf("expected 1 minion, got %d", len(board))
+	}
+	if board[0].Attack != 4 || board[0].Health != 3 {
+		t.Errorf("expected stats updated to 4/3, got %d/%d", board[0].Attack, board[0].Health)
+	}
+	if len(board[0].Enchantments) != 1 {
+		t.Fatalf("expected enchantment to survive re-upsert, got %d enchantments", len(board[0].Enchantments))
+	}
+	if board[0].Enchantments[0].EntityID != 900 {
+		t.Errorf("expected enchantment entity 900, got %d", board[0].Enchantments[0].EntityID)
+	}
+
+	// An incoming minion that carries its own enchantments still replaces wholesale.
+	m.UpsertMinion(MinionState{
+		EntityID: 10, Name: "Murloc", Attack: 4, Health: 3,
+		Enchantments: []Enchantment{{EntityID: 901, TargetID: 10}},
+	})
+	board = m.State().Board
+	if len(board[0].Enchantments) != 1 || board[0].Enchantments[0].EntityID != 901 {
+		t.Errorf("expected incoming enchantments to take precedence, got %+v", board[0].Enchantments)
+	}
+}
+
 func TestMachineUpsertMinionMaxSeven(t *testing.T) {
 	m := New()
 	m.GameStart("g", time.Now())
@@ -1605,6 +1648,55 @@ func TestCounterGoldNextTurnWithOverconfidence(t *testing.T) {
 	}
 }
 
+func TestCounterGoldNextTurnClearsWhenZero(t *testing.T) {
+	m, p := newProc()
+	setupGame(p)
+
+	// Set the counter via the EXTRA_GOLD tag.
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventTagChange,
+		PlayerID:   7,
+		EntityName: "Moch#1358",
+		Tags:       map[string]string{"BACON_PLAYER_EXTRA_GOLD_NEXT_TURN": "4"},
+	})
+	if findAbilityCounter(m, CatGoldNextTurn) == nil {
+		t.Fatal("expected GOLD_NEXT_TURN counter after EXTRA_GOLD=4")
+	}
+
+	// Tag returns to 0 — the counter must be cleared, not left stale.
+	p.Handle(parser.GameEvent{
+		Type:       parser.EventTagChange,
+		PlayerID:   7,
+		EntityName: "Moch#1358",
+		Tags:       map[string]string{"BACON_PLAYER_EXTRA_GOLD_NEXT_TURN": "0"},
+	})
+	if ac := findAbilityCounter(m, CatGoldNextTurn); ac != nil {
+		t.Errorf("expected GOLD_NEXT_TURN counter removed when total is 0, still present: %+v", *ac)
+	}
+
+	// Overconfidence-only path: counter appears while the Dnt is in PLAY...
+	p.entityController[500] = 7
+	p.entityProps[500] = &entityInfo{CardID: "BG28_884e", Zone: ""}
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventTagChange,
+		EntityID: 500,
+		Tags:     map[string]string{"ZONE": "PLAY"},
+	})
+	if findAbilityCounter(m, CatGoldNextTurn) == nil {
+		t.Fatal("expected GOLD_NEXT_TURN counter after Overconfidence enters PLAY")
+	}
+
+	// ...and is cleared again when it leaves play with sure gold still 0.
+	p.Handle(parser.GameEvent{
+		Type:     parser.EventTagChange,
+		EntityID: 500,
+		Tags:     map[string]string{"ZONE": "GRAVEYARD"},
+	})
+	if ac := findAbilityCounter(m, CatGoldNextTurn); ac != nil {
+		t.Errorf("expected GOLD_NEXT_TURN counter removed after Overconfidence leaves PLAY, still present: %+v", *ac)
+	}
+}
+
 func TestCounterGoldNextTurnMultipleOverconfidence(t *testing.T) {
 	m, p := newProc()
 	setupGame(p)
@@ -2751,6 +2843,54 @@ func TestDuosNotUnsetWhenFromTeammate(t *testing.T) {
 
 	if !m.State().IsDuos {
 		t.Error("expected IsDuos to remain true — duos was set via authoritative TEAMMATE_PLAYER_ID")
+	}
+}
+
+func TestDuosTeammateSignalAfterBackupDetection(t *testing.T) {
+	m, p := newProc()
+	p.Handle(parser.GameEvent{Type: parser.EventGameStart, Timestamp: time.Now()})
+	// Backup detection: PUNISH_LEAVERS + DUO_PASSABLE (no TEAMMATE tag in the def).
+	p.Handle(parser.GameEvent{
+		Type: parser.EventGameEntityTags,
+		Tags: map[string]string{"BACON_DUOS_PUNISH_LEAVERS": "1"},
+	})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventPlayerDef, EntityID: 14, PlayerID: 5,
+		Tags: map[string]string{"hi": "144115193835963207", "lo": "30722021", "PLAYER_ID": "5"},
+	})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventPlayerDef, EntityID: 15, PlayerID: 13,
+		Tags: map[string]string{"hi": "0", "lo": "0", "PLAYER_ID": "13"},
+	})
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 1143,
+		Tags: map[string]string{"BACON_DUO_PASSABLE": "1"},
+	})
+	if !m.State().IsDuos {
+		t.Fatal("expected IsDuos=true from combined PUNISH_LEAVERS + DUO_PASSABLE")
+	}
+
+	// Authoritative teammate signal arrives later via TAG_CHANGE on the local
+	// player entity — it must not be discarded just because duos is already set.
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 14, PlayerID: 5,
+		Tags: map[string]string{"BACON_DUO_TEAMMATE_PLAYER_ID": "8"},
+	})
+	if p.partnerPlayerID != 8 {
+		t.Errorf("expected partnerPlayerID=8 recorded from teammate signal, got %d", p.partnerPlayerID)
+	}
+	if !p.duosFromTeammate {
+		t.Error("expected duosFromTeammate=true after authoritative teammate signal")
+	}
+
+	// A later PUNISH_LEAVERS=0 must NOT clear duos — authoritative evidence exists.
+	p.Handle(parser.GameEvent{
+		Type: parser.EventTagChange, EntityID: 1,
+		EntityName: "GameEntity",
+		Tags:       map[string]string{"BACON_DUOS_PUNISH_LEAVERS": "0"},
+	})
+	if !m.State().IsDuos {
+		t.Error("expected IsDuos to remain true — teammate signal arrived after backup detection")
 	}
 }
 

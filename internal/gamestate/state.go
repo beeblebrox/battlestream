@@ -410,6 +410,14 @@ func (m *Machine) UpsertMinion(minion MinionState) {
 	defer m.mu.Unlock()
 	for i, mn := range m.state.Board {
 		if mn.EntityID == minion.EntityID {
+			// Preserve attached enchantments across re-registration (golden
+			// upgrades, repeated ZONE=PLAY): callers construct fresh MinionState
+			// values without enchantments, which would otherwise wipe the slice
+			// populated by AddEnchantment. Deep-copy to avoid sharing a backing
+			// array with snapshots.
+			if len(minion.Enchantments) == 0 && len(mn.Enchantments) > 0 {
+				minion.Enchantments = append([]Enchantment(nil), mn.Enchantments...)
+			}
 			m.state.Board[i] = minion
 			return
 		}
