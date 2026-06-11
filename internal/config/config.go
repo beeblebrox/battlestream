@@ -113,10 +113,24 @@ func (c *Config) ProfileList() string {
 	return strings.Join(names, ", ")
 }
 
+// BaseDir returns the battlestream base directory. If the BS_CONFIG_DIR
+// environment variable is set, it takes precedence (used by
+// scripts/safe-test.sh and other isolation scenarios); otherwise the
+// default is ~/.battlestream.
+func BaseDir() string {
+	if dir := os.Getenv("BS_CONFIG_DIR"); dir != "" {
+		return dir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ".battlestream"
+	}
+	return filepath.Join(home, ".battlestream")
+}
+
 // NewProfileConfig returns a ProfileConfig with sensible path defaults for the given name.
 func NewProfileConfig(name string) *ProfileConfig {
-	home, _ := os.UserHomeDir()
-	base := filepath.Join(home, ".battlestream", "profiles", name)
+	base := filepath.Join(BaseDir(), "profiles", name)
 	return &ProfileConfig{
 		Hearthstone: HearthstoneConfig{
 			AutoPatchLogConfig: true,
@@ -133,7 +147,8 @@ func NewProfileConfig(name string) *ProfileConfig {
 }
 
 // Load reads config from file and environment variables.
-// Config file is searched in: $HOME/.battlestream/, current dir, /etc/battlestream/.
+// Config file is searched in: BaseDir() ($BS_CONFIG_DIR if set, else
+// $HOME/.battlestream/), current dir, /etc/battlestream/.
 func Load(cfgFile string) (*Config, error) {
 	v := viper.New()
 
@@ -142,10 +157,7 @@ func Load(cfgFile string) (*Config, error) {
 	if cfgFile != "" {
 		v.SetConfigFile(cfgFile)
 	} else {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			v.AddConfigPath(filepath.Join(home, ".battlestream"))
-		}
+		v.AddConfigPath(BaseDir())
 		v.AddConfigPath(".")
 		v.AddConfigPath("/etc/battlestream")
 		v.SetConfigName("config")
@@ -193,9 +205,8 @@ func Load(cfgFile string) (*Config, error) {
 	}
 
 	// Apply path expansion and fill zero-value defaults to all profiles.
-	home, _ := os.UserHomeDir()
 	for name, p := range cfg.Profiles {
-		applyProfileDefaults(p, name, home)
+		applyProfileDefaults(p, name)
 		p.expandPaths()
 	}
 
@@ -234,8 +245,8 @@ func setGlobalDefaults(v *viper.Viper) {
 	v.SetDefault("logging.file", "")
 }
 
-func applyProfileDefaults(p *ProfileConfig, name, home string) {
-	base := filepath.Join(home, ".battlestream", "profiles", name)
+func applyProfileDefaults(p *ProfileConfig, name string) {
+	base := filepath.Join(BaseDir(), "profiles", name)
 	if p.Storage.DBPath == "" {
 		p.Storage.DBPath = filepath.Join(base, "data")
 	}
@@ -265,11 +276,7 @@ func expandHome(path string) string {
 
 // SaveTUI persists just the TUI section to the config file.
 func (c *Config) SaveTUI() error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("user home dir: %w", err)
-	}
-	path := filepath.Join(home, ".battlestream", "config.yaml")
+	path := filepath.Join(BaseDir(), "config.yaml")
 
 	v := viper.New()
 	v.SetConfigFile(path)
