@@ -341,22 +341,42 @@ func TestLoopIgnoresHistoricalGameInBacklog(t *testing.T) {
 		"D 10:00:01.0000000 GameState.DebugPrintPower() - TAG_CHANGE Entity=GameEntity tag=TURN value=1",
 		"",
 	}, "\n")
-	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0o644)
+	appendToLog(t, logPath, newGame)
+
+	// Poll with periodic heartbeat appends. A single one-shot append leaves
+	// the tail dependent on one inotify event being delivered (observed
+	// flaky on CI); in production Hearthstone writes continuously, so a
+	// missed event self-heals on the next write. The heartbeats are
+	// PowerTaskList lines, which the parser filters out — they generate
+	// filesystem events without affecting game state.
+	heartbeat := "D 10:00:02.0000000 PowerTaskList.DebugPrintPower() - heartbeat\n"
+	deadline := time.Now().Add(30 * time.Second)
+	captured := false
+	for time.Now().Before(deadline) {
+		calls := store.InitCalls()
+		if len(calls) == 1 && calls[0] != historicalID && store.FrameCount() > 0 {
+			captured = true
+			break
+		}
+		appendToLog(t, logPath, heartbeat)
+		time.Sleep(300 * time.Millisecond)
+	}
+	if !captured {
+		t.Fatalf("live game after catchup was not captured: initCalls=%v frames=%d (historical=%s)",
+			store.InitCalls(), store.FrameCount(), historicalID)
+	}
+}
+
+// appendToLog appends content to the log file in a single write, the same
+// way Hearthstone extends Power.log.
+func appendToLog(t *testing.T, path, content string) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		t.Fatalf("open log for append: %v", err)
 	}
-	if _, err := f.WriteString(newGame); err != nil {
-		f.Close()
-		t.Fatalf("append new game: %v", err)
-	}
-	f.Close()
-
-	ok := waitFor(t, 10*time.Second, func() bool {
-		calls := store.InitCalls()
-		return len(calls) == 1 && calls[0] != historicalID && store.FrameCount() > 0
-	})
-	if !ok {
-		t.Fatalf("live game after catchup was not captured: initCalls=%v frames=%d (historical=%s)",
-			store.InitCalls(), store.FrameCount(), historicalID)
+	defer f.Close()
+	if _, err := f.WriteString(content); err != nil {
+		t.Fatalf("append to log: %v", err)
 	}
 }
